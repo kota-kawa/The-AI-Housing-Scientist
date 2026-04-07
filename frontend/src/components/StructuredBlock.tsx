@@ -1,8 +1,228 @@
+import type { ComponentType, SVGProps } from "react";
+
 import type { UIBlock } from "../lib/api";
 
 type Props = {
   block: UIBlock;
 };
+
+type IconProps = { className?: string };
+
+type BlockTone = {
+  label: string;
+  iconBg: string;
+  iconColor: string;
+  accentTitle: string;
+  accentLabel: string;
+  border: string;
+  surface: string;
+  badgeBg: string;
+  badgeText: string;
+};
+
+const TONES: Record<UIBlock["type"], BlockTone> = {
+  text: {
+    label: "メモ",
+    iconBg: "bg-sky-50",
+    iconColor: "text-sky-600",
+    accentTitle: "text-sky-700",
+    accentLabel: "text-sky-500",
+    border: "border-sky-100",
+    surface: "bg-white",
+    badgeBg: "bg-sky-50",
+    badgeText: "text-sky-700",
+  },
+  cards: {
+    label: "候補物件",
+    iconBg: "bg-cyan-50",
+    iconColor: "text-cyan-600",
+    accentTitle: "text-cyan-700",
+    accentLabel: "text-cyan-500",
+    border: "border-cyan-100",
+    surface: "bg-white",
+    badgeBg: "bg-cyan-50",
+    badgeText: "text-cyan-700",
+  },
+  table: {
+    label: "比較表",
+    iconBg: "bg-blue-50",
+    iconColor: "text-blue-600",
+    accentTitle: "text-blue-700",
+    accentLabel: "text-blue-500",
+    border: "border-blue-100",
+    surface: "bg-white",
+    badgeBg: "bg-blue-50",
+    badgeText: "text-blue-700",
+  },
+  checklist: {
+    label: "チェック",
+    iconBg: "bg-sky-50",
+    iconColor: "text-sky-600",
+    accentTitle: "text-sky-700",
+    accentLabel: "text-sky-500",
+    border: "border-sky-100",
+    surface: "bg-white",
+    badgeBg: "bg-sky-50",
+    badgeText: "text-sky-700",
+  },
+  warning: {
+    label: "注意",
+    iconBg: "bg-amber-100",
+    iconColor: "text-amber-700",
+    accentTitle: "text-amber-800",
+    accentLabel: "text-amber-600",
+    border: "border-amber-200",
+    surface: "bg-amber-50/70",
+    badgeBg: "bg-amber-100",
+    badgeText: "text-amber-800",
+  },
+};
+
+/* ---------- Icons ---------- */
+
+function TextIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M5 6H15M5 10H15M5 14H11"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function CardsIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M3 9L10 4L17 9V16C17 16.5523 16.5523 17 16 17H13V12H7V17H4C3.44772 17 3 16.5523 3 16V9Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function TableIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <rect x="3" y="4" width="14" height="12" rx="1.6" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M3 8.5H17M3 12.5H17M8.5 4V16M13 4V16"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
+function ChecklistIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <rect x="3" y="3" width="14" height="14" rx="3" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M6.8 10.6L9 12.8L13.4 8.2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function WarningIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M10 3.2L18 17H2L10 3.2Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 8.5V11.8M10 14.2V14.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function CheckmarkIcon({ className = "h-3.5 w-3.5" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M5 10.5L8.5 14L15 7"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function WalkIcon({ className = "h-3.5 w-3.5" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <circle cx="12" cy="4.4" r="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M11 7.5L9 11L11 13.5L10 17.5M11 7.5L13 9.7L15.5 10.3M11 7.5L8 9.6L6 13"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function StarIcon({ className = "h-3.5 w-3.5" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className={className}>
+      <path d="M10 2.2L12.36 7.06L17.6 7.84L13.78 11.62L14.72 16.96L10 14.4L5.28 16.96L6.22 11.62L2.4 7.84L7.64 7.06L10 2.2Z" />
+    </svg>
+  );
+}
+
+function PlusCircleIcon({ className = "h-3.5 w-3.5" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <circle cx="10" cy="10" r="7.6" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M10 7V13M7 10H13"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function MinusCircleIcon({ className = "h-3.5 w-3.5" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <circle cx="10" cy="10" r="7.6" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M7 10H13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+const TYPE_ICONS: Record<UIBlock["type"], ComponentType<IconProps & SVGProps<SVGSVGElement>>> = {
+  text: TextIcon,
+  cards: CardsIcon,
+  table: TableIcon,
+  checklist: ChecklistIcon,
+  warning: WarningIcon,
+};
+
+/* ---------- Helpers ---------- */
 
 function toDisplayText(value: unknown): string {
   if (value === null || value === undefined) {
@@ -16,71 +236,198 @@ function toDisplayNumber(value: unknown): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
+/* ---------- Section header ---------- */
+
+function SectionHeader({
+  block,
+  count,
+}: {
+  block: UIBlock;
+  count?: number;
+}) {
+  const tone = TONES[block.type];
+  const Icon = TYPE_ICONS[block.type];
+
+  return (
+    <header className={`flex items-center gap-3 border-b px-4 py-3 ${tone.border}`}>
+      <span
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${tone.iconBg} ${tone.iconColor}`}
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p
+          className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.accentLabel}`}
+        >
+          {tone.label}
+        </p>
+        <h3 className={`truncate text-sm font-semibold ${tone.accentTitle}`}>{block.title}</h3>
+      </div>
+      {count !== undefined && count > 0 && (
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone.badgeBg} ${tone.badgeText}`}
+        >
+          {count}
+        </span>
+      )}
+    </header>
+  );
+}
+
+/* ---------- Property card ---------- */
+
+function PropertyCard({ item, index }: { item: Record<string, unknown>; index: number }) {
+  const rent = toDisplayNumber(item.rent);
+  const score = toDisplayText(item.score);
+  const title = toDisplayText(item.title) || `候補物件 ${index + 1}`;
+  const walk = toDisplayText(item.station_walk_min);
+  const station = toDisplayText(item.station);
+  const layout = toDisplayText(item.layout);
+  const area = toDisplayText(item.area);
+  const whySelected = toDisplayText(item.why_selected);
+  const whyNotSelected = toDisplayText(item.why_not_selected);
+
+  return (
+    <article className="group relative overflow-hidden rounded-2xl border border-hairline bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-cardHover">
+      <header className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h4 className="font-display text-[13px] font-semibold leading-snug text-ink line-clamp-2">
+            {title}
+          </h4>
+          <p className="mt-1.5 flex items-baseline gap-1 font-display">
+            <span className="text-xl font-bold tracking-tight text-ink">
+              {rent !== null ? rent.toLocaleString() : "—"}
+            </span>
+            <span className="text-[11px] font-medium text-inkMuted">円 / 月</span>
+          </p>
+        </div>
+        {score && (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-100 px-2 py-1 text-[11px] font-semibold text-sky-700">
+            <StarIcon className="h-3 w-3" />
+            {score}
+          </span>
+        )}
+      </header>
+
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-hairline pt-3 text-[11px] text-inkMuted">
+        <div className="flex items-center gap-1.5">
+          <WalkIcon className="h-3.5 w-3.5 text-inkSubtle" />
+          <span>徒歩 {walk || "—"} 分</span>
+        </div>
+        {station && (
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex h-3.5 w-3.5 items-center justify-center text-inkSubtle">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+                <path
+                  d="M10 17C13 13.5 15.5 11 15.5 8.2C15.5 5.05 13.04 2.6 10 2.6C6.96 2.6 4.5 5.05 4.5 8.2C4.5 11 7 13.5 10 17Z"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinejoin="round"
+                />
+                <circle cx="10" cy="8.2" r="1.7" stroke="currentColor" strokeWidth="1.4" />
+              </svg>
+            </span>
+            <span className="truncate">{station}</span>
+          </div>
+        )}
+        {layout && (
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex h-3.5 w-3.5 items-center justify-center text-inkSubtle">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+                <rect
+                  x="3"
+                  y="3"
+                  width="14"
+                  height="14"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path d="M3 11H12M12 3V17" stroke="currentColor" strokeWidth="1.4" />
+              </svg>
+            </span>
+            <span>{layout}</span>
+          </div>
+        )}
+        {area && (
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex h-3.5 w-3.5 items-center justify-center text-inkSubtle">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+                <path
+                  d="M3 13V17H7M17 7V3H13M3 7V3H7M17 13V17H13"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span>{area}</span>
+          </div>
+        )}
+      </dl>
+
+      {(whySelected || whyNotSelected) && (
+        <div className="mt-3 space-y-1.5">
+          {whySelected && (
+            <p className="flex items-start gap-1.5 rounded-lg bg-sky-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-sky-800">
+              <PlusCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-600" />
+              <span>{whySelected}</span>
+            </p>
+          )}
+          {whyNotSelected && (
+            <p className="flex items-start gap-1.5 rounded-lg bg-cyan-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-cyan-800">
+              <MinusCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-600" />
+              <span>{whyNotSelected}</span>
+            </p>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+/* ---------- Block dispatcher ---------- */
+
 export default function StructuredBlock({ block }: Props) {
   if (block.type === "text") {
+    const tone = TONES.text;
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-2 text-sm font-semibold text-accent">{block.title}</h3>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">
-          {toDisplayText(block.content.body)}
-        </p>
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} />
+        <div className="px-4 py-3.5">
+          <p className="whitespace-pre-wrap text-[14px] leading-7 text-ink">
+            {toDisplayText(block.content.body)}
+          </p>
+        </div>
       </section>
     );
   }
 
   if (block.type === "warning") {
+    const tone = TONES.warning;
     return (
-      <section className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
-        <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-700">
-          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-200 text-[10px] font-bold text-amber-800">
-            !
-          </span>
-          {block.title}
-        </h3>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-amber-800">
-          {toDisplayText(block.content.body)}
-        </p>
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} />
+        <div className="px-4 py-3.5">
+          <p className="whitespace-pre-wrap text-[14px] leading-7 text-amber-900">
+            {toDisplayText(block.content.body)}
+          </p>
+        </div>
       </section>
     );
   }
 
   if (block.type === "cards") {
     const items = (block.content.items as Array<Record<string, unknown>>) ?? [];
+    const tone = TONES.cards;
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-accent">{block.title}</h3>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {items.map((item, idx) => {
-            const rent = toDisplayNumber(item.rent);
-            return (
-              <article
-                key={toDisplayText(item.id) || `card-${idx}`}
-                className="rounded-xl border border-slate-200 bg-slate-50/70 p-3"
-              >
-                <h4 className="mb-2 text-sm font-semibold text-ink">
-                  {toDisplayText(item.title) || "候補物件"}
-                </h4>
-
-                <div className="space-y-1 text-xs text-inkMuted">
-                  <p>スコア: {toDisplayText(item.score) || "-"}</p>
-                  <p>家賃: {rent !== null ? `${rent.toLocaleString()}円` : "-"}</p>
-                  <p>徒歩: {toDisplayText(item.station_walk_min) || "-"}分</p>
-                </div>
-
-                {toDisplayText(item.why_selected) && (
-                  <p className="mt-2 rounded-lg bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
-                    {toDisplayText(item.why_selected)}
-                  </p>
-                )}
-
-                {toDisplayText(item.why_not_selected) && (
-                  <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-700">
-                    {toDisplayText(item.why_not_selected)}
-                  </p>
-                )}
-              </article>
-            );
-          })}
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} count={items.length} />
+        <div className="grid gap-3 p-4 sm:grid-cols-2">
+          {items.map((item, idx) => (
+            <PropertyCard key={toDisplayText(item.id) || `card-${idx}`} item={item} index={idx} />
+          ))}
         </div>
       </section>
     );
@@ -89,28 +436,26 @@ export default function StructuredBlock({ block }: Props) {
   if (block.type === "table") {
     const columns = (block.content.columns as string[]) ?? [];
     const rows = (block.content.rows as Array<Record<string, unknown>>) ?? [];
+    const tone = TONES.table;
     return (
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <h3 className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-accent">{block.title}</h3>
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} count={rows.length} />
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs">
-            <thead className="bg-slate-100 text-inkMuted">
+            <thead className="bg-blue-50/60 text-[11px] uppercase tracking-wider text-blue-700">
               <tr>
                 {columns.map((col) => (
-                  <th key={col} className="px-3 py-2 text-left font-semibold">
+                  <th key={col} className="px-4 py-2.5 text-left font-semibold">
                     {col}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100 text-ink">
               {rows.map((row, idx) => (
-                <tr
-                  key={idx}
-                  className={`border-t border-slate-100 text-ink ${idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"}`}
-                >
+                <tr key={idx} className="transition hover:bg-blue-50/40">
                   {columns.map((col) => (
-                    <td key={col} className="px-3 py-2">
+                    <td key={col} className="whitespace-nowrap px-4 py-2.5">
                       {toDisplayText(row[col])}
                     </td>
                   ))}
@@ -125,20 +470,31 @@ export default function StructuredBlock({ block }: Props) {
 
   if (block.type === "checklist") {
     const items = (block.content.items as Array<{ label: string; checked: boolean }>) ?? [];
+    const doneCount = items.filter((i) => i.checked).length;
+    const tone = TONES.checklist;
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-2 text-sm font-semibold text-accent">{block.title}</h3>
-        <ul className="space-y-2 text-sm text-ink">
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} count={items.length} />
+        {items.length > 0 && (
+          <div className="border-b border-sky-100 bg-sky-50/50 px-4 py-2 text-[11px] font-semibold text-sky-700">
+            完了 {doneCount} / {items.length}
+          </div>
+        )}
+        <ul className="divide-y divide-slate-100 text-sm">
           {items.map((item, idx) => (
-            <li key={idx} className="flex items-start gap-2 rounded-lg bg-slate-50/70 px-2 py-1.5">
+            <li key={idx} className="flex items-start gap-3 px-4 py-2.5">
               <span
-                className={`mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${
-                  item.checked ? "bg-emerald-500 text-white" : "border border-slate-300 bg-white text-transparent"
+                className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition ${
+                  item.checked
+                    ? "bg-accent text-white shadow-sm"
+                    : "border border-hairline bg-white text-transparent"
                 }`}
               >
-                ✓
+                <CheckmarkIcon className="h-3 w-3" />
               </span>
-              <span className={item.checked ? "text-ink" : "text-inkMuted"}>{item.label}</span>
+              <span className={`leading-6 ${item.checked ? "text-ink" : "text-inkMuted"}`}>
+                {item.label}
+              </span>
             </li>
           ))}
         </ul>

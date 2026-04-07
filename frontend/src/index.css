@@ -1,25 +1,31 @@
-@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Sora:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color: #0f172a;
-  background: #eef3f9;
+  color: #0b1220;
+  background: #eff9ff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+html,
 body {
   margin: 0;
   min-height: 100vh;
+}
+
+body {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(238, 243, 249, 0.98)),
-    radial-gradient(1000px 520px at -10% -12%, rgba(37, 99, 235, 0.14), transparent 72%),
-    radial-gradient(820px 480px at 110% -12%, rgba(20, 184, 166, 0.1), transparent 78%),
-    #eef3f9;
+    linear-gradient(180deg, rgba(240, 248, 255, 0.76) 0%, rgba(224, 242, 254, 0.82) 100%),
+    url("/housing-scientist.png") center / cover no-repeat fixed;
   font-family: "Noto Sans JP", "Sora", sans-serif;
+  font-feature-settings: "palt" 1;
+  letter-spacing: 0.01em;
 }
 
 #root {
@@ -30,6 +36,11 @@ body {
   box-sizing: border-box;
 }
 
+::selection {
+  background: rgba(2, 132, 199, 0.22);
+  color: #0b1220;
+}
+
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -37,10 +48,19 @@ body {
 
 *::-webkit-scrollbar-thumb {
   border-radius: 9999px;
-  border: 2px solid rgba(255, 255, 255, 0.6);
-  background: rgba(148, 163, 184, 0.75);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  background: rgba(56, 189, 248, 0.38);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(2, 132, 199, 0.58);
 }
 
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* textarea の自動リサイズ用ヘルパー */
+.auto-resize {
+  field-sizing: content;
 }
