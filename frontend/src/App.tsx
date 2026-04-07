@@ -1059,7 +1059,6 @@ export default function App() {
                       <ChevronIcon open={llmEditorOpen} />
                     </span>
                   </button>
-                  <p className="mt-1 max-w-[28rem] truncate text-[11px] text-inkMuted">{llmSummary}</p>
                 </div>
 
                 <div className="flex items-center gap-2">
