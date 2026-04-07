@@ -7,7 +7,17 @@ export type ActionDescriptor = {
 };
 
 export type UIBlock = {
-  type: "text" | "table" | "checklist" | "cards" | "warning" | "question" | "actions";
+  type:
+    | "text"
+    | "table"
+    | "checklist"
+    | "cards"
+    | "warning"
+    | "question"
+    | "actions"
+    | "plan"
+    | "timeline"
+    | "sources";
   title: string;
   content: Record<string, unknown>;
 };
@@ -44,6 +54,16 @@ export type PreflightReport = {
   providers: Record<string, { key_present: boolean; reachable: boolean; model_valid: boolean; details: string }>;
 };
 
+export type ResearchState = {
+  session_id: string;
+  job_id: string | null;
+  status: string;
+  current_stage: string;
+  progress_percent: number;
+  latest_summary: string;
+  response: ChatMessageResponse | null;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -65,10 +85,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function createSession(profileId?: string): Promise<CreateSessionResponse> {
+export async function createSession(
+  profileId?: string,
+  freshStart: boolean = false
+): Promise<CreateSessionResponse> {
   return request<CreateSessionResponse>("/api/chat/sessions", {
     method: "POST",
-    body: JSON.stringify({ profile_id: profileId }),
+    body: JSON.stringify({ profile_id: profileId, fresh_start: freshStart }),
   });
 }
 
@@ -111,4 +134,8 @@ export async function runAction(
 
 export async function fetchPreflight(): Promise<PreflightReport> {
   return request<PreflightReport>("/api/system/preflight");
+}
+
+export async function fetchResearchState(sessionId: string): Promise<ResearchState> {
+  return request<ResearchState>(`/api/chat/sessions/${sessionId}/research`);
 }

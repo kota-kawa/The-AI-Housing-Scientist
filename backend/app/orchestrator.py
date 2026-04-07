@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from app.config import ProviderName, Settings, get_provider_model
 from app.db import Database, utc_now_iso
 from app.llm import create_adapter
-from app.models import ChatMessageResponse, UIBlock
+from app.models import ChatMessageResponse, ResearchStateResponse, UIBlock
 from app.profile_memory import (
     build_profile_resume_summary,
     merge_learned_preferences,
@@ -17,6 +18,17 @@ from app.services import BraveSearchClient, PropertyCatalogService
 from app.stages import run_communication, run_ranking, run_risk_check, run_search_and_normalize
 from app.stages.planner import detect_search_signal, run_planner
 from app.stages.risk_check import looks_like_contract_text
+
+
+RESEARCH_STAGE_ORDER = [
+    ("plan_finalize", "計画確認"),
+    ("query_expand", "クエリ展開"),
+    ("retrieve", "情報収集"),
+    ("enrich", "詳細補完"),
+    ("normalize_dedupe", "正規化と重複統合"),
+    ("rank", "推薦順位付け"),
+    ("synthesize", "結果要約"),
+]
 
 
 class HousingOrchestrator:
@@ -100,6 +112,163 @@ class HousingOrchestrator:
                 "intro": intro,
                 "items": questions,
             },
+        )
+
+    def _stage_label(self, stage_name: str) -> str:
+        for name, label in RESEARCH_STAGE_ORDER:
+            if name == stage_name:
+                return label
+        return stage_name
+
+    def _build_plan_conditions(self, user_memory: dict[str, Any]) -> list[dict[str, str]]:
+        conditions: list[dict[str, str]] = []
+        if user_memory.get("target_area"):
+            conditions.append({"label": "希望エリア", "value": str(user_memory["target_area"])})
+        if user_memory.get("budget_max"):
+            conditions.append(
+                {
+                    "label": "家賃上限",
+                    "value": self._format_money(user_memory["budget_max"]),
+                }
+            )
+        if user_memory.get("layout_preference"):
+            conditions.append(
+                {"label": "間取り", "value": str(user_memory["layout_preference"])}
+            )
+        if user_memory.get("station_walk_max"):
+            conditions.append(
+                {
+                    "label": "駅徒歩",
+                    "value": self._format_walk(user_memory["station_walk_max"]),
+                }
+            )
+        if user_memory.get("move_in_date"):
+            conditions.append({"label": "入居時期", "value": str(user_memory["move_in_date"])})
+        if user_memory.get("must_conditions"):
+            conditions.append(
+                {
+                    "label": "必須条件",
+                    "value": " / ".join(str(item) for item in user_memory["must_conditions"]),
+                }
+            )
+        if user_memory.get("nice_to_have"):
+            conditions.append(
+                {
+                    "label": "あると良い条件",
+                    "value": " / ".join(str(item) for item in user_memory["nice_to_have"]),
+                }
+            )
+        return conditions
+
+    def _build_research_plan(
+        self,
+        *,
+        user_memory: dict[str, Any],
+        planner_result: dict[str, Any],
+        message: str,
+        provider: ProviderName,
+    ) -> dict[str, Any]:
+        follow_up_questions = planner_result.get("follow_up_questions", [])
+        base_query = self._build_search_query(user_memory, message)
+        open_questions = [str(item.get("question") or "") for item in follow_up_questions if str(item.get("question") or "").strip()]
+        strategy = [
+            "希望条件を軸に複数クエリへ展開して候補を広めに収集します。",
+            "詳細ページを優先して読み、表記ゆれと重複掲載を整理します。",
+            "条件一致度と不足情報を比較し、問い合わせ向きの候補を上位化します。",
+        ]
+        summary_tokens = [item["value"] for item in self._build_plan_conditions(user_memory)[:4]]
+        summary = " / ".join(summary_tokens) if summary_tokens else "条件整理から調査を開始"
+
+        return {
+            "summary": summary,
+            "goal": "条件に近い候補を比較し、問い合わせに進める物件を絞り込む",
+            "conditions": self._build_plan_conditions(user_memory),
+            "strategy": strategy,
+            "open_questions": open_questions,
+            "search_query": base_query,
+            "provider": provider,
+            "created_from_message": message,
+            "user_memory_snapshot": user_memory,
+        }
+
+    def _build_plan_block(self, plan: dict[str, Any]) -> UIBlock:
+        return UIBlock(
+            type="plan",
+            title="今回の調査計画",
+            content={
+                "summary": plan.get("summary", ""),
+                "goal": plan.get("goal", ""),
+                "conditions": plan.get("conditions", []),
+                "strategy": plan.get("strategy", []),
+                "open_questions": plan.get("open_questions", []),
+                "search_query": plan.get("search_query", ""),
+            },
+        )
+
+    def _build_timeline_items(self, job: dict[str, Any] | None) -> list[dict[str, str]]:
+        if job is None:
+            return []
+        completed_nodes = {
+            node["stage"]: node
+            for node in self.db.list_research_journal_nodes(job["id"])
+            if node["status"] == "completed"
+        }
+        items: list[dict[str, str]] = []
+        for stage_name, label in RESEARCH_STAGE_ORDER:
+            status = "pending"
+            detail = ""
+            if stage_name in completed_nodes:
+                status = "completed"
+                detail = str(
+                    completed_nodes[stage_name]["output"].get("summary")
+                    or completed_nodes[stage_name]["reasoning"]
+                )
+            elif job["status"] == "failed" and stage_name == job.get("current_stage"):
+                status = "failed"
+                detail = str(job.get("error_message") or "処理に失敗しました。")
+            elif job["status"] in {"queued", "running"} and stage_name == job.get("current_stage"):
+                status = "running"
+                detail = str(job.get("latest_summary") or "")
+            elif job["status"] == "completed" and stage_name == "synthesize":
+                status = "completed"
+                detail = str(job.get("latest_summary") or "")
+            items.append({"label": label, "status": status, "detail": detail})
+        return items
+
+    def _build_timeline_block(self, job: dict[str, Any] | None) -> UIBlock:
+        return UIBlock(
+            type="timeline",
+            title="調査の進捗",
+            content={
+                "progress_percent": int(job.get("progress_percent", 0)) if job else 0,
+                "current_stage": self._stage_label(str(job.get("current_stage") or "")) if job else "",
+                "summary": str(job.get("latest_summary") or "") if job else "",
+                "items": self._build_timeline_items(job),
+            },
+        )
+
+    def _build_sources_block(self, source_items: list[dict[str, Any]]) -> UIBlock:
+        return UIBlock(
+            type="sources",
+            title="参照ソース",
+            content={"items": source_items},
+        )
+
+    def _build_research_running_response(self, job: dict[str, Any]) -> ChatMessageResponse:
+        status = "research_running" if job["status"] == "running" else "research_queued"
+        assistant_message = (
+            "調査計画に沿って候補を収集中です。進捗はこのまま更新されます。"
+            if job["status"] == "running"
+            else "調査ジョブを登録しました。まもなく情報収集を始めます。"
+        )
+        return ChatMessageResponse(
+            status=status,
+            assistant_message=assistant_message,
+            missing_slots=[],
+            next_action="await_research_completion",
+            blocks=[self._build_timeline_block(job)],
+            pending_confirmation=False,
+            pending_action=None,
         )
 
     def _format_money(self, value: Any) -> str:
@@ -400,6 +569,181 @@ class HousingOrchestrator:
 
         return blocks
 
+    def _build_research_summary_body(
+        self,
+        *,
+        ranked_properties: list[dict[str, Any]],
+        normalized_properties: list[dict[str, Any]],
+        source_items: list[dict[str, Any]],
+    ) -> str:
+        if not ranked_properties:
+            return (
+                "結論: 現時点では問い合わせ候補を十分に絞り込めませんでした。\n"
+                "理由: 条件に合う詳細付き候補が不足しています。\n"
+                "不確実な点: 家賃・駅距離・間取りなどの不足情報が残っています。\n"
+                "次の一手: 条件を少し広げるか、優先順位を教えて再調査してください。"
+            )
+
+        top_ranked = ranked_properties[0]
+        by_id = {item["property_id_norm"]: item for item in normalized_properties}
+        top_property = by_id.get(top_ranked["property_id_norm"], {})
+        uncertainty = []
+        if not top_property.get("rent"):
+            uncertainty.append("家賃情報の再確認が必要")
+        if not top_property.get("station_walk_min"):
+            uncertainty.append("駅徒歩情報の再確認が必要")
+        if not top_property.get("layout"):
+            uncertainty.append("間取り情報の再確認が必要")
+        if not uncertainty:
+            uncertainty.append("掲載条件の最新性は問い合わせで最終確認が必要")
+
+        confirmation_items = []
+        if source_items:
+            confirmation_items.append("掲載元ごとの差分条件")
+        if top_property.get("notes"):
+            confirmation_items.append("募集条件の最新状況")
+        confirmation_items.extend(
+            [
+                "初期費用の内訳",
+                "短期解約違約金・更新料・解約予告",
+            ]
+        )
+
+        return (
+            f"結論: 第一候補は {top_property.get('building_name', '候補物件')} です。\n"
+            f"理由: {top_ranked.get('why_selected') or '主要条件との整合が高い候補です。'}\n"
+            f"懸念: {top_ranked.get('why_not_selected') or '大きな懸念は見当たりません。'}\n"
+            f"不確実な点: {' / '.join(uncertainty[:3])}\n"
+            f"問い合わせで確認したい点: {' / '.join(confirmation_items[:4])}"
+        )
+
+    def _build_research_result_blocks(
+        self,
+        *,
+        ranked_properties: list[dict[str, Any]],
+        normalized_properties: list[dict[str, Any]],
+        search_summary: dict[str, Any],
+        source_items: list[dict[str, Any]],
+        task_memory: dict[str, Any],
+        job_id: str | None,
+    ) -> list[UIBlock]:
+        blocks: list[UIBlock] = []
+        job = self.db.get_research_job(job_id) if job_id else None
+        if job is not None:
+            blocks.append(self._build_timeline_block(job))
+
+        blocks.append(
+            UIBlock(
+                type="text",
+                title="調査サマリー",
+                content={
+                    "body": self._build_research_summary_body(
+                        ranked_properties=ranked_properties,
+                        normalized_properties=normalized_properties,
+                        source_items=source_items,
+                    )
+                },
+            )
+        )
+
+        blocks.extend(
+            self._build_search_blocks(
+                ranked_properties=ranked_properties,
+                normalized_properties=normalized_properties,
+                search_summary=search_summary,
+                property_reactions=self._get_property_reactions(task_memory),
+            )
+        )
+
+        if source_items:
+            blocks.append(self._build_sources_block(source_items))
+
+        return blocks
+
+    def _build_research_queries(self, user_memory: dict[str, Any], seed_query: str) -> list[str]:
+        area = str(user_memory.get("target_area") or "").strip()
+        layout = str(user_memory.get("layout_preference") or "").strip()
+        budget = int(user_memory.get("budget_max") or 0)
+        walk = int(user_memory.get("station_walk_max") or 0)
+        must_conditions = [
+            str(item).strip()
+            for item in user_memory.get("must_conditions", []) or []
+            if str(item).strip()
+        ]
+        nice_to_have = [
+            str(item).strip()
+            for item in user_memory.get("nice_to_have", []) or []
+            if str(item).strip()
+        ]
+
+        candidates = [seed_query]
+        if area:
+            tokens = [area, "賃貸"]
+            if layout:
+                tokens.append(layout)
+            if budget:
+                tokens.append(f"{int(budget / 10000)}万円")
+            candidates.append(" ".join(tokens))
+
+        if area or layout:
+            tokens = [token for token in [area, layout, "住みやすい", "賃貸"] if token]
+            candidates.append(" ".join(tokens))
+
+        if walk:
+            tokens = [token for token in [area, "駅近", f"徒歩{walk}分", "賃貸"] if token]
+            candidates.append(" ".join(tokens))
+
+        if must_conditions:
+            tokens = [token for token in [area, layout, " ".join(must_conditions[:2]), "賃貸"] if token]
+            candidates.append(" ".join(tokens))
+
+        if nice_to_have:
+            tokens = [token for token in [area, " ".join(nice_to_have[:2]), "賃貸"] if token]
+            candidates.append(" ".join(tokens))
+
+        deduped: list[str] = []
+        for item in candidates:
+            text = " ".join(part for part in str(item).split() if part).strip()
+            if text and text not in deduped:
+                deduped.append(text)
+        return deduped[:5]
+
+    def _collect_research_source_items(
+        self,
+        *,
+        ranked_properties: list[dict[str, Any]],
+        normalized_properties: list[dict[str, Any]],
+        raw_results: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        by_id = {item["property_id_norm"]: item for item in normalized_properties}
+        raw_by_url = {
+            str(item.get("url") or ""): item
+            for item in raw_results
+            if str(item.get("url") or "").strip()
+        }
+
+        items: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+        for ranked in ranked_properties[:6]:
+            prop = by_id.get(ranked["property_id_norm"], {})
+            url = str(prop.get("detail_url") or "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            raw = raw_by_url.get(url, {})
+            queries = raw.get("matched_queries", []) or []
+            items.append(
+                {
+                    "title": raw.get("title") or prop.get("building_name", "参照ソース"),
+                    "url": url,
+                    "source_name": raw.get("source_name", "source"),
+                    "matched_property": prop.get("building_name", ""),
+                    "reason": ranked.get("why_selected", ""),
+                    "queries": queries[:3],
+                }
+            )
+        return items
+
     def _build_inquiry_blocks(
         self,
         *,
@@ -612,7 +956,11 @@ class HousingOrchestrator:
         assistant_text = (
             "検索条件の追加・物件選択・契約書チェックのいずれを進めるかを指定してください。"
         )
-        if task_memory.get("last_ranked_properties"):
+        if task_memory.get("status") == "awaiting_plan_confirmation" and task_memory.get("draft_research_plan"):
+            assistant_text = (
+                "調査計画は作成済みです。承認ボタンで開始するか、条件を追加して計画を更新してください。"
+            )
+        elif task_memory.get("last_ranked_properties"):
             assistant_text = (
                 "直前の候補は保持しています。物件カードのボタンで問い合わせ文を作るか、"
                 "新しい条件を送るか、契約条項テキストを貼り付けてください。"
@@ -633,6 +981,7 @@ class HousingOrchestrator:
             pending_confirmation=False,
             pending_action=None,
         )
+        self.db.set_session_status(session_id, response.status)
         self.db.add_message(session_id, "assistant", response.model_dump())
         self.db.add_audit_event(
             session_id,
@@ -703,10 +1052,13 @@ class HousingOrchestrator:
 
         if planner_result["missing_slots"]:
             assistant_text = "検索を始める前に、条件を少しだけ確認させてください。"
-            task_memory["status"] = "awaiting_user_slots"
+            task_memory["status"] = "awaiting_user_input"
             task_memory["awaiting_contract_text"] = False
+            task_memory["draft_research_plan"] = None
+            task_memory["last_provider"] = provider
             self.db.update_memories(session_id, updated_user_memory, task_memory)
             self.db.set_pending_action(session_id, None)
+            self.db.set_session_status(session_id, "awaiting_user_input")
 
             blocks = []
             if follow_up_questions:
@@ -737,74 +1089,23 @@ class HousingOrchestrator:
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 
-        query = self._build_search_query(updated_user_memory, message)
-        merged_search_results, source_summary = self._collect_search_results(
-            query=query,
+        draft_plan = self._build_research_plan(
             user_memory=updated_user_memory,
+            planner_result=planner_result,
+            message=message,
+            provider=provider,
         )
 
-        search_result = run_search_and_normalize(
-            query=query,
-            search_results=merged_search_results,
-            detail_fetcher=self.catalog.fetch_detail_html,
-        )
-        self.db.add_audit_event(
-            session_id,
-            "search_normalize",
-            {"query": query, "search_sources": source_summary},
-            search_result,
-            "検索結果URLを個別フェッチし、詳細ページから共通スキーマへ正規化",
-        )
-
-        ranking_result = run_ranking(
-            normalized_properties=search_result["normalized_properties"],
-            user_memory=updated_user_memory,
-        )
-        self.db.add_audit_event(
-            session_id,
-            "ranking",
-            {"user_memory": updated_user_memory},
-            ranking_result,
-            "条件スコアに基づいて順位付け",
-        )
-
-        session = self.db.get_session(session_id)
-        profile_id = session["profile_id"] if session is not None else ""
-        if profile_id:
-            updated_user_memory = self._sync_profile_after_search(
-                profile_id=profile_id,
-                user_memory=updated_user_memory,
-                query=query,
-            )
-
-        task_memory["status"] = "search_results_ready"
+        task_memory["status"] = "awaiting_plan_confirmation"
         task_memory["awaiting_contract_text"] = False
         task_memory["profile_resume_pending"] = False
-        task_memory["last_query"] = query
-        task_memory["last_normalized_properties"] = search_result["normalized_properties"]
-        task_memory["last_ranked_properties"] = ranking_result["ranked_properties"]
-        task_memory["last_duplicate_groups"] = search_result["duplicate_groups"]
-        task_memory["last_search_summary"] = search_result["summary"] | source_summary
-        task_memory["selected_property_id"] = None
-        task_memory["risk_items"] = []
-        task_memory["property_reactions"] = {}
-        task_memory["comparison_property_ids"] = []
+        task_memory["draft_research_plan"] = draft_plan
         task_memory["last_provider"] = provider
-
         self.db.set_pending_action(session_id, None)
         self.db.update_memories(session_id, updated_user_memory, task_memory)
+        self.db.set_session_status(session_id, "awaiting_plan_confirmation")
 
-        visible_ranked_properties = self._visible_ranked_properties(
-            ranking_result["ranked_properties"],
-            task_memory,
-        )
-
-        blocks = self._build_search_blocks(
-            ranked_properties=visible_ranked_properties,
-            normalized_properties=search_result["normalized_properties"],
-            search_summary=search_result["summary"],
-            property_reactions=self._get_property_reactions(task_memory),
-        )
+        blocks = [self._build_plan_block(draft_plan)]
         if follow_up_questions:
             blocks.append(
                 self._build_question_block(
@@ -812,25 +1113,479 @@ class HousingOrchestrator:
                     optional=True,
                 )
             )
-
-        assistant_text = (
-            f"候補を{len(visible_ranked_properties)}件比較しました。"
-            "気になる物件を選ぶと、次に問い合わせ文を作成します。"
+        blocks.append(
+            UIBlock(
+                type="actions",
+                title="調査をどう進めますか",
+                content={
+                    "items": [
+                        {
+                            "label": "この計画で調査を始める",
+                            "action_type": "approve_research_plan",
+                            "payload": {},
+                        },
+                        {
+                            "label": "条件を追加して計画を更新する",
+                            "action_type": "revise_research_plan",
+                            "payload": {},
+                        },
+                    ]
+                },
+            )
         )
+
+        assistant_text = "調査計画を作成しました。内容を確認してから、明示承認で調査を開始します。"
         if follow_up_questions:
-            assistant_text += "追加で分かる条件があれば、下の候補から追加入力できます。"
+            assistant_text += "追加で分かる条件があれば、下の候補から反映できます。"
 
         response = ChatMessageResponse(
-            status="search_results_ready",
+            status="awaiting_plan_confirmation",
             assistant_message=assistant_text,
             missing_slots=[],
-            next_action="select_property",
+            next_action="approve_research_plan",
             blocks=blocks,
             pending_confirmation=False,
             pending_action=None,
         )
         self.db.add_message(session_id, "assistant", response.model_dump())
         return response
+
+    def _run_research_stage(
+        self,
+        *,
+        job_id: str,
+        stage_name: str,
+        progress_percent: int,
+        latest_summary: str,
+        input_payload: dict[str, Any],
+        reasoning: str,
+        runner: Any,
+    ) -> dict[str, Any]:
+        self.db.update_research_job(
+            job_id,
+            current_stage=stage_name,
+            progress_percent=progress_percent,
+            latest_summary=latest_summary,
+        )
+        started = time.perf_counter()
+        try:
+            output = runner()
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            self.db.add_research_journal_node(
+                job_id=job_id,
+                stage=stage_name,
+                node_type="stage",
+                status="failed",
+                input_payload=input_payload,
+                output_payload={"error": str(exc)},
+                reasoning=reasoning,
+                duration_ms=duration_ms,
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        self.db.add_research_journal_node(
+            job_id=job_id,
+            stage=stage_name,
+            node_type="stage",
+            status="completed",
+            input_payload=input_payload,
+            output_payload=output,
+            reasoning=reasoning,
+            duration_ms=duration_ms,
+        )
+        return output
+
+    def _retrieve_across_queries(
+        self,
+        *,
+        job_id: str,
+        queries: list[str],
+        user_memory: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged_by_url: dict[str, dict[str, Any]] = {}
+        per_query: list[dict[str, Any]] = []
+        catalog_total = 0
+        brave_total = 0
+        brave_errors: list[str] = []
+
+        for index, query in enumerate(queries, start=1):
+            self.db.update_research_job(
+                job_id,
+                current_stage="retrieve",
+                progress_percent=25,
+                latest_summary=f"{index}/{len(queries)}件目のクエリを収集中: {query}",
+            )
+            results, source_summary = self._collect_search_results(
+                query=query,
+                user_memory=user_memory,
+            )
+            catalog_total += int(source_summary["catalog_result_count"])
+            brave_total += int(source_summary["brave_result_count"])
+            if source_summary["brave_error"]:
+                brave_errors.append(str(source_summary["brave_error"]))
+
+            per_query.append(
+                {
+                    "query": query,
+                    "result_count": len(results),
+                    "catalog_result_count": source_summary["catalog_result_count"],
+                    "brave_result_count": source_summary["brave_result_count"],
+                }
+            )
+
+            for item in results:
+                url = str(item.get("url") or "").strip()
+                if not url:
+                    continue
+                source_name = str(item.get("source_name") or "unknown")
+                if url not in merged_by_url:
+                    merged_by_url[url] = {
+                        **item,
+                        "matched_queries": [query],
+                        "source_names": [source_name],
+                        "source_name": source_name,
+                    }
+                    continue
+                existing = merged_by_url[url]
+                if query not in existing["matched_queries"]:
+                    existing["matched_queries"].append(query)
+                if source_name not in existing["source_names"]:
+                    existing["source_names"].append(source_name)
+                snippets = list(existing.get("extra_snippets", []) or [])
+                for snippet in item.get("extra_snippets", []) or []:
+                    text = str(snippet).strip()
+                    if text and text not in snippets:
+                        snippets.append(text)
+                existing["extra_snippets"] = snippets[:6]
+                if len(existing["source_names"]) > 1:
+                    existing["source_name"] = "multi_source"
+
+        raw_results = list(merged_by_url.values())
+        return {
+            "raw_results": raw_results,
+            "summary": {
+                "query_count": len(queries),
+                "unique_url_count": len(raw_results),
+                "catalog_result_count": catalog_total,
+                "brave_result_count": brave_total,
+                "brave_error_count": len(brave_errors),
+            },
+            "per_query": per_query,
+        }
+
+    def _prefetch_detail_pages(
+        self,
+        *,
+        job_id: str,
+        raw_results: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        detail_html_map: dict[str, str] = {}
+        total = len(raw_results)
+        for index, item in enumerate(raw_results, start=1):
+            url = str(item.get("url") or "").strip()
+            if not url:
+                continue
+            detail_html = self.catalog.fetch_detail_html(url)
+            if detail_html:
+                detail_html_map[url] = detail_html
+            if total and (index == 1 or index == total or index % 3 == 0):
+                self.db.update_research_job(
+                    job_id,
+                    current_stage="enrich",
+                    progress_percent=45,
+                    latest_summary=f"詳細ページを補完中: {index}/{total}件",
+                )
+        return {
+            "detail_html_map": detail_html_map,
+            "summary": {
+                "detail_attempt_count": total,
+                "detail_hit_count": len(detail_html_map),
+                "summary": f"詳細ページを {len(detail_html_map)} 件取得",
+            },
+        }
+
+    def _execute_research_job(self, job_id: str) -> dict[str, Any]:
+        job = self.db.get_research_job(job_id)
+        if job is None:
+            raise RuntimeError("research job not found")
+
+        session_id = job["session_id"]
+        approved_plan = job["approved_plan"]
+        user_memory, task_memory = self.db.get_memories(session_id)
+        provider = str(job.get("provider") or task_memory.get("last_provider") or self.settings.llm_default_provider)
+        adapter = self._get_adapter_or_none(provider) if provider in {"openai", "gemini", "groq", "claude"} else None
+
+        plan_result = self._run_research_stage(
+            job_id=job_id,
+            stage_name="plan_finalize",
+            progress_percent=10,
+            latest_summary="承認済み計画を確認しています。",
+            input_payload={"approved_plan": approved_plan},
+            reasoning="ユーザー承認済みの計画を固定し、以降の調査に使う条件を確定する。",
+            runner=lambda: {
+                "summary": f"条件 {len(approved_plan.get('conditions', []))} 件で調査開始",
+                "search_query": approved_plan.get("search_query", ""),
+            },
+        )
+
+        queries_result = self._run_research_stage(
+            job_id=job_id,
+            stage_name="query_expand",
+            progress_percent=18,
+            latest_summary="複数の検索クエリに展開しています。",
+            input_payload={"search_query": plan_result["search_query"]},
+            reasoning="単発検索を避け、条件ごとの観点で収集漏れを減らす。",
+            runner=lambda: {
+                "queries": self._build_research_queries(
+                    approved_plan.get("user_memory_snapshot", user_memory),
+                    str(approved_plan.get("search_query") or ""),
+                ),
+                "summary": "検索クエリを展開",
+            },
+        )
+        queries = queries_result["queries"]
+
+        retrieve_result = self._run_research_stage(
+            job_id=job_id,
+            stage_name="retrieve",
+            progress_percent=25,
+            latest_summary="検索結果を収集しています。",
+            input_payload={"queries": queries},
+            reasoning="複数クエリの結果をまとめて収集し、URL単位で統合する。",
+            runner=lambda: self._retrieve_across_queries(
+                job_id=job_id,
+                queries=queries,
+                user_memory=approved_plan.get("user_memory_snapshot", user_memory),
+            ),
+        )
+        raw_results = retrieve_result["raw_results"]
+
+        enrich_result = self._run_research_stage(
+            job_id=job_id,
+            stage_name="enrich",
+            progress_percent=45,
+            latest_summary="候補の詳細ページを確認しています。",
+            input_payload={"raw_result_count": len(raw_results)},
+            reasoning="詳細ページを優先して読み、賃料や駅距離などの精度を上げる。",
+            runner=lambda: self._prefetch_detail_pages(job_id=job_id, raw_results=raw_results),
+        )
+        detail_html_map = enrich_result["detail_html_map"]
+
+        query = str(approved_plan.get("search_query") or self._build_search_query(user_memory, "賃貸"))
+        def normalize_runner() -> dict[str, Any]:
+            return run_search_and_normalize(
+                query=query,
+                search_results=raw_results,
+                detail_fetcher=lambda url: detail_html_map.get(url),
+            )
+
+        search_result = self._run_research_stage(
+            job_id=job_id,
+            stage_name="normalize_dedupe",
+            progress_percent=62,
+            latest_summary="表記ゆれと重複掲載を整理しています。",
+            input_payload={"query": query, "raw_result_count": len(raw_results)},
+            reasoning="詳細ページとスニペットを共通スキーマへ揃え、重複候補を統合する。",
+            runner=normalize_runner,
+        )
+        self.db.add_audit_event(
+            session_id,
+            "search_normalize",
+            {"query": query, "query_expand": queries, "retrieve_summary": retrieve_result["summary"]},
+            search_result,
+            "複数検索結果を詳細優先で正規化し、重複候補を整理",
+        )
+
+        ranking_result = self._run_research_stage(
+            job_id=job_id,
+            stage_name="rank",
+            progress_percent=78,
+            latest_summary="候補の優先順位を評価しています。",
+            input_payload={"normalized_property_count": len(search_result["normalized_properties"])},
+            reasoning="条件一致度と不足情報を見て問い合わせ候補を順位付けする。",
+            runner=lambda: run_ranking(
+                normalized_properties=search_result["normalized_properties"],
+                user_memory=approved_plan.get("user_memory_snapshot", user_memory),
+            ),
+        )
+        self.db.add_audit_event(
+            session_id,
+            "ranking",
+            {"user_memory": approved_plan.get("user_memory_snapshot", user_memory)},
+            ranking_result,
+            "条件スコアと取得情報の充実度から順位付け",
+        )
+
+        session = self.db.get_session(session_id)
+        profile_id = session["profile_id"] if session is not None else ""
+        updated_user_memory = approved_plan.get("user_memory_snapshot", user_memory)
+        if profile_id:
+            updated_user_memory = self._sync_profile_after_search(
+                profile_id=profile_id,
+                user_memory=updated_user_memory,
+                query=query,
+            )
+
+        source_items = self._collect_research_source_items(
+            ranked_properties=ranking_result["ranked_properties"],
+            normalized_properties=search_result["normalized_properties"],
+            raw_results=raw_results,
+        )
+        search_summary = search_result["summary"] | retrieve_result["summary"] | enrich_result["summary"]
+
+        self._run_research_stage(
+            job_id=job_id,
+            stage_name="synthesize",
+            progress_percent=92,
+            latest_summary="結果を人向けに整理しています。",
+            input_payload={"ranked_property_count": len(ranking_result["ranked_properties"])},
+            reasoning="比較結果・不確実性・参照ソースをユーザー向けに整理する。",
+            runner=lambda: {
+                "summary": "結果要約を作成",
+                "source_item_count": len(source_items),
+            },
+        )
+
+        task_memory["status"] = "research_completed"
+        task_memory["awaiting_contract_text"] = False
+        task_memory["profile_resume_pending"] = False
+        task_memory["last_query"] = query
+        task_memory["last_normalized_properties"] = search_result["normalized_properties"]
+        task_memory["last_ranked_properties"] = ranking_result["ranked_properties"]
+        task_memory["last_duplicate_groups"] = search_result["duplicate_groups"]
+        task_memory["last_search_summary"] = search_summary
+        task_memory["last_source_items"] = source_items
+        task_memory["selected_property_id"] = None
+        task_memory["risk_items"] = []
+        task_memory["property_reactions"] = {}
+        task_memory["comparison_property_ids"] = []
+        task_memory["approved_research_plan"] = approved_plan
+        task_memory["draft_research_plan"] = approved_plan
+        task_memory["active_research_job_id"] = None
+        task_memory["last_research_job_id"] = job_id
+        task_memory["last_provider"] = provider
+        self.db.set_pending_action(session_id, None)
+        self.db.update_memories(session_id, updated_user_memory, task_memory)
+
+        self.db.update_research_job(
+            job_id,
+            status="completed",
+            current_stage="synthesize",
+            progress_percent=100,
+            latest_summary="調査が完了しました。",
+            finished_at=utc_now_iso(),
+        )
+        completed_job = self.db.get_research_job(job_id)
+        visible_ranked_properties = self._visible_ranked_properties(
+            ranking_result["ranked_properties"],
+            task_memory,
+        )
+        response = ChatMessageResponse(
+            status="research_completed",
+            assistant_message=(
+                f"調査が完了しました。{len(visible_ranked_properties)}件の候補を比較し、"
+                "問い合わせに進める候補を整理しました。"
+            ),
+            missing_slots=[],
+            next_action="select_property",
+            blocks=self._build_research_result_blocks(
+                ranked_properties=visible_ranked_properties,
+                normalized_properties=search_result["normalized_properties"],
+                search_summary=search_summary,
+                source_items=source_items,
+                task_memory=task_memory,
+                job_id=completed_job["id"] if completed_job else job_id,
+            ),
+            pending_confirmation=False,
+            pending_action=None,
+        )
+        self.db.update_research_job(job_id, result_payload=response.model_dump())
+        self.db.set_session_status(session_id, "research_completed")
+        self.db.add_message(session_id, "assistant", response.model_dump())
+        return response.model_dump()
+
+    def process_next_research_job(self) -> bool:
+        job = self.db.claim_next_research_job()
+        if job is None:
+            return False
+
+        try:
+            self._execute_research_job(job["id"])
+        except Exception as exc:
+            self.db.update_research_job(
+                job["id"],
+                status="failed",
+                latest_summary="調査に失敗しました。",
+                error_message=str(exc),
+                finished_at=utc_now_iso(),
+            )
+            failed_job = self.db.get_research_job(job["id"]) or job
+            session_id = failed_job["session_id"]
+            user_memory, task_memory = self.db.get_memories(session_id)
+            task_memory["status"] = "research_failed"
+            task_memory["active_research_job_id"] = None
+            task_memory["last_research_job_id"] = job["id"]
+            self.db.update_memories(session_id, user_memory, task_memory)
+            response = ChatMessageResponse(
+                status="research_failed",
+                assistant_message="調査中にエラーが発生しました。条件は保持しているので再実行できます。",
+                missing_slots=[],
+                next_action="retry_research_job",
+                blocks=[
+                    self._build_timeline_block(failed_job),
+                    UIBlock(
+                        type="warning",
+                        title="調査エラー",
+                        content={"body": str(exc)},
+                    ),
+                    UIBlock(
+                        type="actions",
+                        title="次のアクション",
+                        content={
+                            "items": [
+                                {
+                                    "label": "同じ計画で再調査する",
+                                    "action_type": "retry_research_job",
+                                    "payload": {},
+                                }
+                            ]
+                        },
+                    ),
+                ],
+                pending_confirmation=False,
+                pending_action=None,
+            )
+            self.db.update_research_job(
+                job["id"],
+                result_payload=response.model_dump(),
+            )
+            self.db.set_session_status(session_id, "research_failed")
+            self.db.add_message(session_id, "assistant", response.model_dump())
+        return True
+
+    def get_research_state(self, session_id: str) -> ResearchStateResponse:
+        job = self.db.get_latest_research_job(session_id)
+        if job is None:
+            return ResearchStateResponse(session_id=session_id, status="idle")
+
+        response_payload = job.get("result")
+        response = None
+        if response_payload:
+            response = ChatMessageResponse(**response_payload)
+        elif job["status"] in {"queued", "running"}:
+            response = self._build_research_running_response(job)
+
+        return ResearchStateResponse(
+            session_id=session_id,
+            job_id=job["id"],
+            status=job["status"],
+            current_stage=self._stage_label(job["current_stage"]),
+            progress_percent=job["progress_percent"],
+            latest_summary=job["latest_summary"],
+            response=response,
+        )
 
     def _process_contract_text(
         self,
@@ -853,6 +1608,7 @@ class HousingOrchestrator:
         task_memory["awaiting_contract_text"] = False
         task_memory["risk_items"] = risk_result["risk_items"]
         self.db.update_memories(session_id, user_memory, task_memory)
+        self.db.set_session_status(session_id, "risk_check_completed")
 
         response = ChatMessageResponse(
             status="risk_check_completed",
@@ -885,12 +1641,20 @@ class HousingOrchestrator:
 
         search_signal = detect_search_signal(message)
         contract_like = looks_like_contract_text(message)
+        active_job_id = str(task_memory.get("active_research_job_id") or "").strip()
+        active_job = self.db.get_research_job(active_job_id) if active_job_id else None
 
         if task_memory.get("awaiting_contract_text") and not search_signal:
             return self._process_contract_text(session_id=session_id, source_text=message)
 
         if contract_like and not search_signal:
             return self._process_contract_text(session_id=session_id, source_text=message)
+
+        if active_job and active_job["status"] in {"queued", "running"}:
+            response = self._build_research_running_response(active_job)
+            self.db.add_message(session_id, "assistant", response.model_dump())
+            self.db.set_session_status(session_id, response.status)
+            return response
 
         if not search_signal:
             return self._build_guidance_response(
@@ -922,6 +1686,8 @@ class HousingOrchestrator:
         normalized_properties = task_memory.get("last_normalized_properties", [])
         ranked_properties = task_memory.get("last_ranked_properties", [])
         property_reactions = self._get_property_reactions(task_memory)
+        latest_job_id = str(task_memory.get("last_research_job_id") or "")
+        latest_job = self.db.get_research_job(latest_job_id) if latest_job_id else None
 
         if action_type == "resume_profile_memory":
             profile = self.db.get_profile(session["profile_id"])
@@ -947,6 +1713,7 @@ class HousingOrchestrator:
                 pending_confirmation=False,
                 pending_action=None,
             )
+            self.db.set_session_status(session_id, "awaiting_user_input")
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 
@@ -964,6 +1731,86 @@ class HousingOrchestrator:
                 pending_confirmation=False,
                 pending_action=None,
             )
+            self.db.set_session_status(session_id, "awaiting_user_input")
+            self.db.add_message(session_id, "assistant", response.model_dump())
+            return response
+
+        if action_type == "approve_research_plan":
+            active_job_id = str(task_memory.get("active_research_job_id") or "").strip()
+            if active_job_id:
+                active_job = self.db.get_research_job(active_job_id)
+                if active_job is not None and active_job["status"] in {"queued", "running"}:
+                    response = self._build_research_running_response(active_job)
+                    self.db.set_session_status(session_id, response.status)
+                    self.db.add_message(session_id, "assistant", response.model_dump())
+                    return response
+
+            draft_plan = task_memory.get("draft_research_plan")
+            if not isinstance(draft_plan, dict) or not draft_plan:
+                raise RuntimeError("承認できる調査計画がありません")
+
+            provider = str(task_memory.get("last_provider") or self.settings.llm_default_provider)
+            approved_plan = {**draft_plan, "approved_at": utc_now_iso()}
+            job_id, _ = self.db.create_research_job(
+                session_id=session_id,
+                provider=provider,
+                approved_plan=approved_plan,
+            )
+            task_memory["status"] = "research_queued"
+            task_memory["approved_research_plan"] = approved_plan
+            task_memory["active_research_job_id"] = job_id
+            task_memory["last_research_job_id"] = job_id
+            task_memory["awaiting_contract_text"] = False
+            task_memory["selected_property_id"] = None
+            task_memory["property_reactions"] = {}
+            task_memory["comparison_property_ids"] = []
+            self.db.set_pending_action(session_id, None)
+            self.db.update_memories(session_id, user_memory, task_memory)
+            job = self.db.get_research_job(job_id)
+            if job is None:
+                raise RuntimeError("research job creation failed")
+            response = self._build_research_running_response(job)
+            self.db.set_session_status(session_id, response.status)
+            self.db.add_message(session_id, "assistant", response.model_dump())
+            return response
+
+        if action_type == "revise_research_plan":
+            message = "条件を追加入力すると、計画を更新してから再度確認できます。"
+            response = ChatMessageResponse(
+                status="awaiting_user_input",
+                assistant_message=message,
+                missing_slots=[],
+                next_action="await_search_input",
+                blocks=[UIBlock(type="text", title="計画の更新", content={"body": message})],
+                pending_confirmation=False,
+                pending_action=None,
+            )
+            self.db.set_session_status(session_id, "awaiting_user_input")
+            self.db.add_message(session_id, "assistant", response.model_dump())
+            return response
+
+        if action_type == "retry_research_job":
+            approved_plan = task_memory.get("approved_research_plan") or (
+                latest_job["approved_plan"] if latest_job is not None else None
+            )
+            if not isinstance(approved_plan, dict) or not approved_plan:
+                raise RuntimeError("再実行できる調査計画がありません")
+
+            provider = str(task_memory.get("last_provider") or self.settings.llm_default_provider)
+            job_id, _ = self.db.create_research_job(
+                session_id=session_id,
+                provider=provider,
+                approved_plan=approved_plan,
+            )
+            task_memory["status"] = "research_queued"
+            task_memory["active_research_job_id"] = job_id
+            task_memory["last_research_job_id"] = job_id
+            self.db.update_memories(session_id, user_memory, task_memory)
+            job = self.db.get_research_job(job_id)
+            if job is None:
+                raise RuntimeError("research job creation failed")
+            response = self._build_research_running_response(job)
+            self.db.set_session_status(session_id, response.status)
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 
@@ -977,19 +1824,23 @@ class HousingOrchestrator:
             self.db.update_memories(session_id, user_memory, task_memory)
 
             response = ChatMessageResponse(
-                status="search_results_ready",
+                status="research_completed",
                 assistant_message=f"選択した{len(property_ids)}件を比較しました。",
                 missing_slots=[],
                 next_action="select_property",
-                blocks=self._build_compare_blocks(
-                    property_ids=property_ids,
-                    ranked_properties=self._visible_ranked_properties(ranked_properties, task_memory),
-                    normalized_properties=normalized_properties,
-                    property_reactions=property_reactions,
+                blocks=(
+                    ([self._build_timeline_block(latest_job)] if latest_job else [])
+                    + self._build_compare_blocks(
+                        property_ids=property_ids,
+                        ranked_properties=self._visible_ranked_properties(ranked_properties, task_memory),
+                        normalized_properties=normalized_properties,
+                        property_reactions=property_reactions,
+                    )
                 ),
                 pending_confirmation=False,
                 pending_action=None,
             )
+            self.db.set_session_status(session_id, "research_completed")
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 
@@ -1047,19 +1898,22 @@ class HousingOrchestrator:
             }[reaction]
             property_name = self._find_property_name(task_memory, property_id)
             response = ChatMessageResponse(
-                status="search_results_ready",
+                status="research_completed",
                 assistant_message=f"{property_name}を「{reaction_label}」として記録しました。",
                 missing_slots=[],
                 next_action="select_property",
-                blocks=self._build_search_blocks(
+                blocks=self._build_research_result_blocks(
                     ranked_properties=visible_ranked_properties,
                     normalized_properties=normalized_properties,
                     search_summary=task_memory.get("last_search_summary", {}),
-                    property_reactions=updated_reactions,
+                    source_items=task_memory.get("last_source_items", []) or [],
+                    task_memory=task_memory,
+                    job_id=latest_job_id or None,
                 ),
                 pending_confirmation=False,
                 pending_action=None,
             )
+            self.db.set_session_status(session_id, "research_completed")
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 
@@ -1109,6 +1963,7 @@ class HousingOrchestrator:
                 pending_confirmation=pending_action is not None,
                 pending_action=pending_action,
             )
+            self.db.set_session_status(session_id, "inquiry_draft_ready")
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 
@@ -1130,6 +1985,7 @@ class HousingOrchestrator:
                 pending_confirmation=session.get("pending_action") is not None,
                 pending_action=session.get("pending_action"),
             )
+            self.db.set_session_status(session_id, "awaiting_contract_text")
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 
@@ -1173,5 +2029,6 @@ class HousingOrchestrator:
             pending_confirmation=False,
             pending_action=None,
         )
+        self.db.set_session_status(session_id, "completed")
         self.db.add_message(session_id, "assistant", response.model_dump())
         return response

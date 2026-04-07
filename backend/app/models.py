@@ -59,7 +59,18 @@ class ChecklistItem(BaseModel):
 
 
 class UIBlock(BaseModel):
-    type: Literal["text", "table", "checklist", "cards", "warning", "question", "actions"]
+    type: Literal[
+        "text",
+        "table",
+        "checklist",
+        "cards",
+        "warning",
+        "question",
+        "actions",
+        "plan",
+        "timeline",
+        "sources",
+    ]
     title: str = ""
     content: dict[str, Any] = Field(default_factory=dict)
 
@@ -88,6 +99,7 @@ class CreateSessionResponse(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     profile_id: str | None = None
+    fresh_start: bool = False
 
 
 class ConfirmActionRequest(BaseModel):
@@ -108,6 +120,16 @@ class SessionStateResponse(BaseModel):
     user_memory: dict[str, Any]
     task_memory: dict[str, Any]
     messages: list[dict[str, Any]]
+
+
+class ResearchStateResponse(BaseModel):
+    session_id: str
+    job_id: str | None = None
+    status: str
+    current_stage: str = ""
+    progress_percent: int = 0
+    latest_summary: str = ""
+    response: ChatMessageResponse | None = None
 
 
 class AuditEventResponse(BaseModel):

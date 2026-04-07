@@ -105,6 +105,39 @@ const TONES: Record<UIBlock["type"], BlockTone> = {
     badgeBg: "bg-violet-100",
     badgeText: "text-violet-800",
   },
+  plan: {
+    label: "計画",
+    iconBg: "bg-indigo-100",
+    iconColor: "text-indigo-700",
+    accentTitle: "text-indigo-800",
+    accentLabel: "text-indigo-600",
+    border: "border-indigo-200",
+    surface: "bg-indigo-50/55",
+    badgeBg: "bg-indigo-100",
+    badgeText: "text-indigo-800",
+  },
+  timeline: {
+    label: "進捗",
+    iconBg: "bg-slate-100",
+    iconColor: "text-slate-700",
+    accentTitle: "text-slate-800",
+    accentLabel: "text-slate-600",
+    border: "border-slate-200",
+    surface: "bg-slate-50/65",
+    badgeBg: "bg-slate-100",
+    badgeText: "text-slate-800",
+  },
+  sources: {
+    label: "根拠",
+    iconBg: "bg-teal-100",
+    iconColor: "text-teal-700",
+    accentTitle: "text-teal-800",
+    accentLabel: "text-teal-600",
+    border: "border-teal-200",
+    surface: "bg-teal-50/60",
+    badgeBg: "bg-teal-100",
+    badgeText: "text-teal-800",
+  },
 };
 
 /* ---------- Icons ---------- */
@@ -213,6 +246,52 @@ function ActionIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+function PlanIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M5 4.5H15M5 8.5H12.5M5 12.5H11"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <rect x="3" y="2.8" width="14" height="14.4" rx="2.2" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function TimelineIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path d="M6 4V16M6 6H14M6 10H14M6 14H11" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="6" cy="4" r="1.4" fill="currentColor" />
+      <circle cx="6" cy="10" r="1.4" fill="currentColor" />
+      <circle cx="6" cy="16" r="1.4" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SourceIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M8 12L12 8M7 6.5H5.8C4.25 6.5 3 7.75 3 9.3V14.2C3 15.75 4.25 17 5.8 17H10.7C12.25 17 13.5 15.75 13.5 14.2V13"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10.5 3H17V9.5M17 3L9.2 10.8"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function CheckmarkIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -281,6 +360,9 @@ const TYPE_ICONS: Record<UIBlock["type"], ComponentType<IconProps & SVGProps<SVG
   warning: WarningIcon,
   question: QuestionIcon,
   actions: ActionIcon,
+  plan: PlanIcon,
+  timeline: TimelineIcon,
+  sources: SourceIcon,
 };
 
 /* ---------- Helpers ---------- */
@@ -577,6 +659,224 @@ export default function StructuredBlock({
           <p className="whitespace-pre-wrap text-[14px] leading-7 text-amber-900">
             {toDisplayText(block.content.body)}
           </p>
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === "plan") {
+    const tone = TONES.plan;
+    const summary = toDisplayText(block.content.summary);
+    const goal = toDisplayText(block.content.goal);
+    const searchQuery = toDisplayText(block.content.search_query);
+    const conditions = Array.isArray(block.content.conditions)
+      ? (block.content.conditions as Array<Record<string, unknown>>)
+      : [];
+    const strategy = Array.isArray(block.content.strategy)
+      ? block.content.strategy.map((item) => toDisplayText(item)).filter(Boolean)
+      : [];
+    const openQuestions = Array.isArray(block.content.open_questions)
+      ? block.content.open_questions.map((item) => toDisplayText(item)).filter(Boolean)
+      : [];
+
+    return (
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} />
+        <div className="space-y-4 px-4 py-3.5">
+          {(summary || goal) && (
+            <div className="rounded-2xl border border-indigo-100 bg-white/85 p-4">
+              {summary && <p className="text-sm font-semibold text-indigo-900">{summary}</p>}
+              {goal && <p className="mt-2 text-[13px] leading-6 text-inkMuted">{goal}</p>}
+            </div>
+          )}
+
+          {conditions.length > 0 && (
+            <div className="rounded-2xl border border-indigo-100 bg-white/85 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600">
+                条件
+              </p>
+              <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+                {conditions.map((condition, idx) => (
+                  <div key={`${toDisplayText(condition.label)}-${idx}`} className="rounded-xl bg-indigo-50/70 px-3 py-2">
+                    <dt className="text-[11px] font-semibold text-indigo-700">{toDisplayText(condition.label)}</dt>
+                    <dd className="mt-1 text-sm text-ink">{toDisplayText(condition.value)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
+          {strategy.length > 0 && (
+            <div className="rounded-2xl border border-indigo-100 bg-white/85 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600">
+                調査の進め方
+              </p>
+              <ul className="mt-3 space-y-2 text-sm leading-6 text-ink">
+                {strategy.map((item) => (
+                  <li key={item} className="flex items-start gap-2">
+                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {(searchQuery || openQuestions.length > 0) && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {searchQuery && (
+                <div className="rounded-2xl border border-indigo-100 bg-white/85 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600">
+                    初期クエリ
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-ink">{searchQuery}</p>
+                </div>
+              )}
+              {openQuestions.length > 0 && (
+                <div className="rounded-2xl border border-indigo-100 bg-white/85 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600">
+                    追加で確認したい点
+                  </p>
+                  <ul className="mt-2 space-y-2 text-sm leading-6 text-inkMuted">
+                    {openQuestions.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === "timeline") {
+    const tone = TONES.timeline;
+    const progress = Math.max(0, Math.min(100, toDisplayNumber(block.content.progress_percent) ?? 0));
+    const currentStage = toDisplayText(block.content.current_stage);
+    const summary = toDisplayText(block.content.summary);
+    const items = Array.isArray(block.content.items)
+      ? (block.content.items as Array<Record<string, unknown>>)
+      : [];
+
+    return (
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} />
+        <div className="space-y-4 px-4 py-3.5">
+          <div className="rounded-2xl border border-slate-200 bg-white/90 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Current Stage
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">{currentStage || "待機中"}</p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                {progress}%
+              </span>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-[linear-gradient(90deg,#0f766e_0%,#0ea5e9_100%)] transition-all duration-500"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            {summary && <p className="mt-3 text-sm leading-6 text-slate-700">{summary}</p>}
+          </div>
+
+          {items.length > 0 && (
+            <div className="space-y-2">
+              {items.map((item, idx) => {
+                const itemStatus = toDisplayText(item.status);
+                const badgeClass =
+                  itemStatus === "completed"
+                    ? "bg-emerald-100 text-emerald-800"
+                    : itemStatus === "running"
+                      ? "bg-sky-100 text-sky-800"
+                      : itemStatus === "failed"
+                        ? "bg-rose-100 text-rose-800"
+                        : "bg-slate-100 text-slate-700";
+                return (
+                  <div key={`${toDisplayText(item.label)}-${idx}`} className="rounded-2xl border border-slate-200 bg-white/90 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-ink">{toDisplayText(item.label)}</p>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${badgeClass}`}>
+                        {itemStatus || "pending"}
+                      </span>
+                    </div>
+                    {toDisplayText(item.detail) && (
+                      <p className="mt-2 text-[13px] leading-6 text-inkMuted">{toDisplayText(item.detail)}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === "sources") {
+    const tone = TONES.sources;
+    const items = Array.isArray(block.content.items)
+      ? (block.content.items as Array<Record<string, unknown>>)
+      : [];
+    return (
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} count={items.length} />
+        <div className="space-y-3 p-4">
+          {items.map((item, idx) => {
+            const queries = Array.isArray(item.queries)
+              ? item.queries.map((query) => toDisplayText(query)).filter(Boolean)
+              : [];
+            const url = toDisplayText(item.url);
+            return (
+              <article key={`${toDisplayText(item.title)}-${idx}`} className="rounded-2xl border border-teal-100 bg-white/90 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-teal-900">{toDisplayText(item.title)}</p>
+                    {toDisplayText(item.matched_property) && (
+                      <p className="mt-1 text-[12px] text-teal-700">
+                        紐づく候補: {toDisplayText(item.matched_property)}
+                      </p>
+                    )}
+                  </div>
+                  {toDisplayText(item.source_name) && (
+                    <span className="shrink-0 rounded-full bg-teal-100 px-2 py-1 text-[11px] font-semibold text-teal-800">
+                      {toDisplayText(item.source_name)}
+                    </span>
+                  )}
+                </div>
+
+                {toDisplayText(item.reason) && (
+                  <p className="mt-3 text-[13px] leading-6 text-ink">{toDisplayText(item.reason)}</p>
+                )}
+
+                {queries.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {queries.map((query) => (
+                      <span key={query} className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-medium text-teal-700">
+                        {query}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {url && (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-3 inline-flex items-center gap-2 text-[13px] font-medium text-teal-700 underline decoration-teal-300 underline-offset-4 transition hover:text-teal-900"
+                  >
+                    参照ページを開く
+                  </a>
+                )}
+              </article>
+            );
+          })}
         </div>
       </section>
     );

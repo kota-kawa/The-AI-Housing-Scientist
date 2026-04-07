@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -17,10 +19,25 @@ from app.models import (
     CreateSessionRequest,
     CreateSessionResponse,
     PreflightReport,
+    ResearchStateResponse,
     SessionStateResponse,
 )
 from app.orchestrator import HousingOrchestrator
 from app.preflight import run_preflight
+
+
+logger = logging.getLogger(__name__)
+
+
+def _research_worker(stop_event: threading.Event, orchestrator: HousingOrchestrator) -> None:
+    while not stop_event.is_set():
+        try:
+            processed = orchestrator.process_next_research_job()
+        except Exception:
+            logger.exception("research worker loop failed")
+            processed = False
+        if not processed:
+            stop_event.wait(1.0)
 
 
 @asynccontextmanager
@@ -36,11 +53,23 @@ async def lifespan(app: FastAPI):
     app.state.orchestrator = HousingOrchestrator(settings=settings, db=db)
     app.state.preflight_report = preflight_report
     app.state.preflight_ok = preflight_ok
+    app.state.research_stop_event = threading.Event()
+    app.state.research_worker = threading.Thread(
+        target=_research_worker,
+        args=(app.state.research_stop_event, app.state.orchestrator),
+        daemon=True,
+        name="research-worker",
+    )
+    app.state.research_worker.start()
 
     if settings.run_preflight_on_startup and settings.preflight_fail_fast and not preflight_ok:
         raise RuntimeError("Preflight failed in fail-fast mode")
 
-    yield
+    try:
+        yield
+    finally:
+        app.state.research_stop_event.set()
+        app.state.research_worker.join(timeout=2.0)
 
 
 app = FastAPI(title="The-AI-Housing-Scientist", version="0.1.0", lifespan=lifespan)
@@ -68,7 +97,9 @@ def get_preflight() -> PreflightReport:
 def create_session(body: CreateSessionRequest | None = None) -> CreateSessionResponse:
     profile_id, _ = app.state.db.get_or_create_profile(body.profile_id if body else None)
     session_id, created_at = app.state.db.create_session(profile_id=profile_id)
-    initial_response = app.state.orchestrator.build_session_initial_response(session_id)
+    initial_response = None
+    if not (body.fresh_start if body else False):
+        initial_response = app.state.orchestrator.build_session_initial_response(session_id)
     if initial_response is not None:
         app.state.db.add_message(session_id, "assistant", initial_response.model_dump())
     return CreateSessionResponse(
@@ -97,6 +128,13 @@ def get_session_state(session_id: str) -> SessionStateResponse:
         task_memory=task_memory,
         messages=messages,
     )
+
+
+@app.get("/api/chat/sessions/{session_id}/research", response_model=ResearchStateResponse)
+def get_research_state(session_id: str) -> ResearchStateResponse:
+    if not app.state.db.session_exists(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return app.state.orchestrator.get_research_state(session_id)
 
 
 @app.post("/api/chat/sessions/{session_id}/messages", response_model=ChatMessageResponse)

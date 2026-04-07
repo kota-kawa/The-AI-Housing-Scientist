@@ -78,6 +78,38 @@ class Database:
                     FOREIGN KEY(session_id) REFERENCES sessions(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS research_jobs (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    approved_plan_json TEXT NOT NULL,
+                    current_stage TEXT NOT NULL,
+                    progress_percent INTEGER NOT NULL,
+                    latest_summary TEXT NOT NULL,
+                    result_json TEXT,
+                    error_message TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(session_id) REFERENCES sessions(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS research_journal_nodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL,
+                    stage TEXT NOT NULL,
+                    node_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    input_json TEXT NOT NULL,
+                    output_json TEXT NOT NULL,
+                    reasoning TEXT NOT NULL,
+                    duration_ms INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(job_id) REFERENCES research_jobs(id)
+                );
+
                 CREATE TABLE IF NOT EXISTS property_catalog (
                     property_id TEXT PRIMARY KEY,
                     detail_url TEXT NOT NULL UNIQUE,
@@ -311,6 +343,15 @@ class Database:
             "updated_at": row["updated_at"],
         }
 
+    def set_session_status(self, session_id: str, status: str) -> None:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
+                (status, now, session_id),
+            )
+            conn.commit()
+
     def set_pending_action(self, session_id: str, pending_action: dict[str, Any] | None) -> None:
         now = utc_now_iso()
         payload = json.dumps(pending_action, ensure_ascii=False) if pending_action else None
@@ -533,4 +574,261 @@ class Database:
             "notes": row["notes"],
             "contract_text": row["contract_text"],
             "features": json.loads(row["features_json"]) if row["features_json"] else [],
+        }
+
+    def create_research_job(
+        self,
+        *,
+        session_id: str,
+        provider: str,
+        approved_plan: dict[str, Any],
+    ) -> tuple[str, str]:
+        job_id = uuid.uuid4().hex
+        now = utc_now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_jobs(
+                    id,
+                    session_id,
+                    status,
+                    provider,
+                    approved_plan_json,
+                    current_stage,
+                    progress_percent,
+                    latest_summary,
+                    result_json,
+                    error_message,
+                    created_at,
+                    started_at,
+                    finished_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    session_id,
+                    "queued",
+                    provider,
+                    json.dumps(approved_plan, ensure_ascii=False),
+                    "queued",
+                    0,
+                    "調査ジョブを登録しました。",
+                    None,
+                    "",
+                    now,
+                    None,
+                    None,
+                    now,
+                ),
+            )
+            conn.commit()
+        return job_id, now
+
+    def get_research_job(self, job_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM research_jobs WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        return self._research_job_row_to_dict(row)
+
+    def get_latest_research_job(self, session_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM research_jobs
+                WHERE session_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._research_job_row_to_dict(row)
+
+    def claim_next_research_job(self) -> dict[str, Any] | None:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT *
+                FROM research_jobs
+                WHERE status = 'queued'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return None
+
+            conn.execute(
+                """
+                UPDATE research_jobs
+                SET status = ?, current_stage = ?, latest_summary = ?, started_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    "running",
+                    "plan_finalize",
+                    "調査を開始しました。",
+                    now,
+                    now,
+                    row["id"],
+                ),
+            )
+            conn.commit()
+
+        return self.get_research_job(row["id"])
+
+    def update_research_job(
+        self,
+        job_id: str,
+        *,
+        status: str | None = None,
+        current_stage: str | None = None,
+        progress_percent: int | None = None,
+        latest_summary: str | None = None,
+        result_payload: dict[str, Any] | None = None,
+        error_message: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        updates: list[str] = []
+        params: list[Any] = []
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if current_stage is not None:
+            updates.append("current_stage = ?")
+            params.append(current_stage)
+        if progress_percent is not None:
+            updates.append("progress_percent = ?")
+            params.append(progress_percent)
+        if latest_summary is not None:
+            updates.append("latest_summary = ?")
+            params.append(latest_summary)
+        if result_payload is not None:
+            updates.append("result_json = ?")
+            params.append(json.dumps(result_payload, ensure_ascii=False))
+        if error_message is not None:
+            updates.append("error_message = ?")
+            params.append(error_message)
+        if started_at is not None:
+            updates.append("started_at = ?")
+            params.append(started_at)
+        if finished_at is not None:
+            updates.append("finished_at = ?")
+            params.append(finished_at)
+
+        now = utc_now_iso()
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.append(job_id)
+
+        with self.connect() as conn:
+            conn.execute(
+                f"UPDATE research_jobs SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+            conn.commit()
+
+    def add_research_journal_node(
+        self,
+        *,
+        job_id: str,
+        stage: str,
+        node_type: str,
+        status: str,
+        input_payload: dict[str, Any],
+        output_payload: dict[str, Any],
+        reasoning: str,
+        duration_ms: int = 0,
+    ) -> None:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_journal_nodes(
+                    job_id,
+                    stage,
+                    node_type,
+                    status,
+                    input_json,
+                    output_json,
+                    reasoning,
+                    duration_ms,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    stage,
+                    node_type,
+                    status,
+                    json.dumps(input_payload, ensure_ascii=False),
+                    json.dumps(output_payload, ensure_ascii=False),
+                    reasoning,
+                    duration_ms,
+                    now,
+                ),
+            )
+            conn.commit()
+
+    def list_research_journal_nodes(self, job_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    job_id,
+                    stage,
+                    node_type,
+                    status,
+                    input_json,
+                    output_json,
+                    reasoning,
+                    duration_ms,
+                    created_at
+                FROM research_journal_nodes
+                WHERE job_id = ?
+                ORDER BY id ASC
+                """,
+                (job_id,),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "job_id": row["job_id"],
+                "stage": row["stage"],
+                "node_type": row["node_type"],
+                "status": row["status"],
+                "input": json.loads(row["input_json"]),
+                "output": json.loads(row["output_json"]),
+                "reasoning": row["reasoning"],
+                "duration_ms": row["duration_ms"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def _research_job_row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "status": row["status"],
+            "provider": row["provider"],
+            "approved_plan": json.loads(row["approved_plan_json"]),
+            "current_stage": row["current_stage"],
+            "progress_percent": int(row["progress_percent"] or 0),
+            "latest_summary": row["latest_summary"],
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+            "error_message": row["error_message"],
+            "created_at": row["created_at"],
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "updated_at": row["updated_at"],
         }

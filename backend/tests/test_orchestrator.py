@@ -2,6 +2,8 @@ from pathlib import Path
 
 from app.config import Settings
 from app.db import Database
+from app.main import app, create_session as create_session_endpoint
+from app.models import CreateSessionRequest
 from app.orchestrator import HousingOrchestrator
 
 
@@ -42,10 +44,25 @@ def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
         provider="openai",
     )
 
-    assert search_response.status == "search_results_ready"
-    assert search_response.next_action == "select_property"
-    assert any(block.type == "cards" for block in search_response.blocks)
-    assert all(block.title != "問い合わせ下書き" for block in search_response.blocks)
+    assert search_response.status == "awaiting_plan_confirmation"
+    assert search_response.next_action == "approve_research_plan"
+    assert any(block.type == "plan" for block in search_response.blocks)
+
+    queued_response = orchestrator.execute_action(
+        session_id=session_id,
+        action_type="approve_research_plan",
+        payload={},
+    )
+
+    assert queued_response.status == "research_queued"
+    assert any(block.type == "timeline" for block in queued_response.blocks)
+
+    assert orchestrator.process_next_research_job() is True
+    research_state = orchestrator.get_research_state(session_id)
+    assert research_state.status == "completed"
+    assert research_state.response is not None
+    assert research_state.response.status == "research_completed"
+    assert any(block.type == "cards" for block in research_state.response.blocks)
 
     user_memory, task_memory = db.get_memories(session_id)
     selected_property_id = task_memory["last_ranked_properties"][0]["property_id_norm"]
@@ -59,6 +76,7 @@ def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
         },
     )
 
+    assert comparison_response.status == "research_completed"
     assert any(block.title == "選択物件の比較表" for block in comparison_response.blocks)
 
     inquiry_response = orchestrator.execute_action(
@@ -107,6 +125,12 @@ def test_profile_memory_is_available_across_sessions(tmp_path: Path):
         message="江東区で家賃12万円以下、駅徒歩7分以内の1LDKを探しています",
         provider="openai",
     )
+    orchestrator.execute_action(
+        session_id=first_session_id,
+        action_type="approve_research_plan",
+        payload={},
+    )
+    assert orchestrator.process_next_research_job() is True
     _, first_task_memory = db.get_memories(first_session_id)
     selected_property_id = first_task_memory["last_ranked_properties"][0]["property_id_norm"]
 
@@ -116,7 +140,7 @@ def test_profile_memory_is_available_across_sessions(tmp_path: Path):
         payload={"property_id": selected_property_id, "reaction": "favorite"},
     )
 
-    assert reaction_response.status == "search_results_ready"
+    assert reaction_response.status == "research_completed"
 
     second_session_id, _ = db.create_session(profile_id=profile_id)
     initial_response = orchestrator.build_session_initial_response(second_session_id)
@@ -125,3 +149,34 @@ def test_profile_memory_is_available_across_sessions(tmp_path: Path):
     assert initial_response.status == "awaiting_profile_resume"
     assert initial_response.assistant_message == "前回の条件を引き継ぎますか？"
     assert any("江東区" in str(block.content.get("body", "")) for block in initial_response.blocks)
+
+
+def test_fresh_start_session_skips_profile_resume_prompt(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+
+    profile_id, _ = db.get_or_create_profile("local-profile-2")
+    first_session_id, _ = db.create_session(profile_id=profile_id)
+    orchestrator.process_user_message(
+        session_id=first_session_id,
+        message="吉祥寺で家賃12万円以下、駅徒歩7分以内、在宅ワーク向けで探したい",
+        provider="openai",
+    )
+    orchestrator.execute_action(
+        session_id=first_session_id,
+        action_type="approve_research_plan",
+        payload={},
+    )
+    assert orchestrator.process_next_research_job() is True
+
+    app.state.db = db
+    app.state.orchestrator = orchestrator
+
+    response = create_session_endpoint(
+        CreateSessionRequest(profile_id=profile_id, fresh_start=True)
+    )
+
+    assert response.profile_id == profile_id
+    assert response.initial_response is None

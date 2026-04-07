@@ -9,6 +9,7 @@ import {
   confirmAction,
   createSession,
   fetchPreflight,
+  fetchResearchState,
   runAction,
   sendMessage,
 } from "./lib/api";
@@ -17,6 +18,7 @@ type Message = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  status?: string;
   blocks?: UIBlock[];
   pendingAction?: ActionDescriptor | null;
 };
@@ -53,6 +55,7 @@ function toAssistantMessage(payload: ChatMessageResponse): Message {
     id: crypto.randomUUID(),
     role: "assistant",
     text: payload.assistant_message,
+    status: payload.status,
     blocks: payload.blocks,
     pendingAction: payload.pending_action,
   };
@@ -65,8 +68,20 @@ function toStatusLabel(payload: ChatMessageResponse): string {
   if (payload.status === "awaiting_user_input") {
     return "追加条件の回答待ち";
   }
-  if (payload.status === "search_results_ready") {
-    return "物件選択待ち";
+  if (payload.status === "awaiting_plan_confirmation") {
+    return "調査計画の承認待ち";
+  }
+  if (payload.status === "research_queued") {
+    return "調査キュー登録済み";
+  }
+  if (payload.status === "research_running") {
+    return "調査進行中";
+  }
+  if (payload.status === "research_completed" || payload.status === "search_results_ready") {
+    return "調査完了・物件選択待ち";
+  }
+  if (payload.status === "research_failed") {
+    return "調査エラー";
   }
   if (payload.status === "inquiry_draft_ready") {
     return "問い合わせ文の確認待ち";
@@ -107,6 +122,29 @@ function SendIcon() {
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="h-5 w-5">
       <path
         d="M4.5 12H19.5M19.5 12L13 5.5M19.5 12L13 18.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function NewSessionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="h-5 w-5">
+      {/* ノート部分 */}
+      <path
+        d="M12 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* 鉛筆部分 */}
+      <path
+        d="M17.5 3.5a2 2 0 0 1 2.83 2.83L11 15.5l-3.5.5.5-3.5L17.5 3.5z"
         stroke="currentColor"
         strokeWidth="2"
         strokeLinecap="round"
@@ -174,6 +212,7 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [preflightSummary, setPreflightSummary] = useState<string>("");
+  const [activeResearchMessageId, setActiveResearchMessageId] = useState<string>("");
   const providerMenuRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -253,12 +292,74 @@ export default function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [messages, loading]);
 
+  useEffect(() => {
+    if (!sessionId || !activeResearchMessageId) {
+      return;
+    }
+
+    if (!["research_queued", "research_running"].includes(responseState)) {
+      return;
+    }
+
+    let cancelled = false;
+    let timerId: number | undefined;
+
+    const poll = async () => {
+      try {
+        const researchState = await fetchResearchState(sessionId);
+        if (cancelled || !researchState.response) {
+          return;
+        }
+
+        const updatedMessage: Message = {
+          ...toAssistantMessage(researchState.response),
+          id: activeResearchMessageId,
+        };
+
+        setMessages((prev) =>
+          prev.map((message) => (message.id === activeResearchMessageId ? updatedMessage : message))
+        );
+        setResponseState(researchState.response.status);
+        setStatus(toStatusLabel(researchState.response));
+
+        if (["research_completed", "research_failed"].includes(researchState.response.status)) {
+          setActiveResearchMessageId("");
+          return;
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "進捗取得に失敗しました");
+        }
+      }
+
+      if (!cancelled) {
+        timerId = window.setTimeout(() => void poll(), 2000);
+      }
+    };
+
+    timerId = window.setTimeout(() => void poll(), 1200);
+    return () => {
+      cancelled = true;
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [activeResearchMessageId, responseState, sessionId]);
+
   const inputPlaceholder = useMemo(() => {
     if (responseState === "awaiting_contract_text") {
       return "契約書・重要事項説明・初期費用表の文面を貼り付けてください…";
     }
+    if (responseState === "awaiting_plan_confirmation") {
+      return "条件を追加すると、調査計画を更新できます…";
+    }
+    if (responseState === "research_queued" || responseState === "research_running") {
+      return "調査中です。完了すると結果と参照ソースがここに表示されます…";
+    }
     return "希望条件や気になる物件、契約条項を入力してください…";
   }, [responseState]);
+
+  const isResearchBusy = responseState === "research_queued" || responseState === "research_running";
 
   const pendingAction = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -277,6 +378,9 @@ export default function App() {
     if (loading) {
       return "border-sky-200 bg-sky-50 text-sky-700";
     }
+    if (isResearchBusy) {
+      return "border-teal-200 bg-teal-50 text-teal-700";
+    }
     if (pendingAction) {
       return "border-cyan-200 bg-cyan-50 text-cyan-700";
     }
@@ -284,10 +388,20 @@ export default function App() {
       return "border-sky-200 bg-sky-50 text-sky-700";
     }
     return "border-sky-100 bg-sky-50/80 text-sky-700";
-  }, [error, loading, pendingAction, status]);
+  }, [error, isResearchBusy, loading, pendingAction, status]);
+
+  const appendAssistantResponse = (payload: ChatMessageResponse) => {
+    const assistantMessage = toAssistantMessage(payload);
+    setMessages((prev) => [...prev, assistantMessage]);
+    if (payload.status === "research_queued" || payload.status === "research_running") {
+      setActiveResearchMessageId(assistantMessage.id);
+    } else {
+      setActiveResearchMessageId("");
+    }
+  };
 
   const submitMessage = async (messageText: string) => {
-    if (!sessionId || !messageText.trim() || loading) {
+    if (!sessionId || !messageText.trim() || loading || isResearchBusy) {
       return;
     }
 
@@ -295,7 +409,7 @@ export default function App() {
     setInput("");
     setError("");
     setLoading(true);
-    setStatus(responseState === "awaiting_contract_text" ? "契約条項を確認中..." : "検索・比較を実行中...");
+    setStatus(responseState === "awaiting_contract_text" ? "契約条項を確認中..." : "条件を整理中...");
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -306,7 +420,7 @@ export default function App() {
 
     try {
       const response = await sendMessage(sessionId, userText, provider);
-      setMessages((prev) => [...prev, toAssistantMessage(response)]);
+      appendAssistantResponse(response);
       setResponseState(response.status);
       setStatus(toStatusLabel(response));
     } catch (e) {
@@ -323,11 +437,11 @@ export default function App() {
     }
     setLoading(true);
     setError("");
-    setStatus("操作を実行中...");
+    setStatus(action.action_type === "approve_research_plan" ? "調査ジョブを登録中..." : "操作を実行中...");
 
     try {
       const response = await runAction(sessionId, action.action_type, action.payload ?? {});
-      setMessages((prev) => [...prev, toAssistantMessage(response)]);
+      appendAssistantResponse(response);
       setResponseState(response.status);
       setStatus(toStatusLabel(response));
     } catch (e) {
@@ -364,7 +478,7 @@ export default function App() {
 
     try {
       const response = await confirmAction(sessionId, pendingAction.action_type, approved);
-      setMessages((prev) => [...prev, toAssistantMessage(response)]);
+      appendAssistantResponse(response);
       setResponseState(response.status);
       setStatus(toStatusLabel(response));
     } catch (e) {
@@ -378,6 +492,41 @@ export default function App() {
   const handlePromptPick = (prompt: string) => {
     setInput(prompt);
     textareaRef.current?.focus();
+  };
+
+  const handleNewSession = async () => {
+    if (loading) {
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setStatus("新しいセッションを準備中...");
+    setProviderMenuOpen(false);
+    setActiveResearchMessageId("");
+
+    try {
+      const profileId = window.localStorage.getItem(PROFILE_STORAGE_KEY) ?? undefined;
+      const session = await createSession(profileId, true);
+      setSessionId(session.session_id);
+      window.localStorage.setItem(PROFILE_STORAGE_KEY, session.profile_id);
+      setInput("");
+
+      if (session.initial_response) {
+        setMessages([toAssistantMessage(session.initial_response)]);
+        setResponseState(session.initial_response.status);
+        setStatus(toStatusLabel(session.initial_response));
+      } else {
+        setMessages([]);
+        setResponseState("ready");
+        setStatus("準備完了");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "新しいセッションの作成に失敗しました");
+      setStatus("エラー");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleQuestionSuggestionToggle = (
@@ -535,7 +684,7 @@ export default function App() {
       const response = await runAction(sessionId, "compare_selected_properties", {
         property_ids: selectedIds,
       });
-      setMessages((prev) => [...prev, toAssistantMessage(response)]);
+      appendAssistantResponse(response);
       setResponseState(response.status);
       setStatus(toStatusLabel(response));
     } catch (e) {
@@ -563,7 +712,7 @@ export default function App() {
                 AI Housing Scientist
               </p>
               <p className="mt-0.5 text-xs font-medium text-slate-700 sm:text-sm">
-                対話で進める、住まい探しの条件整理と比較
+                対話で計画を固めてから進める、住まい探しの深掘り調査
               </p>
             </div>
           </div>
@@ -606,8 +755,8 @@ export default function App() {
                     住まい探しを、もっと賢く。
                   </h2>
                   <p className="mt-2 text-sm leading-relaxed text-inkMuted sm:text-[15px]">
-                    希望条件を入れて比較し、気になる物件を選び、最後に契約書の文面を確認できます。
-                    検索から問い合わせ、契約前チェックまで会話の流れに沿って段階的に進めます。
+                    まず希望条件から調査計画を作り、承認後に時間をかけて候補を集めます。
+                    結果の比較、問い合わせ文の作成、契約前チェックまで会話の流れに沿って段階的に進めます。
                   </p>
 
                   <p className="mt-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-inkSubtle">
@@ -665,7 +814,7 @@ export default function App() {
                         <StructuredBlock
                           key={`${message.id}-${idx}`}
                           block={block}
-                          disabled={loading}
+                          disabled={loading || isResearchBusy}
                           onActionExecute={(action) => void handleActionExecute(action)}
                           onCompareExecute={() => void handleCompareExecute(message.id, idx)}
                           onCompareToggle={(itemIndex) =>
@@ -737,17 +886,19 @@ export default function App() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onTextareaKeyDown}
+                disabled={isResearchBusy}
                 rows={1}
                 placeholder={inputPlaceholder}
-                className="auto-resize max-h-48 min-h-[76px] w-full resize-none bg-transparent px-5 pb-3 pt-4 text-[15px] leading-7 text-ink outline-none placeholder:text-inkSubtle"
+                className="auto-resize max-h-48 min-h-[76px] w-full resize-none bg-transparent px-5 pb-3 pt-4 text-[15px] leading-7 text-ink outline-none placeholder:text-inkSubtle disabled:cursor-not-allowed disabled:opacity-70"
               />
 
               <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-2">
                 <div ref={providerMenuRef} className="relative">
                   <button
                     type="button"
+                    disabled={isResearchBusy}
                     onClick={() => setProviderMenuOpen((prev) => !prev)}
-                    className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-white/90 px-3.5 py-2 text-sm text-ink shadow-sm transition hover:border-sky-300 hover:bg-white hover:shadow-card"
+                    className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-white/90 px-3.5 py-2 text-sm text-ink shadow-sm transition hover:border-sky-300 hover:bg-white hover:shadow-card disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-inkSubtle">
                       Provider
@@ -789,14 +940,26 @@ export default function App() {
                   )}
                 </div>
 
-                <button
-                  type="submit"
-                  aria-label="送信"
-                  disabled={loading || !sessionId || !input.trim()}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-sky-500/20 bg-accent text-white shadow-floating transition hover:-translate-y-0.5 hover:bg-accentDeep hover:shadow-glow disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-100 disabled:text-sky-400 disabled:opacity-100 disabled:shadow-none"
-                >
-                  <SendIcon />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleNewSession()}
+                    disabled={loading}
+                    aria-label="新しいセッションを作成"
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-sky-500/20 bg-accent text-white shadow-floating transition hover:-translate-y-0.5 hover:bg-accentDeep hover:shadow-glow disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-100 disabled:text-sky-400 disabled:opacity-100 disabled:shadow-none"
+                  >
+                    <NewSessionIcon />
+                  </button>
+
+                  <button
+                    type="submit"
+                    aria-label="送信"
+                    disabled={loading || isResearchBusy || !sessionId || !input.trim()}
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-sky-500/20 bg-accent text-white shadow-floating transition hover:-translate-y-0.5 hover:bg-accentDeep hover:shadow-glow disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-100 disabled:text-sky-400 disabled:opacity-100 disabled:shadow-none"
+                  >
+                    <SendIcon />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
