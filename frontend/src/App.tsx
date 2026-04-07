@@ -551,7 +551,7 @@ export default function App() {
       <div className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 pb-8 pt-6 sm:px-6">
         {/* ===== Header ===== */}
         <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 rounded-[24px] border border-white/85 bg-white/88 px-4 py-3 shadow-[0_10px_28px_rgba(15,23,42,0.12)] backdrop-blur-xl">
             <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-gradient text-white shadow-floating">
               <HouseLogoIcon />
               <span className="absolute -bottom-1 -right-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-accent shadow-card">
@@ -559,10 +559,10 @@ export default function App() {
               </span>
             </div>
             <div>
-              <p className="font-display text-xl font-bold tracking-tight text-ink sm:text-2xl">
+              <p className="font-display text-xl font-bold tracking-tight text-slate-950 sm:text-2xl">
                 AI Housing Scientist
               </p>
-              <p className="mt-0.5 text-xs text-inkMuted sm:text-sm">
+              <p className="mt-0.5 text-xs font-medium text-slate-700 sm:text-sm">
                 対話で進める、住まい探しの条件整理と比較
               </p>
             </div>
@@ -652,11 +652,11 @@ export default function App() {
                 <div
                   className={`max-w-[min(880px,calc(100%-3rem))] rounded-3xl border p-4 shadow-card sm:p-5 ${
                     isUser
-                      ? "rounded-tr-md border-sky-100 bg-user-bubble text-ink"
+                      ? "rounded-tr-md border-sky-300/90 bg-[linear-gradient(135deg,rgba(255,255,255,0.96)_0%,rgba(224,242,254,0.98)_46%,rgba(186,230,253,0.98)_100%)] text-slate-950 shadow-[0_12px_32px_rgba(14,116,144,0.18)] backdrop-blur-xl"
                       : "rounded-tl-md border-white/80 bg-white/92 backdrop-blur-xl"
                   }`}
                 >
-                  <p className="whitespace-pre-wrap text-[15px] leading-7 text-ink">
+                  <p className={`whitespace-pre-wrap text-[15px] leading-7 ${isUser ? "font-medium text-slate-950" : "text-ink"}`}>
                     {message.text}
                   </p>
                   {message.blocks && message.blocks.length > 0 && (
