@@ -21,3 +21,52 @@ def test_search_normalize_dedup_group():
 
     assert len(result["normalized_properties"]) == 2
     assert len(result["duplicate_groups"]) == 1
+
+
+def test_search_normalize_prefers_detail_page_payload():
+    items = [
+        {
+            "title": "東雲ベイテラス | Mock Housing",
+            "description": "江東区東雲の1LDK",
+            "url": "https://mock-housing.local/properties/koto-shinonome-bay",
+            "extra_snippets": [],
+            "source_name": "mock_catalog",
+        }
+    ]
+
+    def fetch_detail(url: str) -> str | None:
+        if "koto-shinonome-bay" not in url:
+            return None
+        return """
+        <article data-kind="property-detail">
+          <h1 data-field="building_name">東雲ベイテラス</h1>
+          <p data-field="property_id">koto-shinonome-bay</p>
+          <p data-field="address">東京都江東区東雲1-4-8</p>
+          <p data-field="nearest_station">豊洲駅</p>
+          <p data-field="line_name">東京メトロ有楽町線</p>
+          <p data-field="station_walk_min">6</p>
+          <p data-field="layout">1LDK</p>
+          <p data-field="area_m2">42.1</p>
+          <p data-field="rent">118000</p>
+          <p data-field="management_fee">8000</p>
+          <p data-field="deposit">118000</p>
+          <p data-field="key_money">118000</p>
+          <p data-field="available_date">2026-05-上旬</p>
+          <p data-field="agency_name">Mock Homes 豊洲店</p>
+          <section data-field="notes">南東向き。2人入居相談可。</section>
+        </article>
+        """
+
+    result = run_search_and_normalize(
+        query="江東区 賃貸 12万円",
+        search_results=items,
+        detail_fetcher=fetch_detail,
+    )
+
+    prop = result["normalized_properties"][0]
+
+    assert prop["building_name"] == "東雲ベイテラス"
+    assert prop["address"] == "東京都江東区東雲1-4-8"
+    assert prop["nearest_station"] == "豊洲駅"
+    assert prop["rent"] == 118000
+    assert result["summary"]["detail_parsed_count"] == 1

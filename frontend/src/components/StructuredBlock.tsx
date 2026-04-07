@@ -1,10 +1,14 @@
 import type { ComponentType, SVGProps } from "react";
 
-import type { UIBlock } from "../lib/api";
+import type { ActionDescriptor, UIBlock } from "../lib/api";
 
 type Props = {
   block: UIBlock;
-  onSuggestionPick?: (prompt: string) => void;
+  disabled?: boolean;
+  onChecklistToggle?: (itemIndex: number) => void;
+  onQuestionExecute?: () => void;
+  onQuestionSuggestionToggle?: (itemIndex: number, prompt: string) => void;
+  onActionExecute?: (action: ActionDescriptor) => void;
 };
 
 type IconProps = { className?: string };
@@ -87,6 +91,17 @@ const TONES: Record<UIBlock["type"], BlockTone> = {
     surface: "bg-emerald-50/60",
     badgeBg: "bg-emerald-100",
     badgeText: "text-emerald-800",
+  },
+  actions: {
+    label: "操作",
+    iconBg: "bg-violet-100",
+    iconColor: "text-violet-700",
+    accentTitle: "text-violet-800",
+    accentLabel: "text-violet-600",
+    border: "border-violet-200",
+    surface: "bg-violet-50/55",
+    badgeBg: "bg-violet-100",
+    badgeText: "text-violet-800",
   },
 };
 
@@ -182,6 +197,20 @@ function QuestionIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+function ActionIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M4 10H16M11 5L16 10L11 15"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function CheckmarkIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -249,6 +278,7 @@ const TYPE_ICONS: Record<UIBlock["type"], ComponentType<IconProps & SVGProps<SVG
   checklist: ChecklistIcon,
   warning: WarningIcon,
   question: QuestionIcon,
+  actions: ActionIcon,
 };
 
 /* ---------- Helpers ---------- */
@@ -305,7 +335,17 @@ function SectionHeader({
 
 /* ---------- Property card ---------- */
 
-function PropertyCard({ item, index }: { item: Record<string, unknown>; index: number }) {
+function PropertyCard({
+  item,
+  index,
+  disabled = false,
+  onActionExecute,
+}: {
+  item: Record<string, unknown>;
+  index: number;
+  disabled?: boolean;
+  onActionExecute?: (action: ActionDescriptor) => void;
+}) {
   const rent = toDisplayNumber(item.rent);
   const score = toDisplayText(item.score);
   const title = toDisplayText(item.title) || `候補物件 ${index + 1}`;
@@ -315,6 +355,7 @@ function PropertyCard({ item, index }: { item: Record<string, unknown>; index: n
   const area = toDisplayText(item.area);
   const whySelected = toDisplayText(item.why_selected);
   const whyNotSelected = toDisplayText(item.why_not_selected);
+  const action = (item.action as ActionDescriptor | undefined) ?? undefined;
 
   return (
     <article className="group relative overflow-hidden rounded-2xl border border-hairline bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-cardHover">
@@ -412,13 +453,31 @@ function PropertyCard({ item, index }: { item: Record<string, unknown>; index: n
           )}
         </div>
       )}
+
+      {action && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onActionExecute?.(action)}
+          className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-sky-500/20 bg-accent px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-accentDeep disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-100 disabled:text-sky-400"
+        >
+          {action.label}
+        </button>
+      )}
     </article>
   );
 }
 
 /* ---------- Block dispatcher ---------- */
 
-export default function StructuredBlock({ block, onSuggestionPick }: Props) {
+export default function StructuredBlock({
+  block,
+  disabled = false,
+  onChecklistToggle,
+  onQuestionExecute,
+  onQuestionSuggestionToggle,
+  onActionExecute,
+}: Props) {
   if (block.type === "text") {
     const tone = TONES.text;
     return (
@@ -450,6 +509,7 @@ export default function StructuredBlock({ block, onSuggestionPick }: Props) {
   if (block.type === "question") {
     const items = (block.content.items as Array<Record<string, unknown>>) ?? [];
     const intro = toDisplayText(block.content.intro);
+    const selectedCount = items.filter((item) => toDisplayText(item.selected_example)).length;
     const tone = TONES.question;
     return (
       <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
@@ -462,6 +522,7 @@ export default function StructuredBlock({ block, onSuggestionPick }: Props) {
             const examples = Array.isArray(item.examples)
               ? item.examples.map((example) => toDisplayText(example)).filter(Boolean)
               : [];
+            const selectedExample = toDisplayText(item.selected_example);
 
             return (
               <div
@@ -478,8 +539,14 @@ export default function StructuredBlock({ block, onSuggestionPick }: Props) {
                       <button
                         key={example}
                         type="button"
-                        onClick={() => onSuggestionPick?.(example)}
-                        className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 transition hover:border-emerald-300 hover:bg-emerald-100"
+                        aria-pressed={selectedExample === example}
+                        disabled={disabled}
+                        onClick={() => onQuestionSuggestionToggle?.(idx, example)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-55 ${
+                          selectedExample === example
+                            ? "border-emerald-700 bg-emerald-700 text-white shadow-sm"
+                            : "border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100"
+                        }`}
                       >
                         {example}
                       </button>
@@ -489,6 +556,21 @@ export default function StructuredBlock({ block, onSuggestionPick }: Props) {
               </div>
             );
           })}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-white/80 px-3 py-3">
+            <p className="text-xs font-medium text-emerald-800">
+              {selectedCount > 0
+                ? `${selectedCount}件選択中です。内容を確認して実行してください。`
+                : "候補を選択すると、ここからまとめて送信できます。"}
+            </p>
+            <button
+              type="button"
+              disabled={disabled || selectedCount === 0}
+              onClick={onQuestionExecute}
+              className="rounded-full border border-emerald-700 bg-emerald-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-100 disabled:text-emerald-400"
+            >
+              実行する
+            </button>
+          </div>
         </div>
       </section>
     );
@@ -502,7 +584,13 @@ export default function StructuredBlock({ block, onSuggestionPick }: Props) {
         <SectionHeader block={block} count={items.length} />
         <div className="grid gap-3 p-4 sm:grid-cols-2">
           {items.map((item, idx) => (
-            <PropertyCard key={toDisplayText(item.id) || `card-${idx}`} item={item} index={idx} />
+            <PropertyCard
+              key={toDisplayText(item.id) || `card-${idx}`}
+              item={item}
+              index={idx}
+              disabled={disabled}
+              onActionExecute={onActionExecute}
+            />
           ))}
         </div>
       </section>
@@ -558,22 +646,54 @@ export default function StructuredBlock({ block, onSuggestionPick }: Props) {
         )}
         <ul className="divide-y divide-slate-100 text-sm">
           {items.map((item, idx) => (
-            <li key={idx} className="flex items-start gap-3 px-4 py-2.5">
-              <span
-                className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition ${
-                  item.checked
-                    ? "bg-accent text-white shadow-sm"
-                    : "border border-hairline bg-white text-transparent"
-                }`}
+            <li key={idx}>
+              <button
+                type="button"
+                aria-pressed={item.checked}
+                disabled={disabled}
+                onClick={() => onChecklistToggle?.(idx)}
+                className="flex w-full items-start gap-3 px-4 py-2.5 text-left transition hover:bg-sky-50/60 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <CheckmarkIcon className="h-3 w-3" />
-              </span>
-              <span className={`leading-6 ${item.checked ? "text-ink" : "text-inkMuted"}`}>
-                {item.label}
-              </span>
+                <span
+                  className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition ${
+                    item.checked
+                      ? "bg-accent text-white shadow-sm"
+                      : "border border-hairline bg-white text-transparent"
+                  }`}
+                >
+                  <CheckmarkIcon className="h-3 w-3" />
+                </span>
+                <span className={`leading-6 ${item.checked ? "text-ink" : "text-inkMuted"}`}>
+                  {item.label}
+                </span>
+              </button>
             </li>
           ))}
         </ul>
+      </section>
+    );
+  }
+
+  if (block.type === "actions") {
+    const items = (block.content.items as ActionDescriptor[]) ?? [];
+    const tone = TONES.actions;
+    return (
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} count={items.length} />
+        <div className="space-y-2 p-4">
+          {items.map((item, idx) => (
+            <button
+              key={`${item.action_type}-${idx}`}
+              type="button"
+              disabled={disabled}
+              onClick={() => onActionExecute?.(item)}
+              className="flex w-full items-center justify-between rounded-2xl border border-violet-200 bg-white px-4 py-3 text-left text-sm font-medium text-violet-900 shadow-sm transition hover:border-violet-300 hover:bg-violet-50 disabled:cursor-not-allowed disabled:border-violet-100 disabled:bg-violet-50/50 disabled:text-violet-400"
+            >
+              <span>{item.label}</span>
+              <ActionIcon className="h-4 w-4 text-violet-600" />
+            </button>
+          ))}
+        </div>
       </section>
     );
   }

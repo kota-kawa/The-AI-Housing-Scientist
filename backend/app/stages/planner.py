@@ -15,6 +15,7 @@ SEARCH_SIGNAL_KEYS = (
     "must_conditions",
     "nice_to_have",
 )
+SEARCH_INTENT_KEYWORDS = ("賃貸", "物件", "部屋", "比較", "探", "住まい")
 GENERIC_SEARCH_PATTERNS = (
     re.compile(r"^(おすすめ|相談|比較|教えて|探したい|探して|お願いします)$"),
     re.compile(
@@ -147,6 +148,14 @@ def _has_structured_search_signal(merged: dict[str, Any]) -> bool:
 def _is_generic_search_request(message: str) -> bool:
     normalized = re.sub(r"[\s　、。,.!！?？・]+", "", message)
     return any(pattern.fullmatch(normalized) for pattern in GENERIC_SEARCH_PATTERNS)
+
+
+def detect_search_signal(message: str) -> bool:
+    if _rule_based_slots(message):
+        return True
+    if _is_generic_search_request(message):
+        return True
+    return any(keyword in message for keyword in SEARCH_INTENT_KEYWORDS)
 
 
 def _build_follow_up_questions(

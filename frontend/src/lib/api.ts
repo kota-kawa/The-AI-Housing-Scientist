@@ -1,7 +1,13 @@
 export type Provider = "openai" | "gemini" | "groq" | "claude";
 
+export type ActionDescriptor = {
+  action_type: string;
+  label: string;
+  payload?: Record<string, unknown>;
+};
+
 export type UIBlock = {
-  type: "text" | "table" | "checklist" | "cards" | "warning" | "question";
+  type: "text" | "table" | "checklist" | "cards" | "warning" | "question" | "actions";
   title: string;
   content: Record<string, unknown>;
 };
@@ -13,7 +19,7 @@ export type ChatMessageResponse = {
   next_action: string;
   blocks: UIBlock[];
   pending_confirmation: boolean;
-  pending_action: { action_type: string; label: string } | null;
+  pending_action: ActionDescriptor | null;
 };
 
 export type SessionState = {
@@ -79,6 +85,17 @@ export async function confirmAction(
   return request<ChatMessageResponse>(`/api/chat/sessions/${sessionId}/actions/confirm`, {
     method: "POST",
     body: JSON.stringify({ action_type: actionType, approved }),
+  });
+}
+
+export async function runAction(
+  sessionId: string,
+  actionType: string,
+  payload: Record<string, unknown> = {}
+): Promise<ChatMessageResponse> {
+  return request<ChatMessageResponse>(`/api/chat/sessions/${sessionId}/actions`, {
+    method: "POST",
+    body: JSON.stringify({ action_type: actionType, payload }),
   });
 }
 

@@ -33,6 +33,27 @@ RISK_RULES = [
     ),
 ]
 
+CONTRACT_KEYWORDS = (
+    "更新料",
+    "短期解約",
+    "違約金",
+    "解約予告",
+    "保証会社",
+    "保証料",
+    "契約",
+    "敷金",
+    "礼金",
+    "原状回復",
+    "退去",
+    "特約",
+)
+
+
+def looks_like_contract_text(source_text: str) -> bool:
+    keyword_hits = sum(1 for token in CONTRACT_KEYWORDS if token in source_text)
+    normalized_length = len(re.sub(r"\s+", "", source_text))
+    return keyword_hits >= 2 or (keyword_hits >= 1 and normalized_length >= 80)
+
 
 def run_risk_check(*, source_text: str) -> dict[str, Any]:
     risk_items: list[RiskItem] = []

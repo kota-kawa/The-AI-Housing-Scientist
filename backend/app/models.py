@@ -9,8 +9,13 @@ from pydantic import BaseModel, Field
 class PropertyNormalized(BaseModel):
     property_id_norm: str
     source_id: str
+    building_name: str = ""
     building_name_norm: str
+    detail_url: str = ""
+    address: str = ""
     address_norm: str
+    nearest_station: str = ""
+    line_name: str = ""
     layout: str = ""
     area_m2: float = 0.0
     rent: int = 0
@@ -50,7 +55,7 @@ class ChecklistItem(BaseModel):
 
 
 class UIBlock(BaseModel):
-    type: Literal["text", "table", "checklist", "cards", "warning", "question"]
+    type: Literal["text", "table", "checklist", "cards", "warning", "question", "actions"]
     title: str = ""
     content: dict[str, Any] = Field(default_factory=dict)
 
@@ -78,6 +83,11 @@ class CreateSessionResponse(BaseModel):
 class ConfirmActionRequest(BaseModel):
     action_type: str
     approved: bool
+
+
+class ActionRequest(BaseModel):
+    action_type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class SessionStateResponse(BaseModel):

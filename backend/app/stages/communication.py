@@ -8,6 +8,7 @@ def run_communication(
     ranked_properties: list[dict[str, Any]],
     normalized_properties: list[dict[str, Any]],
     user_memory: dict[str, Any],
+    selected_property_id: str | None = None,
 ) -> dict[str, Any]:
     by_id = {item["property_id_norm"]: item for item in normalized_properties}
 
@@ -23,9 +24,20 @@ def run_communication(
         }
 
     top = ranked_properties[0]
+    if selected_property_id:
+        selected = next(
+            (item for item in ranked_properties if item["property_id_norm"] == selected_property_id),
+            None,
+        )
+        if selected is not None:
+            top = selected
+
     prop = by_id.get(top["property_id_norm"], {})
-    building_name = prop.get("building_name_norm", "対象物件")
+    building_name = prop.get("building_name", "対象物件")
     rent = int(prop.get("rent") or 0)
+    station = prop.get("nearest_station", "")
+    walk = prop.get("station_walk_min", 0)
+    layout = prop.get("layout", "")
 
     move_in = user_memory.get("move_in_date", "入居時期未定")
 
@@ -33,6 +45,7 @@ def run_communication(
         "お世話になっております。\n"
         f"{building_name}について問い合わせさせていただきます。\n"
         f"現在、家賃帯は{rent:,}円前後、入居希望時期は{move_in}で検討しております。\n"
+        f"物件条件は{layout or '間取り要確認'}、{station or '最寄り駅要確認'} 徒歩{walk or '要確認'}分として認識しています。\n"
         "以下についてご教示いただけますでしょうか。\n"
         "1. 最新の空室状況\n"
         "2. 初期費用の内訳（仲介手数料、保証会社、鍵交換費含む）\n"

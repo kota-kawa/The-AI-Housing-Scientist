@@ -2,12 +2,14 @@ import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "
 
 import StructuredBlock from "./components/StructuredBlock";
 import {
+  ActionDescriptor,
   ChatMessageResponse,
   Provider,
   UIBlock,
   confirmAction,
   createSession,
   fetchPreflight,
+  runAction,
   sendMessage,
 } from "./lib/api";
 
@@ -16,7 +18,19 @@ type Message = {
   role: "user" | "assistant";
   text: string;
   blocks?: UIBlock[];
-  pendingAction?: { action_type: string; label: string } | null;
+  pendingAction?: ActionDescriptor | null;
+};
+
+type ChecklistEntry = {
+  label: string;
+  checked: boolean;
+};
+
+type QuestionEntry = {
+  label?: string;
+  question?: string;
+  examples?: string[];
+  selected_example?: string;
 };
 
 const PROVIDERS: Provider[] = ["openai", "gemini", "groq", "claude"];
@@ -41,6 +55,18 @@ function toAssistantMessage(payload: ChatMessageResponse): Message {
 function toStatusLabel(payload: ChatMessageResponse): string {
   if (payload.status === "awaiting_user_input") {
     return "追加条件の回答待ち";
+  }
+  if (payload.status === "search_results_ready") {
+    return "物件選択待ち";
+  }
+  if (payload.status === "inquiry_draft_ready") {
+    return "問い合わせ文の確認待ち";
+  }
+  if (payload.status === "awaiting_contract_text") {
+    return "契約書入力待ち";
+  }
+  if (payload.status === "risk_check_completed") {
+    return "契約リスク確認完了";
   }
   if (payload.pending_confirmation) {
     return "確認待ち";
@@ -135,11 +161,13 @@ export default function App() {
   const [providerMenuOpen, setProviderMenuOpen] = useState<boolean>(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<string>("初期化中...");
+  const [responseState, setResponseState] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [preflightSummary, setPreflightSummary] = useState<string>("");
   const providerMenuRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -158,6 +186,7 @@ export default function App() {
         );
 
         setStatus("準備完了");
+        setResponseState("ready");
       } catch (e) {
         setError(e instanceof Error ? e.message : "初期化に失敗しました");
         setStatus("初期化失敗");
@@ -193,11 +222,29 @@ export default function App() {
     };
   }, [providerMenuOpen]);
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages, loading]);
+
+  const inputPlaceholder = useMemo(() => {
+    if (responseState === "awaiting_contract_text") {
+      return "契約書・重要事項説明・初期費用表の文面を貼り付けてください…";
+    }
+    return "希望条件や気になる物件、契約条項を入力してください…";
+  }, [responseState]);
+
   const pendingAction = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const item = messages[i];
-      if (item.role === "assistant" && item.pendingAction) {
-        return item.pendingAction;
+      if (item.role === "assistant" && "pendingAction" in item) {
+        return item.pendingAction ?? null;
       }
     }
     return null;
@@ -219,16 +266,16 @@ export default function App() {
     return "border-sky-100 bg-sky-50/80 text-sky-700";
   }, [error, loading, pendingAction, status]);
 
-  const submitInput = async () => {
-    if (!sessionId || !input.trim() || loading) {
+  const submitMessage = async (messageText: string) => {
+    if (!sessionId || !messageText.trim() || loading) {
       return;
     }
 
-    const userText = input.trim();
+    const userText = messageText.trim();
     setInput("");
     setError("");
     setLoading(true);
-    setStatus("検索・比較を実行中...");
+    setStatus(responseState === "awaiting_contract_text" ? "契約条項を確認中..." : "検索・比較を実行中...");
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -240,6 +287,7 @@ export default function App() {
     try {
       const response = await sendMessage(sessionId, userText, provider);
       setMessages((prev) => [...prev, toAssistantMessage(response)]);
+      setResponseState(response.status);
       setStatus(toStatusLabel(response));
     } catch (e) {
       setError(e instanceof Error ? e.message : "送信に失敗しました");
@@ -247,6 +295,31 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleActionExecute = async (action: ActionDescriptor) => {
+    if (!sessionId || loading) {
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setStatus("操作を実行中...");
+
+    try {
+      const response = await runAction(sessionId, action.action_type, action.payload ?? {});
+      setMessages((prev) => [...prev, toAssistantMessage(response)]);
+      setResponseState(response.status);
+      setStatus(toStatusLabel(response));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "操作に失敗しました");
+      setStatus("エラー");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitInput = async () => {
+    await submitMessage(input);
   };
 
   const onSubmit = (event: FormEvent) => {
@@ -272,7 +345,8 @@ export default function App() {
     try {
       const response = await confirmAction(sessionId, pendingAction.action_type, approved);
       setMessages((prev) => [...prev, toAssistantMessage(response)]);
-      setStatus("確認処理完了");
+      setResponseState(response.status);
+      setStatus(toStatusLabel(response));
     } catch (e) {
       setError(e instanceof Error ? e.message : "確認処理に失敗しました");
       setStatus("エラー");
@@ -284,6 +358,100 @@ export default function App() {
   const handlePromptPick = (prompt: string) => {
     setInput(prompt);
     textareaRef.current?.focus();
+  };
+
+  const handleQuestionSuggestionToggle = (
+    messageId: string,
+    blockIndex: number,
+    itemIndex: number,
+    example: string
+  ) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (message.id !== messageId || !message.blocks) {
+          return message;
+        }
+
+        const nextBlocks = message.blocks.map((block, currentBlockIndex) => {
+          if (currentBlockIndex !== blockIndex || block.type !== "question") {
+            return block;
+          }
+
+          const items = Array.isArray(block.content.items)
+            ? (block.content.items as QuestionEntry[])
+            : [];
+
+          return {
+            ...block,
+            content: {
+              ...block.content,
+              items: items.map((item, currentItemIndex) => {
+                if (currentItemIndex !== itemIndex) {
+                  return item;
+                }
+                return {
+                  ...item,
+                  selected_example: item.selected_example === example ? undefined : example,
+                };
+              }),
+            },
+          };
+        });
+
+        return { ...message, blocks: nextBlocks };
+      })
+    );
+  };
+
+  const handleQuestionExecute = (messageId: string, blockIndex: number) => {
+    const message = messages.find((item) => item.id === messageId);
+    const block = message?.blocks?.[blockIndex];
+    if (!block || block.type !== "question") {
+      return;
+    }
+
+    const items = Array.isArray(block.content.items) ? (block.content.items as QuestionEntry[]) : [];
+    const selectedAnswers = items
+      .map((item) => item.selected_example?.trim())
+      .filter((item): item is string => Boolean(item));
+
+    if (selectedAnswers.length === 0) {
+      return;
+    }
+
+    void submitMessage(selectedAnswers.join("、"));
+  };
+
+  const handleChecklistToggle = (messageId: string, blockIndex: number, itemIndex: number) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (message.id !== messageId || !message.blocks) {
+          return message;
+        }
+
+        const nextBlocks = message.blocks.map((block, currentBlockIndex) => {
+          if (currentBlockIndex !== blockIndex || block.type !== "checklist") {
+            return block;
+          }
+
+          const items = Array.isArray(block.content.items)
+            ? (block.content.items as ChecklistEntry[])
+            : [];
+
+          return {
+            ...block,
+            content: {
+              ...block.content,
+              items: items.map((item, currentItemIndex) =>
+                currentItemIndex === itemIndex ? { ...item, checked: !item.checked } : item
+              ),
+            },
+          };
+        });
+
+        return { ...message, blocks: nextBlocks };
+      })
+    );
   };
 
   return (
@@ -346,8 +514,8 @@ export default function App() {
                     住まい探しを、もっと賢く。
                   </h2>
                   <p className="mt-2 text-sm leading-relaxed text-inkMuted sm:text-[15px]">
-                    希望条件・気になる物件・契約書の文面まで、自由に入力してください。
-                    複数の AI プロバイダで検索・比較・要約・リスク確認まで一気に進めます。
+                    希望条件を入れて比較し、気になる物件を選び、最後に契約書の文面を確認できます。
+                    検索から問い合わせ、契約前チェックまで会話の流れに沿って段階的に進めます。
                   </p>
 
                   <p className="mt-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-inkSubtle">
@@ -405,7 +573,15 @@ export default function App() {
                         <StructuredBlock
                           key={`${message.id}-${idx}`}
                           block={block}
-                          onSuggestionPick={handlePromptPick}
+                          disabled={loading}
+                          onActionExecute={(action) => void handleActionExecute(action)}
+                          onChecklistToggle={(itemIndex) =>
+                            handleChecklistToggle(message.id, idx, itemIndex)
+                          }
+                          onQuestionExecute={() => handleQuestionExecute(message.id, idx)}
+                          onQuestionSuggestionToggle={(itemIndex, example) =>
+                            handleQuestionSuggestionToggle(message.id, idx, itemIndex, example)
+                          }
                         />
                       ))}
                     </div>
@@ -427,6 +603,7 @@ export default function App() {
               </div>
             </div>
           )}
+          <div ref={messagesEndRef} aria-hidden="true" className="h-px w-full" />
         </main>
       </div>
 
@@ -435,7 +612,6 @@ export default function App() {
         onSubmit={onSubmit}
         className="fixed inset-x-0 bottom-0 z-20 px-4 pb-[calc(env(safe-area-inset-bottom)+14px)] pt-6 sm:px-6"
       >
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-[180%] bg-gradient-to-t from-base via-base/80 to-transparent" />
         <div className="mx-auto max-w-5xl rounded-[28px] bg-white/92 p-3 shadow-floating backdrop-blur-2xl sm:p-4">
           <div className="flex flex-col gap-3">
             {pendingAction && (
@@ -466,7 +642,7 @@ export default function App() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onTextareaKeyDown}
                 rows={1}
-                placeholder="条件や物件情報、契約条項を入力してください…"
+                placeholder={inputPlaceholder}
                 className="auto-resize max-h-48 min-h-[76px] w-full resize-none bg-transparent px-5 pb-3 pt-4 text-[15px] leading-7 text-ink outline-none placeholder:text-inkSubtle"
               />
 

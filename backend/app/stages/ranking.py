@@ -42,6 +42,18 @@ def _score_property(prop: dict[str, Any], user_memory: dict[str, Any]) -> tuple[
         else:
             negatives.append(f"間取り{layout or '不明'}が希望{layout_pref}と不一致")
 
+    if rent <= 0:
+        score -= 15
+        negatives.append("家賃情報が取得できていない")
+
+    if station_walk_min <= 0:
+        score -= 6
+        negatives.append("駅徒歩情報が取得できていない")
+
+    if not layout:
+        score -= 5
+        negatives.append("間取り情報が取得できていない")
+
     if prop.get("area_m2", 0) and float(prop["area_m2"]) >= 25:
         score += 5
         positives.append("専有面積が25㎡以上")

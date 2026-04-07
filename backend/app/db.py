@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.catalog import CATALOG_SEED, build_catalog_detail_url
+
 
 UTC = timezone.utc
 
@@ -66,9 +68,93 @@ class Database:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(session_id) REFERENCES sessions(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS property_catalog (
+                    property_id TEXT PRIMARY KEY,
+                    detail_url TEXT NOT NULL UNIQUE,
+                    building_name TEXT NOT NULL,
+                    address TEXT NOT NULL,
+                    area_name TEXT NOT NULL,
+                    nearest_station TEXT NOT NULL,
+                    line_name TEXT NOT NULL,
+                    station_walk_min INTEGER NOT NULL,
+                    layout TEXT NOT NULL,
+                    area_m2 REAL NOT NULL,
+                    rent INTEGER NOT NULL,
+                    management_fee INTEGER NOT NULL,
+                    deposit INTEGER NOT NULL,
+                    key_money INTEGER NOT NULL,
+                    available_date TEXT NOT NULL,
+                    agency_name TEXT NOT NULL,
+                    notes TEXT NOT NULL,
+                    contract_text TEXT NOT NULL,
+                    features_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
+            self._seed_property_catalog(conn)
             conn.commit()
+
+    def _seed_property_catalog(self, conn: sqlite3.Connection) -> None:
+        row = conn.execute("SELECT COUNT(*) AS count FROM property_catalog").fetchone()
+        count = int(row["count"]) if row is not None else 0
+        if count > 0:
+            return
+
+        now = utc_now_iso()
+        for item in CATALOG_SEED:
+            conn.execute(
+                """
+                INSERT INTO property_catalog(
+                    property_id,
+                    detail_url,
+                    building_name,
+                    address,
+                    area_name,
+                    nearest_station,
+                    line_name,
+                    station_walk_min,
+                    layout,
+                    area_m2,
+                    rent,
+                    management_fee,
+                    deposit,
+                    key_money,
+                    available_date,
+                    agency_name,
+                    notes,
+                    contract_text,
+                    features_json,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item["property_id"],
+                    build_catalog_detail_url(item["property_id"]),
+                    item["building_name"],
+                    item["address"],
+                    item["area_name"],
+                    item["nearest_station"],
+                    item["line_name"],
+                    item["station_walk_min"],
+                    item["layout"],
+                    item["area_m2"],
+                    item["rent"],
+                    item["management_fee"],
+                    item["deposit"],
+                    item["key_money"],
+                    item["available_date"],
+                    item["agency_name"],
+                    item["notes"],
+                    item["contract_text"],
+                    json.dumps(item.get("features", []), ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            )
 
     def create_session(self) -> tuple[str, str]:
         session_id = uuid.uuid4().hex
@@ -207,3 +293,122 @@ class Database:
                 }
             )
         return events
+
+    def list_catalog_properties(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    property_id,
+                    detail_url,
+                    building_name,
+                    address,
+                    area_name,
+                    nearest_station,
+                    line_name,
+                    station_walk_min,
+                    layout,
+                    area_m2,
+                    rent,
+                    management_fee,
+                    deposit,
+                    key_money,
+                    available_date,
+                    agency_name,
+                    notes,
+                    contract_text,
+                    features_json
+                FROM property_catalog
+                ORDER BY rent ASC, station_walk_min ASC
+                """
+            ).fetchall()
+        return [self._catalog_row_to_dict(row) for row in rows]
+
+    def get_catalog_property_by_id(self, property_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    property_id,
+                    detail_url,
+                    building_name,
+                    address,
+                    area_name,
+                    nearest_station,
+                    line_name,
+                    station_walk_min,
+                    layout,
+                    area_m2,
+                    rent,
+                    management_fee,
+                    deposit,
+                    key_money,
+                    available_date,
+                    agency_name,
+                    notes,
+                    contract_text,
+                    features_json
+                FROM property_catalog
+                WHERE property_id = ?
+                """,
+                (property_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._catalog_row_to_dict(row)
+
+    def get_catalog_property_by_url(self, detail_url: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    property_id,
+                    detail_url,
+                    building_name,
+                    address,
+                    area_name,
+                    nearest_station,
+                    line_name,
+                    station_walk_min,
+                    layout,
+                    area_m2,
+                    rent,
+                    management_fee,
+                    deposit,
+                    key_money,
+                    available_date,
+                    agency_name,
+                    notes,
+                    contract_text,
+                    features_json
+                FROM property_catalog
+                WHERE detail_url = ?
+                """,
+                (detail_url,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._catalog_row_to_dict(row)
+
+    def _catalog_row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "property_id": row["property_id"],
+            "detail_url": row["detail_url"],
+            "building_name": row["building_name"],
+            "address": row["address"],
+            "area_name": row["area_name"],
+            "nearest_station": row["nearest_station"],
+            "line_name": row["line_name"],
+            "station_walk_min": row["station_walk_min"],
+            "layout": row["layout"],
+            "area_m2": row["area_m2"],
+            "rent": row["rent"],
+            "management_fee": row["management_fee"],
+            "deposit": row["deposit"],
+            "key_money": row["key_money"],
+            "available_date": row["available_date"],
+            "agency_name": row["agency_name"],
+            "notes": row["notes"],
+            "contract_text": row["contract_text"],
+            "features": json.loads(row["features_json"]) if row["features_json"] else [],
+        }

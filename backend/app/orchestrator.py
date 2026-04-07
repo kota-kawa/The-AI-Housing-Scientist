@@ -6,20 +6,17 @@ from app.config import ProviderName, Settings, get_provider_model
 from app.db import Database
 from app.llm import create_adapter
 from app.models import ChatMessageResponse, UIBlock
-from app.services.brave_search import BraveSearchClient
-from app.stages import (
-    run_communication,
-    run_planner,
-    run_ranking,
-    run_risk_check,
-    run_search_and_normalize,
-)
+from app.services import BraveSearchClient, PropertyCatalogService
+from app.stages import run_communication, run_ranking, run_risk_check, run_search_and_normalize
+from app.stages.planner import detect_search_signal, run_planner
+from app.stages.risk_check import looks_like_contract_text
 
 
 class HousingOrchestrator:
     def __init__(self, settings: Settings, db: Database):
         self.settings = settings
         self.db = db
+        self.catalog = PropertyCatalogService(db)
         self._model_cache: dict[str, list[str]] = {}
 
     def _get_adapter_or_none(self, provider: ProviderName):
@@ -93,60 +90,149 @@ class HousingOrchestrator:
             },
         )
 
-    def _build_blocks(
+    def _format_money(self, value: Any) -> str:
+        amount = int(value or 0)
+        return f"{amount:,}円" if amount > 0 else "要確認"
+
+    def _format_area(self, value: Any) -> str:
+        area = float(value or 0)
+        return f"{area:.1f}㎡" if area > 0 else "要確認"
+
+    def _format_walk(self, value: Any) -> str:
+        minutes = int(value or 0)
+        return f"{minutes}分" if minutes > 0 else "要確認"
+
+    def _build_property_cards(
         self,
         *,
         ranked_properties: list[dict[str, Any]],
         normalized_properties: list[dict[str, Any]],
-        communication: dict[str, Any],
-        risk_result: dict[str, Any],
-    ) -> list[UIBlock]:
+        selectable: bool,
+    ) -> list[dict[str, Any]]:
         by_id = {item["property_id_norm"]: item for item in normalized_properties}
+        cards: list[dict[str, Any]] = []
 
-        cards = []
         for item in ranked_properties[:3]:
             prop = by_id.get(item["property_id_norm"], {})
-            cards.append(
-                {
-                    "id": item["property_id_norm"],
-                    "title": prop.get("building_name_norm", "候補物件"),
-                    "score": item["score"],
-                    "rent": prop.get("rent", 0),
-                    "station_walk_min": prop.get("station_walk_min", 0),
-                    "why_selected": item["why_selected"],
-                    "why_not_selected": item["why_not_selected"],
+            card = {
+                "id": item["property_id_norm"],
+                "title": prop.get("building_name", "候補物件"),
+                "score": item["score"],
+                "rent": prop.get("rent", 0),
+                "station_walk_min": prop.get("station_walk_min", 0),
+                "station": prop.get("nearest_station", ""),
+                "layout": prop.get("layout", ""),
+                "area": self._format_area(prop.get("area_m2", 0)),
+                "why_selected": item["why_selected"],
+                "why_not_selected": item["why_not_selected"],
+            }
+            if selectable:
+                card["action"] = {
+                    "action_type": "generate_inquiry",
+                    "label": "この物件で問い合わせ文を作る",
+                    "payload": {"property_id": item["property_id_norm"]},
                 }
-            )
+            cards.append(card)
+        return cards
+
+    def _build_search_blocks(
+        self,
+        *,
+        ranked_properties: list[dict[str, Any]],
+        normalized_properties: list[dict[str, Any]],
+        search_summary: dict[str, Any],
+    ) -> list[UIBlock]:
+        by_id = {item["property_id_norm"]: item for item in normalized_properties}
 
         rows = []
         for item in ranked_properties[:8]:
             prop = by_id.get(item["property_id_norm"], {})
             rows.append(
                 {
-                    "property_id": item["property_id_norm"],
+                    "building_name": prop.get("building_name", "候補物件"),
                     "score": item["score"],
-                    "rent": prop.get("rent", 0),
-                    "layout": prop.get("layout", ""),
-                    "area_m2": prop.get("area_m2", 0),
-                    "station_walk_min": prop.get("station_walk_min", 0),
+                    "rent": self._format_money(prop.get("rent")),
+                    "layout": prop.get("layout", "要確認"),
+                    "area_m2": self._format_area(prop.get("area_m2", 0)),
+                    "station": prop.get("nearest_station", "要確認"),
+                    "station_walk_min": self._format_walk(prop.get("station_walk_min", 0)),
                 }
             )
 
+        summary_body = (
+            f"比較対象 {search_summary.get('normalized_count', 0)}件 / "
+            f"詳細ページ解析 {search_summary.get('detail_parsed_count', 0)}件 / "
+            f"スニペット補完 {search_summary.get('fallback_count', 0)}件"
+        )
+
+        blocks: list[UIBlock] = [
+            UIBlock(type="text", title="検索サマリー", content={"body": summary_body}),
+        ]
+
+        if ranked_properties:
+            blocks.extend(
+                [
+                    UIBlock(
+                        type="cards",
+                        title="推薦候補",
+                        content={
+                            "items": self._build_property_cards(
+                                ranked_properties=ranked_properties,
+                                normalized_properties=normalized_properties,
+                                selectable=True,
+                            )
+                        },
+                    ),
+                    UIBlock(
+                        type="table",
+                        title="比較表",
+                        content={
+                            "columns": [
+                                "building_name",
+                                "score",
+                                "rent",
+                                "layout",
+                                "area_m2",
+                                "station",
+                                "station_walk_min",
+                            ],
+                            "rows": rows,
+                        },
+                    ),
+                ]
+            )
+        else:
+            blocks.append(
+                UIBlock(
+                    type="warning",
+                    title="候補なし",
+                    content={"body": "詳細ページまで解析できた候補が見つかりませんでした。条件を少し広げて再検索してください。"},
+                )
+            )
+
+        return blocks
+
+    def _build_inquiry_blocks(
+        self,
+        *,
+        ranked_properties: list[dict[str, Any]],
+        normalized_properties: list[dict[str, Any]],
+        communication: dict[str, Any],
+        selected_property_id: str,
+    ) -> list[UIBlock]:
+        selected_ranked = [
+            item for item in ranked_properties if item["property_id_norm"] == selected_property_id
+        ]
         return [
-            UIBlock(type="cards", title="推薦候補", content={"items": cards}),
             UIBlock(
-                type="table",
-                title="比較表",
+                type="cards",
+                title="選択中の物件",
                 content={
-                    "columns": [
-                        "property_id",
-                        "score",
-                        "rent",
-                        "layout",
-                        "area_m2",
-                        "station_walk_min",
-                    ],
-                    "rows": rows,
+                    "items": self._build_property_cards(
+                        ranked_properties=selected_ranked or ranked_properties[:1],
+                        normalized_properties=normalized_properties,
+                        selectable=False,
+                    )
                 },
             ),
             UIBlock(
@@ -160,6 +246,54 @@ class HousingOrchestrator:
                 content={"items": [{"label": x, "checked": False} for x in communication["check_items"]]},
             ),
             UIBlock(
+                type="actions",
+                title="次のアクション",
+                content={
+                    "items": [
+                        {
+                            "label": "契約書チェックへ進む",
+                            "action_type": "start_contract_review",
+                            "payload": {"property_id": selected_property_id},
+                        }
+                    ]
+                },
+            ),
+        ]
+
+    def _build_contract_prompt_blocks(self, property_name: str) -> list[UIBlock]:
+        return [
+            UIBlock(
+                type="text",
+                title="契約書チェックの入力",
+                content={
+                    "body": (
+                        f"{property_name}の契約書・重要事項説明・初期費用表などの文面を貼り付けてください。\n"
+                        "更新料、違約金、解約予告、保証会社条件を重点的に抽出します。"
+                    )
+                },
+            )
+        ]
+
+    def _build_risk_blocks(self, risk_result: dict[str, Any]) -> list[UIBlock]:
+        rows = [
+            {
+                "severity": item["severity"],
+                "risk_type": item["risk_type"],
+                "evidence": item["evidence"],
+                "recommendation": item["recommendation"],
+            }
+            for item in risk_result["risk_items"]
+        ]
+        return [
+            UIBlock(
+                type="table",
+                title="契約リスク一覧",
+                content={
+                    "columns": ["severity", "risk_type", "evidence", "recommendation"],
+                    "rows": rows,
+                },
+            ),
+            UIBlock(
                 type="checklist",
                 title="契約前の必須確認",
                 content={"items": [{"label": x, "checked": False} for x in risk_result["must_confirm_list"]]},
@@ -171,16 +305,91 @@ class HousingOrchestrator:
             ),
         ]
 
-    def process_user_message(
+    def _build_guidance_response(
+        self,
+        *,
+        session_id: str,
+        task_memory: dict[str, Any],
+        message: str,
+    ) -> ChatMessageResponse:
+        assistant_text = (
+            "検索条件の追加・物件選択・契約書チェックのいずれを進めるかを指定してください。"
+        )
+        if task_memory.get("last_ranked_properties"):
+            assistant_text = (
+                "直前の候補は保持しています。物件カードのボタンで問い合わせ文を作るか、"
+                "新しい条件を送るか、契約条項テキストを貼り付けてください。"
+            )
+
+        response = ChatMessageResponse(
+            status="awaiting_user_input",
+            assistant_message=assistant_text,
+            missing_slots=[],
+            next_action="await_specific_input",
+            blocks=[
+                UIBlock(
+                    type="warning",
+                    title="入力ガイド",
+                    content={"body": assistant_text},
+                )
+            ],
+            pending_confirmation=False,
+            pending_action=None,
+        )
+        self.db.add_message(session_id, "assistant", response.model_dump())
+        self.db.add_audit_event(
+            session_id,
+            "guidance",
+            {"message": message},
+            response.model_dump(),
+            "検索条件または契約条項の入力を促す",
+        )
+        return response
+
+    def _collect_search_results(
+        self,
+        *,
+        query: str,
+        user_memory: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        catalog_results = self.catalog.search(query=query, user_memory=user_memory, count=8)
+        brave_results: list[dict[str, Any]] = []
+        brave_error = ""
+
+        if self.settings.brave_search_api_key:
+            try:
+                brave_results = BraveSearchClient(
+                    self.settings.brave_search_api_key,
+                    timeout_seconds=self.settings.llm_timeout_seconds,
+                ).search(query=query, count=6)
+                for item in brave_results:
+                    item["source_name"] = "brave"
+            except Exception as exc:
+                brave_error = str(exc)
+
+        merged: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+        for item in catalog_results + brave_results:
+            url = str(item.get("url") or "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            merged.append(item)
+
+        return merged, {
+            "catalog_result_count": len(catalog_results),
+            "brave_result_count": len(brave_results),
+            "brave_error": brave_error,
+        }
+
+    def _process_search_message(
         self,
         *,
         session_id: str,
         message: str,
-        provider: ProviderName,
+        adapter: Any,
     ) -> ChatMessageResponse:
         user_memory, task_memory = self.db.get_memories(session_id)
-
-        adapter = self._get_adapter_or_none(provider)
 
         planner_result = run_planner(message=message, user_memory=user_memory, adapter=adapter)
         self.db.add_audit_event(
@@ -193,9 +402,11 @@ class HousingOrchestrator:
 
         updated_user_memory = planner_result["user_memory"]
         follow_up_questions = planner_result.get("follow_up_questions", [])
+
         if planner_result["missing_slots"]:
             assistant_text = "検索を始める前に、条件を少しだけ確認させてください。"
             task_memory["status"] = "awaiting_user_slots"
+            task_memory["awaiting_contract_text"] = False
             self.db.update_memories(session_id, updated_user_memory, task_memory)
             self.db.set_pending_action(session_id, None)
 
@@ -229,18 +440,22 @@ class HousingOrchestrator:
             return response
 
         query = self._build_search_query(updated_user_memory, message)
-        search_results = BraveSearchClient(
-            self.settings.brave_search_api_key,
-            timeout_seconds=self.settings.llm_timeout_seconds,
-        ).search(query=query, count=20)
+        merged_search_results, source_summary = self._collect_search_results(
+            query=query,
+            user_memory=updated_user_memory,
+        )
 
-        search_result = run_search_and_normalize(query=query, search_results=search_results)
+        search_result = run_search_and_normalize(
+            query=query,
+            search_results=merged_search_results,
+            detail_fetcher=self.catalog.fetch_detail_html,
+        )
         self.db.add_audit_event(
             session_id,
             "search_normalize",
-            {"query": query},
+            {"query": query, "search_sources": source_summary},
             search_result,
-            "Brave検索結果を共通スキーマへ正規化",
+            "検索結果URLを個別フェッチし、詳細ページから共通スキーマへ正規化",
         )
 
         ranking_result = run_ranking(
@@ -255,44 +470,22 @@ class HousingOrchestrator:
             "条件スコアに基づいて順位付け",
         )
 
-        communication_result = run_communication(
-            ranked_properties=ranking_result["ranked_properties"],
-            normalized_properties=search_result["normalized_properties"],
-            user_memory=updated_user_memory,
-        )
-        self.db.add_audit_event(
-            session_id,
-            "communication",
-            {"top": ranking_result["ranked_properties"][:1]},
-            communication_result,
-            "問い合わせ文の生成",
-        )
-
-        risk_result = run_risk_check(source_text=message)
-        self.db.add_audit_event(
-            session_id,
-            "risk_check",
-            {"source_text": message},
-            risk_result,
-            "契約系キーワードをルール抽出",
-        )
-
-        task_memory["status"] = "message_draft_ready"
+        task_memory["status"] = "search_results_ready"
+        task_memory["awaiting_contract_text"] = False
         task_memory["last_query"] = query
-        task_memory["last_ranked_property_ids"] = [
-            item["property_id_norm"] for item in ranking_result["ranked_properties"][:10]
-        ]
-        task_memory["risk_items"] = risk_result["risk_items"]
+        task_memory["last_normalized_properties"] = search_result["normalized_properties"]
+        task_memory["last_ranked_properties"] = ranking_result["ranked_properties"]
+        task_memory["last_search_summary"] = search_result["summary"] | source_summary
+        task_memory["selected_property_id"] = None
+        task_memory["risk_items"] = []
 
-        pending_action = communication_result["pending_action"]
-        self.db.set_pending_action(session_id, pending_action)
+        self.db.set_pending_action(session_id, None)
         self.db.update_memories(session_id, updated_user_memory, task_memory)
 
-        blocks = self._build_blocks(
+        blocks = self._build_search_blocks(
             ranked_properties=ranking_result["ranked_properties"],
             normalized_properties=search_result["normalized_properties"],
-            communication=communication_result,
-            risk_result=risk_result,
+            search_summary=search_result["summary"],
         )
         if follow_up_questions:
             blocks.append(
@@ -302,22 +495,181 @@ class HousingOrchestrator:
                 )
             )
 
-        assistant_message = "条件に沿って候補を比較し、問い合わせ文と契約前チェック項目を作成しました。"
+        assistant_text = (
+            f"候補を{len(ranking_result['ranked_properties'])}件比較しました。"
+            "気になる物件を選ぶと、次に問い合わせ文を作成します。"
+        )
         if follow_up_questions:
-            assistant_message += "追加で分かると精度が上がる条件も下にまとめています。"
-        assistant_message += "送信前に確認操作を実行してください。"
+            assistant_text += "追加で分かる条件があれば、下の候補から追加入力できます。"
 
         response = ChatMessageResponse(
-            status="completed",
-            assistant_message=assistant_message,
+            status="search_results_ready",
+            assistant_message=assistant_text,
             missing_slots=[],
-            next_action="confirm_before_send",
+            next_action="select_property",
             blocks=blocks,
-            pending_confirmation=pending_action is not None,
-            pending_action=pending_action,
+            pending_confirmation=False,
+            pending_action=None,
         )
         self.db.add_message(session_id, "assistant", response.model_dump())
         return response
+
+    def _process_contract_text(
+        self,
+        *,
+        session_id: str,
+        source_text: str,
+    ) -> ChatMessageResponse:
+        user_memory, task_memory = self.db.get_memories(session_id)
+
+        risk_result = run_risk_check(source_text=source_text)
+        self.db.add_audit_event(
+            session_id,
+            "risk_check",
+            {"source_text": source_text},
+            risk_result,
+            "契約条項テキストをルール抽出",
+        )
+
+        task_memory["status"] = "risk_check_completed"
+        task_memory["awaiting_contract_text"] = False
+        task_memory["risk_items"] = risk_result["risk_items"]
+        self.db.update_memories(session_id, user_memory, task_memory)
+
+        response = ChatMessageResponse(
+            status="risk_check_completed",
+            assistant_message="契約条項を確認しました。優先して確認すべきリスクを整理しました。",
+            missing_slots=[],
+            next_action="await_next_input",
+            blocks=self._build_risk_blocks(risk_result),
+            pending_confirmation=False,
+            pending_action=None,
+        )
+        self.db.add_message(session_id, "assistant", response.model_dump())
+        return response
+
+    def _find_property_name(self, task_memory: dict[str, Any], property_id: str | None) -> str:
+        if not property_id:
+            return "選択中の物件"
+        for item in task_memory.get("last_normalized_properties", []):
+            if item.get("property_id_norm") == property_id:
+                return str(item.get("building_name") or "選択中の物件")
+        return "選択中の物件"
+
+    def process_user_message(
+        self,
+        *,
+        session_id: str,
+        message: str,
+        provider: ProviderName,
+    ) -> ChatMessageResponse:
+        _, task_memory = self.db.get_memories(session_id)
+
+        search_signal = detect_search_signal(message)
+        contract_like = looks_like_contract_text(message)
+
+        if task_memory.get("awaiting_contract_text") and not search_signal:
+            return self._process_contract_text(session_id=session_id, source_text=message)
+
+        if contract_like and not search_signal:
+            return self._process_contract_text(session_id=session_id, source_text=message)
+
+        if not search_signal:
+            return self._build_guidance_response(
+                session_id=session_id,
+                task_memory=task_memory,
+                message=message,
+            )
+
+        adapter = self._get_adapter_or_none(provider)
+        return self._process_search_message(
+            session_id=session_id,
+            message=message,
+            adapter=adapter,
+        )
+
+    def execute_action(
+        self,
+        *,
+        session_id: str,
+        action_type: str,
+        payload: dict[str, Any],
+    ) -> ChatMessageResponse:
+        session = self.db.get_session(session_id)
+        if session is None:
+            raise RuntimeError("session not found")
+
+        user_memory, task_memory = self.db.get_memories(session_id)
+        normalized_properties = task_memory.get("last_normalized_properties", [])
+        ranked_properties = task_memory.get("last_ranked_properties", [])
+
+        if action_type == "generate_inquiry":
+            property_id = str(payload.get("property_id") or "")
+            if not property_id:
+                raise RuntimeError("property_id is required")
+
+            communication_result = run_communication(
+                ranked_properties=ranked_properties,
+                normalized_properties=normalized_properties,
+                user_memory=user_memory,
+                selected_property_id=property_id,
+            )
+            self.db.add_audit_event(
+                session_id,
+                "communication",
+                {"property_id": property_id},
+                communication_result,
+                "選択物件の問い合わせ文を生成",
+            )
+
+            task_memory["status"] = "inquiry_draft_ready"
+            task_memory["awaiting_contract_text"] = False
+            task_memory["selected_property_id"] = property_id
+
+            pending_action = communication_result["pending_action"]
+            self.db.set_pending_action(session_id, pending_action)
+            self.db.update_memories(session_id, user_memory, task_memory)
+
+            property_name = self._find_property_name(task_memory, property_id)
+            response = ChatMessageResponse(
+                status="inquiry_draft_ready",
+                assistant_message=f"{property_name}の問い合わせ文を作成しました。必要ならそのまま契約書チェックにも進めます。",
+                missing_slots=[],
+                next_action="confirm_before_send",
+                blocks=self._build_inquiry_blocks(
+                    ranked_properties=ranked_properties,
+                    normalized_properties=normalized_properties,
+                    communication=communication_result,
+                    selected_property_id=property_id,
+                ),
+                pending_confirmation=pending_action is not None,
+                pending_action=pending_action,
+            )
+            self.db.add_message(session_id, "assistant", response.model_dump())
+            return response
+
+        if action_type == "start_contract_review":
+            property_id = str(payload.get("property_id") or task_memory.get("selected_property_id") or "")
+            task_memory["status"] = "awaiting_contract_text"
+            task_memory["awaiting_contract_text"] = True
+            if property_id:
+                task_memory["selected_property_id"] = property_id
+            self.db.update_memories(session_id, user_memory, task_memory)
+
+            property_name = self._find_property_name(task_memory, property_id)
+            response = ChatMessageResponse(
+                status="awaiting_contract_text",
+                assistant_message="契約書チェックモードに切り替えました。文面を貼り付けてください。",
+                missing_slots=[],
+                next_action="paste_contract_text",
+                blocks=self._build_contract_prompt_blocks(property_name),
+                pending_confirmation=session.get("pending_action") is not None,
+                pending_action=session.get("pending_action"),
+            )
+            self.db.add_message(session_id, "assistant", response.model_dump())
+            return response
+
+        raise RuntimeError(f"unsupported action_type: {action_type}")
 
     def confirm_action(
         self,

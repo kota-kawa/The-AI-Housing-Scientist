@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import ProviderName, load_settings
 from app.db import Database
 from app.models import (
+    ActionRequest,
     AuditEventResponse,
     ChatMessageRequest,
     ChatMessageResponse,
@@ -104,6 +105,21 @@ def post_message(session_id: str, body: ChatMessageRequest) -> ChatMessageRespon
             session_id=session_id,
             message=body.message,
             provider=provider,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/chat/sessions/{session_id}/actions", response_model=ChatMessageResponse)
+def execute_action(session_id: str, body: ActionRequest) -> ChatMessageResponse:
+    if not app.state.db.session_exists(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+
+    try:
+        return app.state.orchestrator.execute_action(
+            session_id=session_id,
+            action_type=body.action_type,
+            payload=body.payload,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
