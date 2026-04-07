@@ -89,6 +89,9 @@ function formatPresetLabel(preset: string): string {
 }
 
 function toStatusLabel(payload: ChatMessageResponse): string {
+  if (payload.status_label) {
+    return payload.status_label;
+  }
   if (payload.status === "awaiting_profile_resume") {
     return "前回条件の引き継ぎ確認";
   }

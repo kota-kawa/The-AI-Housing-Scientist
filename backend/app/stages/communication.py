@@ -23,7 +23,61 @@ def _collect_user_focus_points(user_memory: dict[str, Any]) -> list[str]:
     return focus_points
 
 
-def _collect_confirmation_items(prop: dict[str, Any], user_memory: dict[str, Any]) -> list[str]:
+def _llm_confirmation_items(
+    prop: dict[str, Any],
+    user_memory: dict[str, Any],
+    adapter: LLMAdapter,
+) -> list[str]:
+    schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {"type": "string"},
+            }
+        },
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+    area_m2 = float(prop.get("area_m2") or 0)
+    rent = int(prop.get("rent") or 0)
+    management_fee = int(prop.get("management_fee") or 0)
+    deposit = int(prop.get("deposit") or 0)
+    key_money = int(prop.get("key_money") or 0)
+    system = (
+        "You are a Japanese rental assistant. "
+        "Propose 3 to 5 property-specific confirmation questions to ask the landlord or agent. "
+        "Focus on the unique characteristics of this specific property such as building age, "
+        "structure type, management style, floor plan details, and special clauses. "
+        "Do NOT include generic questions about vacancy, initial costs, cancellation terms, "
+        "or viewing schedules — those are already in the standard checklist."
+    )
+    user_prompt = (
+        "物件情報:\n"
+        f"- 建物名: {prop.get('building_name') or '不明'}\n"
+        f"- 住所: {prop.get('address') or '不明'}\n"
+        f"- 間取り: {prop.get('layout') or '不明'} / {area_m2}㎡\n"
+        f"- 家賃: {rent:,}円 + 管理費 {management_fee:,}円\n"
+        f"- 敷金: {deposit:,}円 / 礼金: {key_money:,}円\n"
+        f"- 最寄り駅: {prop.get('nearest_station') or '不明'} "
+        f"徒歩{int(prop.get('station_walk_min') or 0)}分\n"
+        f"- 特徴: {', '.join(prop.get('features', []) or []) or 'なし'}\n"
+        f"- 備考: {prop.get('notes') or 'なし'}\n"
+        "ユーザーの重視点:\n"
+        f"- {', '.join(_collect_user_focus_points(user_memory)) or 'なし'}\n"
+        "この物件固有の確認項目を3〜5個、簡潔な日本語で提案してください（JSON配列 items に格納）。"
+    )
+    result = adapter.generate_structured(
+        system=system, user=user_prompt, schema=schema, temperature=0.2
+    )
+    return [str(item).strip() for item in result.get("items", []) if str(item).strip()]
+
+
+def _collect_confirmation_items(
+    prop: dict[str, Any],
+    user_memory: dict[str, Any],
+    adapter: LLMAdapter | None = None,
+) -> list[str]:
     features = [str(item).strip() for item in prop.get("features", []) or [] if str(item).strip()]
     features_text = " ".join(features + [str(prop.get("notes") or "")])
     focus_points = _collect_user_focus_points(user_memory)
@@ -56,6 +110,16 @@ def _collect_confirmation_items(prop: dict[str, Any], user_memory: dict[str, Any
     for item in items:
         if item not in deduped:
             deduped.append(item)
+
+    if adapter is not None:
+        try:
+            llm_items = _llm_confirmation_items(prop, user_memory, adapter)
+            for item in llm_items:
+                if item and item not in deduped:
+                    deduped.append(item)
+        except Exception:
+            pass
+
     return deduped
 
 
@@ -167,7 +231,7 @@ def run_communication(
             top = selected
 
     prop = by_id.get(top["property_id_norm"], {})
-    confirmation_items = _collect_confirmation_items(prop, user_memory)
+    confirmation_items = _collect_confirmation_items(prop, user_memory, adapter)
 
     message_draft = _build_fallback_draft(prop, user_memory, confirmation_items)
     if adapter is not None:

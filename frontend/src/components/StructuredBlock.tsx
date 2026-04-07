@@ -402,7 +402,7 @@ function SectionHeader({
         <p
           className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.accentLabel}`}
         >
-          {tone.label}
+          {block.display_label || tone.label}
         </p>
         <h3 className={`truncate text-sm font-semibold ${tone.accentTitle}`}>{block.title}</h3>
       </div>

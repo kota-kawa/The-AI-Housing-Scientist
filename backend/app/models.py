@@ -73,6 +73,7 @@ class UIBlock(BaseModel):
     ]
     title: str = ""
     content: dict[str, Any] = Field(default_factory=dict)
+    display_label: str = ""
 
 
 class ChatMessageRequest(BaseModel):
@@ -130,6 +131,7 @@ class ChatMessageResponse(BaseModel):
     blocks: list[UIBlock] = Field(default_factory=list)
     pending_confirmation: bool = False
     pending_action: dict[str, Any] | None = None
+    status_label: str = ""
 
 
 class CreateSessionResponse(BaseModel):

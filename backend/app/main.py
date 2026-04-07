@@ -195,11 +195,12 @@ def execute_action(session_id: str, body: ActionRequest) -> ChatMessageResponse:
         raise HTTPException(status_code=404, detail="session not found")
 
     try:
-        return app.state.orchestrator.execute_action(
+        response = app.state.orchestrator.execute_action(
             session_id=session_id,
             action_type=body.action_type,
             payload=body.payload,
         )
+        return app.state.orchestrator._annotate_response_labels(response)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -210,11 +211,12 @@ def confirm_action(session_id: str, body: ConfirmActionRequest) -> ChatMessageRe
         raise HTTPException(status_code=404, detail="session not found")
 
     try:
-        return app.state.orchestrator.confirm_action(
+        response = app.state.orchestrator.confirm_action(
             session_id=session_id,
             action_type=body.action_type,
             approved=body.approved,
         )
+        return app.state.orchestrator._annotate_response_labels(response)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

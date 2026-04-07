@@ -63,6 +63,7 @@ export type UIBlock = {
     | "sources";
   title: string;
   content: Record<string, unknown>;
+  display_label?: string;
 };
 
 export type ChatMessageResponse = {
@@ -73,6 +74,7 @@ export type ChatMessageResponse = {
   blocks: UIBlock[];
   pending_confirmation: boolean;
   pending_action: ActionDescriptor | null;
+  status_label?: string;
 };
 
 export type SessionState = {

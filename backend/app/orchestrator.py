@@ -45,6 +45,113 @@ RESEARCH_STAGE_ORDER = [
 ]
 
 
+def _generate_llm_resume_body(
+    profile_summary: dict[str, Any], adapter: LLMAdapter
+) -> str:
+    """LLMで自然なセッション再開メッセージを生成する。失敗時は空文字を返す。"""
+    labels = profile_summary.get("last_search_labels") or []
+    frequent_area = str(profile_summary.get("frequent_area") or "")
+    stable_prefs = list(profile_summary.get("stable_preferences") or [])
+    liked_features = list(profile_summary.get("liked_features") or [])
+    system = (
+        "You are a friendly Japanese rental assistant. "
+        "Write a short, warm session resume message in Japanese (2–3 sentences). "
+        "Mention the user's previous search conditions naturally and ask whether they'd like to continue. "
+        "Do not use bullet points or markdown."
+    )
+    user_prompt = (
+        "前回の検索条件:\n"
+        f"- 条件ラベル: {', '.join(labels[:5]) or 'なし'}\n"
+        f"- よく使うエリア: {frequent_area or 'なし'}\n"
+        f"- 安定した好み: {', '.join(stable_prefs[:3]) or 'なし'}\n"
+        f"- 気になる特徴: {', '.join(liked_features[:3]) or 'なし'}\n"
+        "この情報をもとに、ユーザーへの自然な「お帰りなさい」メッセージを生成してください。"
+    )
+    return adapter.generate_text(system=system, user=user_prompt, temperature=0.4).strip()
+
+
+def _generate_response_labels(
+    *,
+    response: "ChatMessageResponse",
+    adapter: LLMAdapter,
+) -> "ChatMessageResponse":
+    """status_label と各 UIBlock の display_label を LLM で生成して差し込む。"""
+    # status_label: ステータスとブロック数を踏まえた一言ラベル
+    block_summary = ", ".join(
+        f"{b.type}({b.title})" for b in response.blocks[:4]
+    ) or "なし"
+    system = (
+        "You are a Japanese UI labeling assistant. "
+        "Return only the requested JSON with no explanation."
+    )
+    schema = {
+        "type": "object",
+        "properties": {
+            "status_label": {"type": "string"},
+            "block_labels": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": ["status_label", "block_labels"],
+        "additionalProperties": False,
+    }
+    user_prompt = (
+        f"status: {response.status}\n"
+        f"assistant_message (冒頭80字): {response.assistant_message[:80]}\n"
+        f"blocks: {block_summary}\n"
+        "以下を生成してください:\n"
+        "- status_label: このレスポンスの状態を表す10字以内の日本語ラベル\n"
+        "- block_labels: 各ブロックのタイプラベルを上書きする10字以内の日本語ラベルを順番に配列で"
+        f"（{len(response.blocks)}個）"
+    )
+    result = adapter.generate_structured(
+        system=system, user=user_prompt, schema=schema, temperature=0.1
+    )
+    new_response = response.model_copy(deep=True)
+    if result.get("status_label"):
+        new_response.status_label = str(result["status_label"]).strip()
+    block_labels: list[Any] = result.get("block_labels") or []
+    for i, block in enumerate(new_response.blocks):
+        if i < len(block_labels) and str(block_labels[i]).strip():
+            block.display_label = str(block_labels[i]).strip()
+    return new_response
+
+
+def _generate_llm_guidance_message(
+    *,
+    task_memory: dict[str, Any],
+    user_message: str,
+    adapter: LLMAdapter,
+) -> str:
+    """タスク状態を踏まえた文脈依存のガイダンスメッセージをLLMで生成する。"""
+    status = str(task_memory.get("status") or "")
+    has_plan = bool(task_memory.get("draft_research_plan"))
+    ranked = list(task_memory.get("last_ranked_properties") or [])
+    last_error = str(task_memory.get("last_error") or "")
+
+    context_lines = [f"- 現在の状態: {status or '不明'}"]
+    if has_plan:
+        context_lines.append("- 調査計画: 作成済み（承認待ち）")
+    if ranked:
+        context_lines.append(f"- 前回の候補: {len(ranked)}件保持中")
+    if last_error:
+        context_lines.append(f"- 直前のエラー: {last_error[:80]}")
+
+    system = (
+        "You are a friendly Japanese rental assistant. "
+        "Write a short, actionable guidance message in Japanese (1–2 sentences) "
+        "telling the user what they can do next based on the current session state. "
+        "Be specific. Do not use bullet points."
+    )
+    user_prompt = (
+        "セッション状態:\n" + "\n".join(context_lines) + "\n"
+        f"ユーザーの最後のメッセージ: {user_message[:120]}\n"
+        "次のアクションを案内する短いメッセージを生成してください。"
+    )
+    return adapter.generate_text(system=system, user=user_prompt, temperature=0.3).strip()
+
+
 class HousingOrchestrator:
     def __init__(self, settings: Settings, db: Database):
         self.settings = settings
@@ -55,6 +162,21 @@ class HousingOrchestrator:
             db,
             cost_estimator=build_cost_estimator(settings.llm_pricing_overrides_json),
         )
+        self._prime_catalog_notes()
+
+    def _prime_catalog_notes(self) -> None:
+        """起動時にカタログの notes をLLMでリライトする（APIキーがある場合のみ、失敗は無視）。"""
+        try:
+            default_config = build_default_llm_config(self.settings)
+            adapter = self._get_adapter_for_route(
+                llm_config=default_config,
+                route_key="research_default",
+                interaction_type="catalog_rewrite",
+            )
+            if adapter is not None:
+                self.catalog.rewrite_notes_with_llm(adapter)
+        except Exception:
+            pass
 
     def _list_models_for_provider(self, provider: ProviderName) -> list[str]:
         if provider not in self._model_cache:
@@ -601,6 +723,8 @@ class HousingOrchestrator:
             return None
 
         profile_summary = build_profile_resume_summary(last_user_memory, profile["profile_memory"])
+
+        # Fallback body: 構造化テキスト
         summary_lines: list[str] = []
         if profile_summary["last_search_labels"]:
             summary_lines.append(
@@ -616,6 +740,23 @@ class HousingOrchestrator:
             summary_lines.append(
                 f"気になる傾向: {' / '.join(profile_summary['liked_features'][:3])}"
             )
+        resume_body = "\n".join(summary_lines)
+
+        # LLMで自然な再開メッセージを生成（失敗時はフォールバック）
+        try:
+            _, _, llm_config = self._ensure_session_llm_config(session_id)
+            adapter = self._get_adapter_for_route(
+                llm_config=llm_config,
+                route_key="planner",
+                session_id=session_id,
+                interaction_type="profile_resume",
+            )
+            if adapter is not None:
+                llm_body = _generate_llm_resume_body(profile_summary, adapter)
+                if llm_body:
+                    resume_body = llm_body
+        except Exception:
+            pass
 
         _, task_memory = self.db.get_memories(session_id)
         task_memory["profile_resume_pending"] = True
@@ -631,7 +772,7 @@ class HousingOrchestrator:
                 UIBlock(
                     type="text",
                     title="引き継ぎ候補",
-                    content={"body": "\n".join(summary_lines)},
+                    content={"body": resume_body},
                 ),
                 UIBlock(
                     type="actions",
@@ -1262,6 +1403,7 @@ class HousingOrchestrator:
         task_memory: dict[str, Any],
         message: str,
     ) -> ChatMessageResponse:
+        # フォールバック: 状態ベースの固定テンプレート
         assistant_text = (
             "検索条件の追加・物件選択・契約書チェックのいずれを進めるかを指定してください。"
         )
@@ -1274,6 +1416,28 @@ class HousingOrchestrator:
                 "直前の候補は保持しています。物件カードのボタンで問い合わせ文を作るか、"
                 "新しい条件を送るか、契約条項テキストを貼り付けてください。"
             )
+
+        # LLMで文脈依存メッセージに差し替え（失敗時はフォールバックを維持）
+        try:
+            _, _, llm_config = self._ensure_session_llm_config(
+                session_id, task_memory=task_memory
+            )
+            adapter = self._get_adapter_for_route(
+                llm_config=llm_config,
+                route_key="planner",
+                session_id=session_id,
+                interaction_type="guidance",
+            )
+            if adapter is not None:
+                llm_text = _generate_llm_guidance_message(
+                    task_memory=task_memory,
+                    user_message=message,
+                    adapter=adapter,
+                )
+                if llm_text:
+                    assistant_text = llm_text
+        except Exception:
+            pass
 
         response = ChatMessageResponse(
             status="awaiting_user_input",
@@ -1713,6 +1877,55 @@ class HousingOrchestrator:
                 return str(item.get("building_name") or "選択中の物件")
         return "選択中の物件"
 
+    @staticmethod
+    def _annotate_response_labels(response: ChatMessageResponse) -> ChatMessageResponse:
+        """UIBlock.display_label と ChatMessageResponse.status_label をコンテンツベースで設定する。"""
+        if not response.status_label:
+            status_map: dict[str, str] = {
+                "awaiting_profile_resume": "前回条件の引き継ぎ確認",
+                "awaiting_user_input": "追加条件の回答待ち",
+                "awaiting_plan_confirmation": "調査計画の承認待ち",
+                "research_queued": "調査キュー登録済み",
+                "research_running": "調査進行中",
+                "research_failed": "調査エラー",
+                "inquiry_draft_ready": "問い合わせ文の確認待ち",
+                "awaiting_contract_text": "契約書入力待ち",
+                "risk_check_completed": "契約リスク確認完了",
+            }
+            # cards ブロックの件数を取得してラベルに反映
+            cards_count = 0
+            for block in response.blocks:
+                if block.type == "cards":
+                    items = block.content.get("items") or []
+                    cards_count = len(items) if isinstance(items, list) else 0
+                    break
+            if response.status in ("research_completed", "search_results_ready") and cards_count:
+                response.status_label = f"{cards_count}件の候補が揃いました"
+            elif response.status in status_map:
+                response.status_label = status_map[response.status]
+            elif response.pending_confirmation:
+                response.status_label = "確認待ち"
+            else:
+                response.status_label = "処理完了"
+
+        for block in response.blocks:
+            if block.display_label:
+                continue
+            if block.type == "cards":
+                items = block.content.get("items") or []
+                count = len(items) if isinstance(items, list) else 0
+                block.display_label = f"{count}件の候補" if count > 0 else "候補物件"
+            elif block.type == "checklist":
+                items = block.content.get("items") or []
+                count = len(items) if isinstance(items, list) else 0
+                block.display_label = f"{count}項目確認" if count > 0 else "チェック"
+            elif block.type == "table":
+                rows = block.content.get("rows") or []
+                count = len(rows) if isinstance(rows, list) else 0
+                block.display_label = f"{count}件比較" if count > 0 else "比較表"
+
+        return response
+
     def process_user_message(
         self,
         *,
@@ -1740,10 +1953,12 @@ class HousingOrchestrator:
             return response
 
         if not search_signal:
-            return self._build_guidance_response(
-                session_id=session_id,
-                task_memory=task_memory,
-                message=message,
+            return self._annotate_response_labels(
+                self._build_guidance_response(
+                    session_id=session_id,
+                    task_memory=task_memory,
+                    message=message,
+                )
             )
 
         adapter = self._get_adapter_for_route(
@@ -1753,11 +1968,13 @@ class HousingOrchestrator:
             job_id=active_job_id or None,
             interaction_type="planner",
         )
-        return self._process_search_message(
-            session_id=session_id,
-            message=message,
-            adapter=adapter,
-            llm_config=llm_config,
+        return self._annotate_response_labels(
+            self._process_search_message(
+                session_id=session_id,
+                message=message,
+                adapter=adapter,
+                llm_config=llm_config,
+            )
         )
 
     def execute_action(

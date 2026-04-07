@@ -236,6 +236,41 @@ CATALOG_SEED: list[dict[str, Any]] = [
 ]
 
 
+def rewrite_catalog_notes(catalog: list[dict[str, Any]], adapter: Any) -> list[dict[str, Any]]:
+    """notesフィールドをLLMでリライトして検索品質を向上させる。起動時1回の前処理用。"""
+    result: list[dict[str, Any]] = []
+    for prop in catalog:
+        rewritten = dict(prop)
+        try:
+            notes = str(prop.get("notes") or "")
+            features = [str(f) for f in (prop.get("features") or [])]
+            name = str(prop.get("building_name") or "")
+            layout = str(prop.get("layout") or "")
+            area = str(prop.get("area_name") or "")
+            rent = int(prop.get("rent") or 0)
+            system = (
+                "You are a Japanese rental property copywriter. "
+                "Rewrite the property notes to be more informative and search-friendly, "
+                "highlighting unique selling points and key details a renter would search for. "
+                "Output at most 100 characters in natural Japanese. Output the notes text only, no quotes."
+            )
+            user_prompt = (
+                f"物件: {name} ({area} / {layout} / {rent:,}円)\n"
+                f"特徴: {', '.join(features)}\n"
+                f"既存の備考: {notes}\n"
+                "検索にヒットしやすく魅力的な備考文に書き直してください。"
+            )
+            new_notes = adapter.generate_text(
+                system=system, user=user_prompt, temperature=0.2
+            ).strip()
+            if new_notes:
+                rewritten["notes"] = new_notes
+        except Exception:
+            pass
+        result.append(rewritten)
+    return result
+
+
 def render_property_detail_html(property_row: dict[str, Any]) -> str:
     features_json = json.dumps(property_row.get("features", []), ensure_ascii=False)
     safe = {key: html.escape(str(value)) for key, value in property_row.items()}

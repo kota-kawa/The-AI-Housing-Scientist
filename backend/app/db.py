@@ -560,6 +560,13 @@ class Database:
             return None
         return self._catalog_row_to_dict(row)
 
+    def update_catalog_property_notes(self, property_id: str, notes: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE property_catalog SET notes = ?, updated_at = ? WHERE property_id = ?",
+                (notes, utc_now_iso(), property_id),
+            )
+
     def get_catalog_property_by_url(self, detail_url: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(

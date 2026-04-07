@@ -168,7 +168,12 @@ def _llm_parse(message: str, adapter: LLMAdapter) -> dict[str, Any]:
     return adapter.generate_structured(
         system=(
             "You are a Japanese rental planner. "
-            "Extract user constraints into normalized fields."
+            "Extract user constraints into normalized fields. "
+            "Classification rules:\n"
+            "- must_conditions: 「必須」「絶対」「ないと困る」「必ず」「〜でないとだめ」など強い要件。"
+            "複合条件（例:「南向きで角部屋」）は個別に分解してリストに含める。\n"
+            "- nice_to_have: 「あったらいい」「できれば」「希望」「なるべく」「好み」「〜だとうれしい」"
+            "など優先度の低い要件。判断が難しい場合はこちらに分類する。"
         ),
         user=f"User message:\n{message}",
         schema=schema,
@@ -210,15 +215,19 @@ def run_planner(
     user_memory: dict[str, Any],
     adapter: LLMAdapter | None,
 ) -> dict[str, Any]:
-    merged = _merge_memory(user_memory, _rule_based_slots(message))
-
     if adapter is not None:
         try:
             llm_slots = _llm_parse(message, adapter)
-            merged = _merge_memory(merged, llm_slots)
+            merged = _merge_memory(user_memory, llm_slots)
+            # Rule-based fills only slots the LLM left empty (pure fallback).
+            rule_slots = _rule_based_slots(message)
+            for key, value in rule_slots.items():
+                if merged.get(key) in (None, "", [], {}):
+                    merged = _merge_memory(merged, {key: value})
         except Exception:
-            # Rule-based fallback is the deterministic baseline for PoC.
-            pass
+            merged = _merge_memory(user_memory, _rule_based_slots(message))
+    else:
+        merged = _merge_memory(user_memory, _rule_based_slots(message))
 
     follow_up_questions = _build_follow_up_questions(merged)
 

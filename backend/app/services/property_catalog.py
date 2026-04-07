@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from app.catalog import render_property_detail_html
+from app.catalog import render_property_detail_html, rewrite_catalog_notes
 from app.db import Database
 from app.llm.base import LLMAdapter
 from app.stages.search_normalize import _split_address_levels
@@ -317,6 +317,20 @@ def _build_llm_catalog_enhancements(
 class PropertyCatalogService:
     def __init__(self, db: Database):
         self.db = db
+        self._notes_rewritten = False
+
+    def rewrite_notes_with_llm(self, adapter: LLMAdapter) -> None:
+        """カタログの notes フィールドをLLMでリライトしてDBを更新する（1プロセス1回限り）。"""
+        if self._notes_rewritten:
+            return
+        self._notes_rewritten = True
+        original = self.db.list_catalog_properties()
+        rewritten = rewrite_catalog_notes(original, adapter)
+        for prop in rewritten:
+            pid = str(prop.get("property_id") or "")
+            new_notes = str(prop.get("notes") or "")
+            if pid and new_notes:
+                self.db.update_catalog_property_notes(pid, new_notes)
 
     def search(
         self,
