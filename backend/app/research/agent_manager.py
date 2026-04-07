@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app.db import Database
+from app.llm.base import LLMAdapter
 from app.research.journal import ResearchJournal, ResearchNode
 from app.research.offline_eval import (
     evaluate_branch,
@@ -80,6 +81,7 @@ class HousingResearchAgentManager:
         user_memory: dict[str, Any],
         task_memory: dict[str, Any],
         provider: str,
+        research_adapter: LLMAdapter | None,
         build_research_queries: Callable[[dict[str, Any], str], list[str]],
         collect_search_results: Callable[..., tuple[list[dict[str, Any]], dict[str, Any]]],
         fetch_detail_html: Callable[[str], str | None],
@@ -92,6 +94,7 @@ class HousingResearchAgentManager:
         self.user_memory = user_memory
         self.task_memory = task_memory
         self.provider = provider
+        self.research_adapter = research_adapter
         self.build_research_queries = build_research_queries
         self.collect_search_results = collect_search_results
         self.fetch_detail_html = fetch_detail_html
@@ -499,6 +502,79 @@ class HousingResearchAgentManager:
 
     def _tool_query_expand(self, *, context: ToolContext, seed_query: str) -> dict[str, Any]:
         branches = self._make_branch_plans(seed_query)
+        llm_summary = ""
+        if self.research_adapter is not None:
+            schema = {
+                "type": "object",
+                "properties": {
+                    "branches": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "branch_id": {
+                                    "type": "string",
+                                    "enum": ["balanced", "strict", "broad"],
+                                },
+                                "query_suggestions": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "description_hint": {"type": "string"},
+                            },
+                            "required": ["branch_id", "query_suggestions", "description_hint"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "summary": {"type": "string"},
+                },
+                "required": ["branches", "summary"],
+                "additionalProperties": False,
+            }
+            try:
+                llm_payload = self.research_adapter.generate_structured(
+                    system=(
+                        "You are designing safe query branches for Japanese rental research. "
+                        "Suggest only query variations grounded in the approved plan. "
+                        "Keep the three branch IDs fixed as balanced, strict, and broad."
+                    ),
+                    user=(
+                        "承認済み計画:\n"
+                        f"{self.approved_plan}\n\n"
+                        f"seed_query: {seed_query}"
+                    ),
+                    schema=schema,
+                    temperature=0.2,
+                )
+                by_branch_id = {
+                    str(item.get("branch_id") or ""): item
+                    for item in llm_payload.get("branches", [])
+                }
+                adjusted_branches: list[ResearchBranchPlan] = []
+                for branch in branches:
+                    suggestion = by_branch_id.get(branch.branch_id, {})
+                    suggested_queries = [
+                        str(item).strip()
+                        for item in suggestion.get("query_suggestions", [])
+                        if str(item).strip()
+                    ]
+                    merged_queries = branch.queries
+                    if suggested_queries:
+                        merged_queries = list(dict.fromkeys(branch.queries + suggested_queries))[:5]
+                    description_hint = str(suggestion.get("description_hint") or "").strip()
+                    adjusted_branches.append(
+                        ResearchBranchPlan(
+                            branch_id=branch.branch_id,
+                            label=branch.label,
+                            description=description_hint or branch.description,
+                            queries=merged_queries,
+                            ranking_profile=dict(branch.ranking_profile),
+                        )
+                    )
+                branches = adjusted_branches
+                llm_summary = str(llm_payload.get("summary") or "").strip()
+            except Exception:
+                llm_summary = ""
         return {
             "branches": [
                 {
@@ -510,7 +586,7 @@ class HousingResearchAgentManager:
                 }
                 for branch in branches
             ],
-            "summary": f"{len(branches)}本の安全な検索分岐を作成",
+            "summary": llm_summary or f"{len(branches)}本の安全な検索分岐を作成",
         }
 
     def _tool_retrieve(self, *, context: ToolContext, branch: ResearchBranchPlan) -> dict[str, Any]:

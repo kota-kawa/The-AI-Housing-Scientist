@@ -61,13 +61,18 @@ class OpenAIAdapter(OpenAICompatibleAdapter):
         )
 
 
-def create_adapter(settings: Settings, provider: ProviderName) -> LLMAdapter:
-    model = get_provider_model(settings, provider)
+def create_adapter(
+    settings: Settings,
+    provider: ProviderName,
+    *,
+    model: str | None = None,
+) -> LLMAdapter:
+    resolved_model = model or get_provider_model(settings, provider)
 
     if provider == "openai":
         return OpenAIAdapter(
             api_key=settings.openai_api_key,
-            model=model,
+            model=resolved_model,
             timeout_seconds=settings.llm_timeout_seconds,
             max_retries=settings.llm_max_retries,
         )
@@ -75,7 +80,7 @@ def create_adapter(settings: Settings, provider: ProviderName) -> LLMAdapter:
     if provider == "gemini":
         return GeminiOpenAIAdapter(
             api_key=settings.gemini_api_key,
-            model=model,
+            model=resolved_model,
             timeout_seconds=settings.llm_timeout_seconds,
             max_retries=settings.llm_max_retries,
         )
@@ -83,14 +88,14 @@ def create_adapter(settings: Settings, provider: ProviderName) -> LLMAdapter:
     if provider == "groq":
         return GroqOpenAIAdapter(
             api_key=settings.groq_api_key,
-            model=model,
+            model=resolved_model,
             timeout_seconds=settings.llm_timeout_seconds,
             max_retries=settings.llm_max_retries,
         )
 
     return AnthropicAdapter(
         api_key=settings.claude_api_key,
-        model=model,
+        model=resolved_model,
         timeout_seconds=settings.llm_timeout_seconds,
         max_retries=settings.llm_max_retries,
     )

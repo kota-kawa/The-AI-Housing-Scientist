@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.llm.base import LLMAdapter
 from app.models import RiskItem
 
 
@@ -55,7 +56,7 @@ def looks_like_contract_text(source_text: str) -> bool:
     return keyword_hits >= 2 or (keyword_hits >= 1 and normalized_length >= 80)
 
 
-def run_risk_check(*, source_text: str) -> dict[str, Any]:
+def _build_rule_based_risk_result(source_text: str) -> dict[str, Any]:
     risk_items: list[RiskItem] = []
     must_confirm: list[str] = []
 
@@ -88,3 +89,100 @@ def run_risk_check(*, source_text: str) -> dict[str, Any]:
         "risk_items": [item.model_dump() for item in risk_items],
         "must_confirm_list": must_confirm,
     }
+
+
+def _build_llm_risk_result(source_text: str, adapter: LLMAdapter) -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "properties": {
+            "risk_items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "risk_type": {
+                            "type": "string",
+                            "enum": [
+                                "renewal_fee",
+                                "early_termination",
+                                "notice_period",
+                                "guarantor",
+                                "other",
+                            ],
+                        },
+                        "severity": {"type": "string", "enum": ["high", "medium", "low"]},
+                        "evidence": {"type": "string"},
+                        "recommendation": {"type": "string"},
+                    },
+                    "required": ["risk_type", "severity", "evidence", "recommendation"],
+                    "additionalProperties": False,
+                },
+            },
+            "must_confirm_list": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["risk_items", "must_confirm_list"],
+        "additionalProperties": False,
+    }
+    result = adapter.generate_structured(
+        system=(
+            "You are a Japanese rental contract risk analyst. "
+            "Extract concrete risks from the provided contract text. "
+            "Do not invent clauses that do not appear in the source."
+        ),
+        user=f"契約条項テキスト:\n{source_text}",
+        schema=schema,
+        temperature=0.0,
+    )
+    return {
+        "risk_items": [
+            RiskItem(**item).model_dump()
+            for item in result.get("risk_items", [])
+        ],
+        "must_confirm_list": [
+            str(item).strip()
+            for item in result.get("must_confirm_list", [])
+            if str(item).strip()
+        ],
+    }
+
+
+def _merge_risk_results(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[str, Any]:
+    merged_items: list[dict[str, Any]] = []
+    seen_item_keys: set[tuple[str, str]] = set()
+    for source in [primary, secondary]:
+        for raw_item in source.get("risk_items", []) or []:
+            item = RiskItem(**raw_item).model_dump()
+            dedupe_key = (str(item["risk_type"]), str(item["evidence"]))
+            if dedupe_key in seen_item_keys:
+                continue
+            seen_item_keys.add(dedupe_key)
+            merged_items.append(item)
+
+    merged_confirms: list[str] = []
+    for source in [primary, secondary]:
+        for raw_item in source.get("must_confirm_list", []) or []:
+            item = str(raw_item).strip()
+            if item and item not in merged_confirms:
+                merged_confirms.append(item)
+
+    return {
+        "risk_items": merged_items,
+        "must_confirm_list": merged_confirms,
+    }
+
+
+def run_risk_check(
+    *,
+    source_text: str,
+    adapter: LLMAdapter | None = None,
+) -> dict[str, Any]:
+    rule_based = _build_rule_based_risk_result(source_text)
+    if adapter is None:
+        return rule_based
+
+    try:
+        llm_result = _build_llm_risk_result(source_text, adapter)
+    except Exception:
+        return rule_based
+
+    return _merge_risk_results(llm_result, rule_based)

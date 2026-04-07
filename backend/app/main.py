@@ -15,7 +15,10 @@ from app.models import (
     AuditEventResponse,
     ChatMessageRequest,
     ChatMessageResponse,
+    LLMCapabilitiesResponse,
+    LLMConfigPayload,
     LLMCallEventResponse,
+    SessionLLMConfigResponse,
     ConfirmActionRequest,
     CreateSessionRequest,
     CreateSessionResponse,
@@ -94,6 +97,11 @@ def get_preflight() -> PreflightReport:
     return app.state.preflight_report
 
 
+@app.get("/api/system/llm-capabilities", response_model=LLMCapabilitiesResponse)
+def get_llm_capabilities() -> LLMCapabilitiesResponse:
+    return LLMCapabilitiesResponse(**app.state.orchestrator.get_llm_capabilities())
+
+
 @app.post("/api/chat/sessions", response_model=CreateSessionResponse)
 def create_session(body: CreateSessionRequest | None = None) -> CreateSessionResponse:
     profile_id, _ = app.state.db.get_or_create_profile(body.profile_id if body else None)
@@ -131,6 +139,27 @@ def get_session_state(session_id: str) -> SessionStateResponse:
     )
 
 
+@app.get("/api/chat/sessions/{session_id}/llm-config", response_model=SessionLLMConfigResponse)
+def get_session_llm_config(session_id: str) -> SessionLLMConfigResponse:
+    if not app.state.db.session_exists(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return SessionLLMConfigResponse(**app.state.orchestrator.get_session_llm_config(session_id))
+
+
+@app.put("/api/chat/sessions/{session_id}/llm-config", response_model=SessionLLMConfigResponse)
+def update_session_llm_config(session_id: str, body: LLMConfigPayload) -> SessionLLMConfigResponse:
+    if not app.state.db.session_exists(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    try:
+        payload = app.state.orchestrator.update_session_llm_config(
+            session_id,
+            body.model_dump(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SessionLLMConfigResponse(**payload)
+
+
 @app.get("/api/chat/sessions/{session_id}/research", response_model=ResearchStateResponse)
 def get_research_state(session_id: str) -> ResearchStateResponse:
     if not app.state.db.session_exists(session_id):
@@ -143,9 +172,12 @@ def post_message(session_id: str, body: ChatMessageRequest) -> ChatMessageRespon
     if not app.state.db.session_exists(session_id):
         raise HTTPException(status_code=404, detail="session not found")
 
-    provider: ProviderName = body.provider or app.state.settings.llm_default_provider
+    provider: ProviderName | None = body.provider
+    user_message_payload = {"message": body.message}
+    if provider is not None:
+        user_message_payload["provider"] = provider
 
-    app.state.db.add_message(session_id, "user", {"message": body.message, "provider": provider})
+    app.state.db.add_message(session_id, "user", user_message_payload)
 
     try:
         return app.state.orchestrator.process_user_message(

@@ -4,13 +4,19 @@ import StructuredBlock from "./components/StructuredBlock";
 import {
   ActionDescriptor,
   ChatMessageResponse,
-  Provider,
+  LLMCapabilities,
+  LLMConfig,
+  LLMRouteKey,
+  SessionLLMConfig,
   UIBlock,
   confirmAction,
   createSession,
+  fetchLlmCapabilities,
   fetchPreflight,
   fetchResearchState,
+  fetchSessionLlmConfig,
   runAction,
+  saveSessionLlmConfig,
   sendMessage,
 } from "./lib/api";
 
@@ -40,7 +46,6 @@ type CardEntry = {
   compare_selected?: boolean;
 };
 
-const PROVIDERS: Provider[] = ["openai", "gemini", "groq", "claude"];
 const PROFILE_STORAGE_KEY = "housing_scientist_profile_id";
 
 const SAMPLE_PROMPTS: string[] = [
@@ -59,6 +64,28 @@ function toAssistantMessage(payload: ChatMessageResponse): Message {
     blocks: payload.blocks,
     pendingAction: payload.pending_action,
   };
+}
+
+function cloneLlmConfig(config: LLMConfig): LLMConfig {
+  return {
+    preset: config.preset,
+    routes: {
+      planner: { ...config.routes.planner },
+      research_default: { ...config.routes.research_default },
+      communication: { ...config.routes.communication },
+      risk_check: { ...config.routes.risk_check },
+    },
+  };
+}
+
+function formatPresetLabel(preset: string): string {
+  if (preset === "default") {
+    return "Default";
+  }
+  if (preset === "custom") {
+    return "Custom";
+  }
+  return preset;
 }
 
 function toStatusLabel(payload: ChatMessageResponse): string {
@@ -204,8 +231,6 @@ function UserAvatarIcon({ className = "h-5 w-5" }: { className?: string }) {
 export default function App() {
   const [sessionId, setSessionId] = useState<string>("");
   const [input, setInput] = useState<string>("");
-  const [provider, setProvider] = useState<Provider>("openai");
-  const [providerMenuOpen, setProviderMenuOpen] = useState<boolean>(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<string>("初期化中...");
   const [responseState, setResponseState] = useState<string>("");
@@ -213,7 +238,11 @@ export default function App() {
   const [error, setError] = useState<string>("");
   const [preflightSummary, setPreflightSummary] = useState<string>("");
   const [activeResearchMessageId, setActiveResearchMessageId] = useState<string>("");
-  const providerMenuRef = useRef<HTMLDivElement | null>(null);
+  const [llmCapabilities, setLlmCapabilities] = useState<LLMCapabilities | null>(null);
+  const [llmConfig, setLlmConfig] = useState<SessionLLMConfig | null>(null);
+  const [llmDraft, setLlmDraft] = useState<LLMConfig | null>(null);
+  const [llmEditorOpen, setLlmEditorOpen] = useState<boolean>(false);
+  const [llmSaving, setLlmSaving] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -221,12 +250,17 @@ export default function App() {
     const bootstrap = async () => {
       try {
         const storedProfileId = window.localStorage.getItem(PROFILE_STORAGE_KEY) ?? crypto.randomUUID();
-        const [session, preflight] = await Promise.all([
+        const [session, preflight, capabilities] = await Promise.all([
           createSession(storedProfileId),
           fetchPreflight(),
+          fetchLlmCapabilities(),
         ]);
+        const sessionLlmConfig = await fetchSessionLlmConfig(session.session_id);
         setSessionId(session.session_id);
         window.localStorage.setItem(PROFILE_STORAGE_KEY, session.profile_id);
+        setLlmCapabilities(capabilities);
+        setLlmConfig(sessionLlmConfig);
+        setLlmDraft(cloneLlmConfig(sessionLlmConfig));
 
         const providerStates = Object.entries(preflight.providers)
           .map(([name, report]) => `${name}:${report.model_valid ? "OK" : "NG"}`)
@@ -254,32 +288,6 @@ export default function App() {
 
     void bootstrap();
   }, []);
-
-  useEffect(() => {
-    if (!providerMenuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (providerMenuRef.current && !providerMenuRef.current.contains(event.target as Node)) {
-        setProviderMenuOpen(false);
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setProviderMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown as unknown as EventListener);
-
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown as unknown as EventListener);
-    };
-  }, [providerMenuOpen]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -390,6 +398,17 @@ export default function App() {
     return "border-sky-100 bg-sky-50/80 text-sky-700";
   }, [error, isResearchBusy, loading, pendingAction, status]);
 
+  const llmEditable = Boolean(llmConfig?.editable) && !isResearchBusy;
+
+  const llmSummary = useMemo(() => {
+    if (!llmConfig || !llmCapabilities) {
+      return "設定を読み込み中";
+    }
+    return llmCapabilities.route_definitions
+      .map((route) => `${route.label}:${llmConfig.routes[route.key].model}`)
+      .join(" / ");
+  }, [llmCapabilities, llmConfig]);
+
   const appendAssistantResponse = (payload: ChatMessageResponse) => {
     const assistantMessage = toAssistantMessage(payload);
     setMessages((prev) => [...prev, assistantMessage]);
@@ -419,7 +438,7 @@ export default function App() {
     setMessages((prev) => [...prev, userMessage]);
 
     try {
-      const response = await sendMessage(sessionId, userText, provider);
+      const response = await sendMessage(sessionId, userText);
       appendAssistantResponse(response);
       setResponseState(response.status);
       setStatus(toStatusLabel(response));
@@ -428,6 +447,45 @@ export default function App() {
       setStatus("エラー");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLlmRouteModelChange = (routeKey: LLMRouteKey, model: string) => {
+    if (!llmDraft) {
+      return;
+    }
+    setLlmDraft({
+      ...llmDraft,
+      preset: "custom",
+      routes: {
+        ...llmDraft.routes,
+        [routeKey]: { model },
+      },
+    });
+  };
+
+  const handleResetLlmConfig = () => {
+    if (!llmCapabilities) {
+      return;
+    }
+    setLlmDraft(cloneLlmConfig(llmCapabilities.default_config));
+  };
+
+  const handleSaveLlmConfig = async () => {
+    if (!sessionId || !llmDraft || !llmConfig) {
+      return;
+    }
+    setLlmSaving(true);
+    setError("");
+    try {
+      const saved = await saveSessionLlmConfig(sessionId, llmDraft);
+      setLlmConfig(saved);
+      setLlmDraft(cloneLlmConfig(saved));
+      setLlmEditorOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "LLM設定の保存に失敗しました");
+    } finally {
+      setLlmSaving(false);
     }
   };
 
@@ -502,15 +560,18 @@ export default function App() {
     setLoading(true);
     setError("");
     setStatus("新しいセッションを準備中...");
-    setProviderMenuOpen(false);
+    setLlmEditorOpen(false);
     setActiveResearchMessageId("");
 
     try {
       const profileId = window.localStorage.getItem(PROFILE_STORAGE_KEY) ?? undefined;
       const session = await createSession(profileId, true);
+      const sessionLlmConfig = await fetchSessionLlmConfig(session.session_id);
       setSessionId(session.session_id);
       window.localStorage.setItem(PROFILE_STORAGE_KEY, session.profile_id);
       setInput("");
+      setLlmConfig(sessionLlmConfig);
+      setLlmDraft(cloneLlmConfig(sessionLlmConfig));
 
       if (session.initial_response) {
         setMessages([toAssistantMessage(session.initial_response)]);
@@ -881,6 +942,96 @@ export default function App() {
             )}
 
             <div className="overflow-visible rounded-[26px] bg-sky-50/70 transition">
+              {llmEditorOpen && llmDraft && llmCapabilities && (
+                <div className="border-b border-sky-100/90 px-4 pb-4 pt-4 sm:px-5">
+                  <div className="rounded-[24px] border border-white/90 bg-white/92 p-4 shadow-card backdrop-blur-xl">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-inkSubtle">
+                          LLM設定
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-ink">
+                          実行前に段階ごとのモデルを調整できます
+                        </p>
+                        <p className="mt-1 text-xs leading-6 text-inkMuted">
+                          調査ジョブは開始時に設定を固定します。問い合わせ文と契約チェックは実行時の設定を使います。
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setLlmEditorOpen(false)}
+                        className="rounded-full border border-sky-100 bg-white px-3 py-1.5 text-xs font-medium text-ink transition hover:border-sky-300 hover:bg-sky-50"
+                      >
+                        閉じる
+                      </button>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      {llmCapabilities.route_definitions.map((route) => {
+                        const routeConfig = llmDraft.routes[route.key];
+                        return (
+                          <div
+                            key={route.key}
+                            className="grid gap-3 rounded-2xl border border-sky-100 bg-sky-50/45 p-3 sm:grid-cols-[160px_minmax(0,1fr)]"
+                          >
+                            <div>
+                              <p className="text-sm font-semibold text-ink">{route.label}</p>
+                              <p className="mt-1 text-xs leading-5 text-inkMuted">{route.description}</p>
+                            </div>
+
+                            <label className="space-y-1">
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-inkSubtle">
+                                Model
+                              </span>
+                              <select
+                                value={routeConfig.model}
+                                disabled={!llmEditable || llmSaving}
+                                onChange={(e) => handleLlmRouteModelChange(route.key, e.target.value)}
+                                className="w-full rounded-2xl border border-sky-100 bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-sky-300 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                              >
+                                {llmCapabilities.models.map((item) => (
+                                  <option key={`${route.key}-${item.model}`} value={item.model}>
+                                    {item.model}
+                                  </option>
+                                ))}
+                              </select>
+                              <p className="text-xs text-inkMuted">
+                                選択可能モデル {llmCapabilities.models.length} 件
+                              </p>
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs text-inkMuted">
+                        現在のプリセット: {formatPresetLabel(llmDraft.preset)}
+                        {!llmEditable ? " / 調査中は編集できません" : ""}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleResetLlmConfig}
+                          disabled={!llmEditable || llmSaving}
+                          className="rounded-full border border-sky-100 bg-white px-4 py-2 text-sm font-medium text-ink transition hover:border-sky-300 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          デフォルトに戻す
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveLlmConfig()}
+                          disabled={!llmEditable || llmSaving}
+                          className="rounded-full border border-sky-500/20 bg-accent px-4 py-2 text-sm font-medium text-white shadow-card transition hover:bg-accentDeep hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {llmSaving ? "保存中..." : "設定を保存"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -893,51 +1044,22 @@ export default function App() {
               />
 
               <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-2">
-                <div ref={providerMenuRef} className="relative">
+                <div className="min-w-0">
                   <button
                     type="button"
-                    disabled={isResearchBusy}
-                    onClick={() => setProviderMenuOpen((prev) => !prev)}
-                    className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-white/90 px-3.5 py-2 text-sm text-ink shadow-sm transition hover:border-sky-300 hover:bg-white hover:shadow-card disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!llmConfig || llmSaving}
+                    onClick={() => setLlmEditorOpen((prev) => !prev)}
+                    className="inline-flex max-w-full items-center gap-2 rounded-full border border-sky-100 bg-white/90 px-3.5 py-2 text-sm text-ink shadow-sm transition hover:border-sky-300 hover:bg-white hover:shadow-card disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-inkSubtle">
-                      Provider
+                      LLM
                     </span>
-                    <span className="font-medium capitalize">{provider}</span>
+                    <span className="font-medium">{llmConfig ? formatPresetLabel(llmConfig.preset) : "Loading"}</span>
                     <span className="text-slate-400">
-                      <ChevronIcon open={providerMenuOpen} />
+                      <ChevronIcon open={llmEditorOpen} />
                     </span>
                   </button>
-
-                  {providerMenuOpen && (
-                    <div className="absolute bottom-[calc(100%+12px)] left-0 z-30 min-w-[200px] overflow-hidden rounded-2xl border border-hairline bg-white/95 p-1.5 shadow-floating backdrop-blur-xl">
-                      {PROVIDERS.map((item) => {
-                        const selected = item === provider;
-                        return (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => {
-                              setProvider(item);
-                              setProviderMenuOpen(false);
-                            }}
-                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm transition ${
-                              selected
-                                ? "border-sky-200 bg-sky-100 text-sky-900 shadow-sm"
-                                : "border-transparent text-ink hover:border-sky-100 hover:bg-sky-50"
-                            }`}
-                          >
-                            <span className="capitalize">{item}</span>
-                            <span
-                              className={`h-2 w-2 rounded-full ${
-                                selected ? "bg-sky-600" : "bg-sky-200"
-                              }`}
-                            />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <p className="mt-1 max-w-[28rem] truncate text-[11px] text-inkMuted">{llmSummary}</p>
                 </div>
 
                 <div className="flex items-center gap-2">

@@ -21,8 +21,7 @@ def _provider_model_valid(settings: Settings, provider: str, models: list[str]) 
 
     primary = settings.groq_model_primary
     secondary = settings.groq_model_secondary
-    is_valid = primary in models and secondary in models
-    return is_valid, f"wanted={primary},{secondary}"
+    return primary in models, f"wanted={primary}; secondary={secondary}"
 
 
 def run_preflight(settings: Settings) -> tuple[PreflightReport, bool]:

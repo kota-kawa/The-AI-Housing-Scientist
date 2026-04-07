@@ -80,6 +80,48 @@ class ChatMessageRequest(BaseModel):
     provider: Literal["openai", "gemini", "groq", "claude"] | None = None
 
 
+class LLMRouteConfigPayload(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+
+
+class LLMConfigPayload(BaseModel):
+    preset: str = Field(default="custom", max_length=50)
+    routes: dict[str, LLMRouteConfigPayload]
+
+
+class SessionLLMConfigResponse(LLMConfigPayload):
+    session_id: str
+    editable: bool
+    active_job_id: str | None = None
+
+
+class LLMProviderCapability(BaseModel):
+    key_present: bool
+    reachable: bool
+    default_model: str
+    models: list[str] = Field(default_factory=list)
+    details: str = ""
+
+
+class LLMModelOptionResponse(BaseModel):
+    model: str
+    provider: str
+    available: bool = True
+
+
+class LLMRouteDefinitionResponse(BaseModel):
+    key: str
+    label: str
+    description: str
+
+
+class LLMCapabilitiesResponse(BaseModel):
+    route_definitions: list[LLMRouteDefinitionResponse]
+    providers: dict[str, LLMProviderCapability]
+    models: list[LLMModelOptionResponse]
+    default_config: LLMConfigPayload
+
+
 class ChatMessageResponse(BaseModel):
     status: str
     assistant_message: str

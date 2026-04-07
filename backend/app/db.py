@@ -83,6 +83,7 @@ class Database:
                     session_id TEXT NOT NULL,
                     status TEXT NOT NULL,
                     provider TEXT NOT NULL,
+                    llm_config_json TEXT NOT NULL DEFAULT '{}',
                     approved_plan_json TEXT NOT NULL,
                     current_stage TEXT NOT NULL,
                     progress_percent INTEGER NOT NULL,
@@ -163,6 +164,12 @@ class Database:
                 conn,
                 "research_journal_nodes",
                 "metrics_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            )
+            self._ensure_column(
+                conn,
+                "research_jobs",
+                "llm_config_json",
                 "TEXT NOT NULL DEFAULT '{}'",
             )
             self._ensure_column(conn, "llm_call_events", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")
@@ -614,6 +621,7 @@ class Database:
         *,
         session_id: str,
         provider: str,
+        llm_config: dict[str, Any],
         approved_plan: dict[str, Any],
     ) -> tuple[str, str]:
         job_id = uuid.uuid4().hex
@@ -626,6 +634,7 @@ class Database:
                     session_id,
                     status,
                     provider,
+                    llm_config_json,
                     approved_plan_json,
                     current_stage,
                     progress_percent,
@@ -636,13 +645,14 @@ class Database:
                     started_at,
                     finished_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
                     session_id,
                     "queued",
                     provider,
+                    json.dumps(llm_config, ensure_ascii=False),
                     json.dumps(approved_plan, ensure_ascii=False),
                     "queued",
                     0,
@@ -1003,6 +1013,7 @@ class Database:
             "session_id": row["session_id"],
             "status": row["status"],
             "provider": row["provider"],
+            "llm_config": json.loads(row["llm_config_json"]) if row["llm_config_json"] else {},
             "approved_plan": json.loads(row["approved_plan_json"]),
             "current_stage": row["current_stage"],
             "progress_percent": int(row["progress_percent"] or 0),

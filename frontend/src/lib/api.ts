@@ -1,4 +1,47 @@
 export type Provider = "openai" | "gemini" | "groq" | "claude";
+export type LLMRouteKey = "planner" | "research_default" | "communication" | "risk_check";
+
+export type LLMRouteConfig = {
+  model: string;
+};
+
+export type LLMConfig = {
+  preset: string;
+  routes: Record<LLMRouteKey, LLMRouteConfig>;
+};
+
+export type SessionLLMConfig = LLMConfig & {
+  session_id: string;
+  editable: boolean;
+  active_job_id: string | null;
+};
+
+export type LLMRouteDefinition = {
+  key: LLMRouteKey;
+  label: string;
+  description: string;
+};
+
+export type LLMProviderCapability = {
+  key_present: boolean;
+  reachable: boolean;
+  default_model: string;
+  models: string[];
+  details: string;
+};
+
+export type LLMModelOption = {
+  model: string;
+  provider: Provider;
+  available: boolean;
+};
+
+export type LLMCapabilities = {
+  route_definitions: LLMRouteDefinition[];
+  providers: Record<Provider, LLMProviderCapability>;
+  models: LLMModelOption[];
+  default_config: LLMConfig;
+};
 
 export type ActionDescriptor = {
   action_type: string;
@@ -102,7 +145,7 @@ export async function fetchSession(sessionId: string): Promise<SessionState> {
 export async function sendMessage(
   sessionId: string,
   message: string,
-  provider: Provider
+  provider?: Provider
 ): Promise<ChatMessageResponse> {
   return request<ChatMessageResponse>(`/api/chat/sessions/${sessionId}/messages`, {
     method: "POST",
@@ -134,6 +177,24 @@ export async function runAction(
 
 export async function fetchPreflight(): Promise<PreflightReport> {
   return request<PreflightReport>("/api/system/preflight");
+}
+
+export async function fetchLlmCapabilities(): Promise<LLMCapabilities> {
+  return request<LLMCapabilities>("/api/system/llm-capabilities");
+}
+
+export async function fetchSessionLlmConfig(sessionId: string): Promise<SessionLLMConfig> {
+  return request<SessionLLMConfig>(`/api/chat/sessions/${sessionId}/llm-config`);
+}
+
+export async function saveSessionLlmConfig(
+  sessionId: string,
+  payload: LLMConfig
+): Promise<SessionLLMConfig> {
+  return request<SessionLLMConfig>(`/api/chat/sessions/${sessionId}/llm-config`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchResearchState(sessionId: string): Promise<ResearchState> {
