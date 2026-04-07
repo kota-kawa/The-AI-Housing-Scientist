@@ -716,6 +716,7 @@ class HousingResearchAgentManager:
             normalized_properties=normalized_properties,
             user_memory=self.approved_plan.get("user_memory_snapshot", self.user_memory),
             ranking_profile=ranking_profile,
+            adapter=self.research_adapter,
         )
 
     def _ensure_branch_artifacts(
