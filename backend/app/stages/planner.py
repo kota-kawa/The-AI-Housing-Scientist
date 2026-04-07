@@ -43,6 +43,19 @@ FOLLOW_UP_QUESTIONS: dict[str, dict[str, Any]] = {
         "examples": ["駅徒歩10分以内", "徒歩7分まで", "駅近だとうれしい"],
     },
 }
+CONDITION_KEYWORDS: dict[str, str] = {
+    "ペット": "ペット可",
+    "犬": "ペット可",
+    "猫": "ペット可",
+    "楽器": "楽器可",
+    "ピアノ": "楽器可",
+    "在宅ワーク": "在宅ワーク向け",
+    "テレワーク": "在宅ワーク向け",
+    "SOHO": "SOHO相談可",
+    "保証人不要": "保証人不要",
+    "南向き": "南向き",
+    "角部屋": "角部屋",
+}
 
 
 def _extract_budget_yen(text: str) -> int | None:
@@ -111,7 +124,29 @@ def _rule_based_slots(message: str) -> dict[str, Any]:
     elif "1K" in message:
         result["layout_preference"] = "1K"
 
+    condition_tokens = [label for keyword, label in CONDITION_KEYWORDS.items() if keyword in message]
+    if condition_tokens:
+        result["must_conditions"] = sorted(set(condition_tokens))
+
     return result
+
+
+def _merge_memory(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in updates.items():
+        if key in {"must_conditions", "nice_to_have"}:
+            existing = [str(item).strip() for item in merged.get(key, []) or [] if str(item).strip()]
+            incoming = [str(item).strip() for item in value or [] if str(item).strip()]
+            deduped: list[str] = []
+            for item in existing + incoming:
+                if item and item not in deduped:
+                    deduped.append(item)
+            if deduped:
+                merged[key] = deduped
+            continue
+        if value not in (None, "", [], {}):
+            merged[key] = value
+    return merged
 
 
 def _llm_parse(message: str, adapter: LLMAdapter) -> dict[str, Any]:
@@ -175,15 +210,12 @@ def run_planner(
     user_memory: dict[str, Any],
     adapter: LLMAdapter | None,
 ) -> dict[str, Any]:
-    merged = dict(user_memory)
-    merged.update(_rule_based_slots(message))
+    merged = _merge_memory(user_memory, _rule_based_slots(message))
 
     if adapter is not None:
         try:
             llm_slots = _llm_parse(message, adapter)
-            for key, value in llm_slots.items():
-                if value not in (None, "", [], {}):
-                    merged[key] = value
+            merged = _merge_memory(merged, llm_slots)
         except Exception:
             # Rule-based fallback is the deterministic baseline for PoC.
             pass

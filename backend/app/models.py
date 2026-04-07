@@ -14,6 +14,7 @@ class PropertyNormalized(BaseModel):
     detail_url: str = ""
     address: str = ""
     address_norm: str
+    area_name: str = ""
     nearest_station: str = ""
     line_name: str = ""
     layout: str = ""
@@ -26,11 +27,14 @@ class PropertyNormalized(BaseModel):
     available_date: str = ""
     agency_name: str = ""
     notes: str = ""
+    features: list[str] = Field(default_factory=list)
 
 
 class DuplicateGroup(BaseModel):
     key: str
     property_ids: list[str]
+    confidence: float = 0.0
+    reason: str = ""
 
 
 class RankedProperty(BaseModel):
@@ -77,7 +81,13 @@ class ChatMessageResponse(BaseModel):
 
 class CreateSessionResponse(BaseModel):
     session_id: str
+    profile_id: str
     created_at: datetime
+    initial_response: ChatMessageResponse | None = None
+
+
+class CreateSessionRequest(BaseModel):
+    profile_id: str | None = None
 
 
 class ConfirmActionRequest(BaseModel):
@@ -92,6 +102,7 @@ class ActionRequest(BaseModel):
 
 class SessionStateResponse(BaseModel):
     session_id: str
+    profile_id: str
     status: str
     pending_action: dict[str, Any] | None
     user_memory: dict[str, Any]

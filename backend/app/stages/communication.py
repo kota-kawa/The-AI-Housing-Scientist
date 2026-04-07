@@ -2,6 +2,139 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.llm.base import LLMAdapter
+
+
+def _collect_user_focus_points(user_memory: dict[str, Any]) -> list[str]:
+    focus_points: list[str] = []
+
+    for key in ("must_conditions", "nice_to_have"):
+        for item in user_memory.get(key, []) or []:
+            text = str(item).strip()
+            if text and text not in focus_points:
+                focus_points.append(text)
+
+    learned = user_memory.get("learned_preferences", {}) or {}
+    for item in learned.get("liked_features", []) or []:
+        text = str(item).strip()
+        if text and text not in focus_points:
+            focus_points.append(text)
+
+    return focus_points
+
+
+def _collect_confirmation_items(prop: dict[str, Any], user_memory: dict[str, Any]) -> list[str]:
+    features = [str(item).strip() for item in prop.get("features", []) or [] if str(item).strip()]
+    features_text = " ".join(features + [str(prop.get("notes") or "")])
+    focus_points = _collect_user_focus_points(user_memory)
+
+    items = [
+        "最新の空室状況と申込スケジュール",
+        "初期費用の内訳（仲介手数料・保証会社・鍵交換費を含む）",
+        "短期解約違約金・更新料・解約予告期間の条件",
+        "内見可能日と申込前に必要な書類",
+    ]
+
+    if "ペット" in features_text or any("ペット" in item for item in focus_points):
+        items.append("ペット飼育時の条件、追加敷金、種類や頭数の制限")
+
+    if "楽器" in features_text or any("楽器" in item for item in focus_points):
+        items.append("楽器演奏の可否、演奏時間帯の制限、防音条件")
+
+    if any(token in features_text for token in ["在宅ワーク", "ワーク", "高速回線"]) or any(
+        "在宅ワーク" in item for item in focus_points
+    ):
+        items.append("回線種別・通信速度の目安、室内でオンライン会議しやすい環境か")
+
+    if int(prop.get("station_walk_min") or 0) <= 5:
+        items.append("駅近物件として、騒音や人通りの影響がどの程度あるか")
+
+    if any(token in features_text for token in ["礼金ゼロ", "キャンペーン"]):
+        items.append("礼金ゼロやキャンペーン条件が現在も有効か")
+
+    deduped: list[str] = []
+    for item in items:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped
+
+
+def _build_fallback_draft(
+    prop: dict[str, Any],
+    user_memory: dict[str, Any],
+    confirmation_items: list[str],
+) -> str:
+    building_name = str(prop.get("building_name") or "対象物件")
+    rent = int(prop.get("rent") or 0)
+    station = str(prop.get("nearest_station") or "最寄り駅要確認")
+    walk = int(prop.get("station_walk_min") or 0)
+    layout = str(prop.get("layout") or "間取り要確認")
+    move_in = str(user_memory.get("move_in_date") or "入居時期未定")
+    focus_points = _collect_user_focus_points(user_memory)
+    features = [str(item).strip() for item in prop.get("features", []) or [] if str(item).strip()]
+
+    intro_lines = [
+        "お世話になっております。",
+        f"{building_name}について問い合わせさせていただきます。",
+        (
+            f"現在、家賃帯は{rent:,}円前後、入居希望時期は{move_in}で検討しております。"
+            if rent > 0
+            else f"入居希望時期は{move_in}で検討しております。"
+        ),
+        f"物件条件は{layout}、{station} 徒歩{walk or '要確認'}分として認識しています。",
+    ]
+
+    if features:
+        intro_lines.append(f"募集情報では {', '.join(features[:3])} が魅力だと感じました。")
+    if focus_points:
+        intro_lines.append(f"特に重視している点は {', '.join(focus_points[:3])} です。")
+
+    numbered_items = "\n".join(
+        f"{index}. {item}" for index, item in enumerate(confirmation_items, start=1)
+    )
+
+    return (
+        "\n".join(intro_lines)
+        + "\n以下についてご教示いただけますでしょうか。\n"
+        + numbered_items
+        + "\n何卒よろしくお願いいたします。"
+    )
+
+
+def _build_llm_draft(
+    *,
+    adapter: LLMAdapter,
+    prop: dict[str, Any],
+    user_memory: dict[str, Any],
+    confirmation_items: list[str],
+) -> str:
+    system = (
+        "You are a Japanese rental inquiry assistant. "
+        "Write a natural, concise inquiry email in Japanese. "
+        "Reflect the user's priorities and the property's characteristics. "
+        "Do not invent facts that were not provided."
+    )
+    user = (
+        "物件情報:\n"
+        f"- 建物名: {prop.get('building_name') or '対象物件'}\n"
+        f"- 家賃: {int(prop.get('rent') or 0)}\n"
+        f"- 最寄り駅: {prop.get('nearest_station') or '要確認'}\n"
+        f"- 駅徒歩: {int(prop.get('station_walk_min') or 0)}分\n"
+        f"- 間取り: {prop.get('layout') or '要確認'}\n"
+        f"- 特徴: {', '.join(prop.get('features', []) or []) or '特になし'}\n"
+        f"- 備考: {prop.get('notes') or 'なし'}\n"
+        "ユーザー条件:\n"
+        f"- 入居時期: {user_memory.get('move_in_date') or '未定'}\n"
+        f"- 重視点: {', '.join(_collect_user_focus_points(user_memory)) or '特になし'}\n"
+        "確認したい事項:\n"
+        + "\n".join(f"- {item}" for item in confirmation_items)
+        + "\n出力要件:\n"
+        "- メール本文のみを出力\n"
+        "- 丁寧な日本語\n"
+        "- 箇条書きまたは番号付きで確認事項を含める\n"
+    )
+    return adapter.generate_text(system=system, user=user, temperature=0.3).strip()
+
 
 def run_communication(
     *,
@@ -9,6 +142,7 @@ def run_communication(
     normalized_properties: list[dict[str, Any]],
     user_memory: dict[str, Any],
     selected_property_id: str | None = None,
+    adapter: LLMAdapter | None = None,
 ) -> dict[str, Any]:
     by_id = {item["property_id_norm"]: item for item in normalized_properties}
 
@@ -33,34 +167,21 @@ def run_communication(
             top = selected
 
     prop = by_id.get(top["property_id_norm"], {})
-    building_name = prop.get("building_name", "対象物件")
-    rent = int(prop.get("rent") or 0)
-    station = prop.get("nearest_station", "")
-    walk = prop.get("station_walk_min", 0)
-    layout = prop.get("layout", "")
+    confirmation_items = _collect_confirmation_items(prop, user_memory)
 
-    move_in = user_memory.get("move_in_date", "入居時期未定")
-
-    message_draft = (
-        "お世話になっております。\n"
-        f"{building_name}について問い合わせさせていただきます。\n"
-        f"現在、家賃帯は{rent:,}円前後、入居希望時期は{move_in}で検討しております。\n"
-        f"物件条件は{layout or '間取り要確認'}、{station or '最寄り駅要確認'} 徒歩{walk or '要確認'}分として認識しています。\n"
-        "以下についてご教示いただけますでしょうか。\n"
-        "1. 最新の空室状況\n"
-        "2. 初期費用の内訳（仲介手数料、保証会社、鍵交換費含む）\n"
-        "3. 短期解約違約金・更新料・解約予告期間\n"
-        "4. 内見可能日程\n"
-        "何卒よろしくお願いいたします。"
-    )
-
-    check_items = [
-        "空室状況を最終確認",
-        "初期費用内訳を確認",
-        "違約金・更新料を確認",
-        "解約予告期間を確認",
-        "内見候補日を2-3案提示",
-    ]
+    message_draft = _build_fallback_draft(prop, user_memory, confirmation_items)
+    if adapter is not None:
+        try:
+            llm_draft = _build_llm_draft(
+                adapter=adapter,
+                prop=prop,
+                user_memory=user_memory,
+                confirmation_items=confirmation_items,
+            )
+            if llm_draft:
+                message_draft = llm_draft
+        except Exception:
+            pass
 
     pending_action = {
         "action_type": "send_inquiry",
@@ -70,6 +191,6 @@ def run_communication(
 
     return {
         "message_draft": message_draft,
-        "check_items": check_items,
+        "check_items": confirmation_items,
         "pending_action": pending_action,
     }

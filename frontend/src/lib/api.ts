@@ -24,11 +24,18 @@ export type ChatMessageResponse = {
 
 export type SessionState = {
   session_id: string;
+  profile_id: string;
   status: string;
   pending_action: Record<string, unknown> | null;
   user_memory: Record<string, unknown>;
   task_memory: Record<string, unknown>;
   messages: Array<{ role: string; content: Record<string, unknown>; created_at: string }>;
+};
+
+export type CreateSessionResponse = {
+  session_id: string;
+  profile_id: string;
+  initial_response: ChatMessageResponse | null;
 };
 
 export type PreflightReport = {
@@ -58,8 +65,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function createSession(): Promise<{ session_id: string }> {
-  return request<{ session_id: string }>("/api/chat/sessions", { method: "POST" });
+export async function createSession(profileId?: string): Promise<CreateSessionResponse> {
+  return request<CreateSessionResponse>("/api/chat/sessions", {
+    method: "POST",
+    body: JSON.stringify({ profile_id: profileId }),
+  });
 }
 
 export async function fetchSession(sessionId: string): Promise<SessionState> {

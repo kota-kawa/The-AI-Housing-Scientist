@@ -33,7 +33,13 @@ type QuestionEntry = {
   selected_example?: string;
 };
 
+type CardEntry = {
+  id?: string;
+  compare_selected?: boolean;
+};
+
 const PROVIDERS: Provider[] = ["openai", "gemini", "groq", "claude"];
+const PROFILE_STORAGE_KEY = "housing_scientist_profile_id";
 
 const SAMPLE_PROMPTS: string[] = [
   "江東区で家賃12万円以下、駅徒歩7分以内の1LDKを探しています",
@@ -53,6 +59,9 @@ function toAssistantMessage(payload: ChatMessageResponse): Message {
 }
 
 function toStatusLabel(payload: ChatMessageResponse): string {
+  if (payload.status === "awaiting_profile_resume") {
+    return "前回条件の引き継ぎ確認";
+  }
   if (payload.status === "awaiting_user_input") {
     return "追加条件の回答待ち";
   }
@@ -172,8 +181,13 @@ export default function App() {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const [session, preflight] = await Promise.all([createSession(), fetchPreflight()]);
+        const storedProfileId = window.localStorage.getItem(PROFILE_STORAGE_KEY) ?? crypto.randomUUID();
+        const [session, preflight] = await Promise.all([
+          createSession(storedProfileId),
+          fetchPreflight(),
+        ]);
         setSessionId(session.session_id);
+        window.localStorage.setItem(PROFILE_STORAGE_KEY, session.profile_id);
 
         const providerStates = Object.entries(preflight.providers)
           .map(([name, report]) => `${name}:${report.model_valid ? "OK" : "NG"}`)
@@ -185,8 +199,14 @@ export default function App() {
           } | ${providerStates}`
         );
 
-        setStatus("準備完了");
-        setResponseState("ready");
+        if (session.initial_response) {
+          setMessages([toAssistantMessage(session.initial_response)]);
+          setStatus(toStatusLabel(session.initial_response));
+          setResponseState(session.initial_response.status);
+        } else {
+          setStatus("準備完了");
+          setResponseState("ready");
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "初期化に失敗しました");
         setStatus("初期化失敗");
@@ -454,6 +474,78 @@ export default function App() {
     );
   };
 
+  const handleCardCompareToggle = (messageId: string, blockIndex: number, itemIndex: number) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (message.id !== messageId || !message.blocks) {
+          return message;
+        }
+
+        const nextBlocks = message.blocks.map((block, currentBlockIndex) => {
+          if (currentBlockIndex !== blockIndex || block.type !== "cards") {
+            return block;
+          }
+
+          const items = Array.isArray(block.content.items) ? (block.content.items as CardEntry[]) : [];
+
+          return {
+            ...block,
+            content: {
+              ...block.content,
+              items: items.map((item, currentItemIndex) =>
+                currentItemIndex === itemIndex
+                  ? { ...item, compare_selected: !item.compare_selected }
+                  : item
+              ),
+            },
+          };
+        });
+
+        return { ...message, blocks: nextBlocks };
+      })
+    );
+  };
+
+  const handleCompareExecute = async (messageId: string, blockIndex: number) => {
+    if (!sessionId || loading) {
+      return;
+    }
+
+    const message = messages.find((item) => item.id === messageId);
+    const block = message?.blocks?.[blockIndex];
+    if (!block || block.type !== "cards") {
+      return;
+    }
+
+    const items = Array.isArray(block.content.items) ? (block.content.items as CardEntry[]) : [];
+    const selectedIds = items
+      .filter((item) => item.compare_selected && item.id)
+      .map((item) => String(item.id));
+
+    if (selectedIds.length < 2) {
+      setError("比較するには2件以上選択してください");
+      return;
+    }
+
+    setError("");
+    setLoading(true);
+    setStatus("比較を更新中...");
+
+    try {
+      const response = await runAction(sessionId, "compare_selected_properties", {
+        property_ids: selectedIds,
+      });
+      setMessages((prev) => [...prev, toAssistantMessage(response)]);
+      setResponseState(response.status);
+      setStatus(toStatusLabel(response));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "比較に失敗しました");
+      setStatus("エラー");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="relative min-h-screen overflow-x-clip pb-48 text-ink">
       <div className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 pb-8 pt-6 sm:px-6">
@@ -575,6 +667,10 @@ export default function App() {
                           block={block}
                           disabled={loading}
                           onActionExecute={(action) => void handleActionExecute(action)}
+                          onCompareExecute={() => void handleCompareExecute(message.id, idx)}
+                          onCompareToggle={(itemIndex) =>
+                            handleCardCompareToggle(message.id, idx, itemIndex)
+                          }
                           onChecklistToggle={(itemIndex) =>
                             handleChecklistToggle(message.id, idx, itemIndex)
                           }

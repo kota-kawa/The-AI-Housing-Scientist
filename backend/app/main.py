@@ -14,6 +14,7 @@ from app.models import (
     ChatMessageRequest,
     ChatMessageResponse,
     ConfirmActionRequest,
+    CreateSessionRequest,
     CreateSessionResponse,
     PreflightReport,
     SessionStateResponse,
@@ -64,11 +65,17 @@ def get_preflight() -> PreflightReport:
 
 
 @app.post("/api/chat/sessions", response_model=CreateSessionResponse)
-def create_session() -> CreateSessionResponse:
-    session_id, created_at = app.state.db.create_session()
+def create_session(body: CreateSessionRequest | None = None) -> CreateSessionResponse:
+    profile_id, _ = app.state.db.get_or_create_profile(body.profile_id if body else None)
+    session_id, created_at = app.state.db.create_session(profile_id=profile_id)
+    initial_response = app.state.orchestrator.build_session_initial_response(session_id)
+    if initial_response is not None:
+        app.state.db.add_message(session_id, "assistant", initial_response.model_dump())
     return CreateSessionResponse(
         session_id=session_id,
+        profile_id=profile_id,
         created_at=datetime.fromisoformat(created_at),
+        initial_response=initial_response,
     )
 
 
@@ -83,6 +90,7 @@ def get_session_state(session_id: str) -> SessionStateResponse:
 
     return SessionStateResponse(
         session_id=session_id,
+        profile_id=session["profile_id"],
         status=session["status"],
         pending_action=session["pending_action"],
         user_memory=user_memory,

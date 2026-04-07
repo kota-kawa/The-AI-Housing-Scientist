@@ -35,6 +35,7 @@ class Database:
 
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
                     status TEXT NOT NULL,
                     pending_action_json TEXT,
                     created_at TEXT NOT NULL,
@@ -56,6 +57,14 @@ class Database:
                     task_memory_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(session_id) REFERENCES sessions(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS profiles (
+                    id TEXT PRIMARY KEY,
+                    user_memory_json TEXT NOT NULL,
+                    profile_memory_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS audit_events (
@@ -94,8 +103,21 @@ class Database:
                 );
                 """
             )
+            self._ensure_column(conn, "sessions", "profile_id", "TEXT NOT NULL DEFAULT ''")
             self._seed_property_catalog(conn)
             conn.commit()
+
+    def _ensure_column(
+        self,
+        conn: sqlite3.Connection,
+        table_name: str,
+        column_name: str,
+        definition: str,
+    ) -> None:
+        columns = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        if any(row["name"] == column_name for row in columns):
+            return
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
     def _seed_property_catalog(self, conn: sqlite3.Connection) -> None:
         row = conn.execute("SELECT COUNT(*) AS count FROM property_catalog").fetchone()
@@ -156,17 +178,116 @@ class Database:
                 ),
             )
 
-    def create_session(self) -> tuple[str, str]:
-        session_id = uuid.uuid4().hex
+    def get_or_create_profile(self, profile_id: str | None = None) -> tuple[str, dict[str, Any]]:
+        resolved_profile_id = (profile_id or uuid.uuid4().hex).strip() or uuid.uuid4().hex
+        profile = self.get_profile(resolved_profile_id)
+        if profile is not None:
+            return resolved_profile_id, profile
+
         now = utc_now_iso()
         with self.connect() as conn:
             conn.execute(
-                "INSERT INTO sessions(id, status, pending_action_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (session_id, "active", None, now, now),
+                """
+                INSERT INTO profiles(
+                    id,
+                    user_memory_json,
+                    profile_memory_json,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    resolved_profile_id,
+                    "{}",
+                    json.dumps(
+                        {
+                            "search_history": [],
+                            "reaction_history": [],
+                            "learned_preferences": {},
+                        },
+                        ensure_ascii=False,
+                    ),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        created_profile = self.get_profile(resolved_profile_id)
+        if created_profile is None:
+            raise RuntimeError("profile creation failed")
+        return resolved_profile_id, created_profile
+
+    def get_profile(self, profile_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "user_memory": json.loads(row["user_memory_json"]),
+            "profile_memory": json.loads(row["profile_memory_json"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def update_profile(
+        self,
+        profile_id: str,
+        user_memory: dict[str, Any],
+        profile_memory: dict[str, Any],
+    ) -> None:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE profiles
+                SET user_memory_json = ?, profile_memory_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    json.dumps(user_memory, ensure_ascii=False),
+                    json.dumps(profile_memory, ensure_ascii=False),
+                    now,
+                    profile_id,
+                ),
+            )
+            conn.commit()
+
+    def create_session(
+        self,
+        profile_id: str | None = None,
+        *,
+        user_memory: dict[str, Any] | None = None,
+        task_memory: dict[str, Any] | None = None,
+    ) -> tuple[str, str]:
+        resolved_profile_id, _ = self.get_or_create_profile(profile_id)
+        session_id = uuid.uuid4().hex
+        now = utc_now_iso()
+        initial_user_memory = dict(user_memory or {})
+        initial_task_memory = {
+            "profile_id": resolved_profile_id,
+            "property_reactions": {},
+            "comparison_property_ids": [],
+            "profile_resume_pending": False,
+        }
+        initial_task_memory.update(task_memory or {})
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions(id, profile_id, status, pending_action_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (session_id, resolved_profile_id, "active", None, now, now),
             )
             conn.execute(
                 "INSERT INTO memories(session_id, user_memory_json, task_memory_json, updated_at) VALUES (?, ?, ?, ?)",
-                (session_id, "{}", "{}", now),
+                (
+                    session_id,
+                    json.dumps(initial_user_memory, ensure_ascii=False),
+                    json.dumps(initial_task_memory, ensure_ascii=False),
+                    now,
+                ),
             )
             conn.commit()
         return session_id, now
@@ -183,6 +304,7 @@ class Database:
             return None
         return {
             "id": row["id"],
+            "profile_id": row["profile_id"],
             "status": row["status"],
             "pending_action": json.loads(row["pending_action_json"]) if row["pending_action_json"] else None,
             "created_at": row["created_at"],

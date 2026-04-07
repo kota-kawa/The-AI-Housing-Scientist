@@ -5,6 +5,8 @@ import type { ActionDescriptor, UIBlock } from "../lib/api";
 type Props = {
   block: UIBlock;
   disabled?: boolean;
+  onCompareExecute?: () => void;
+  onCompareToggle?: (itemIndex: number) => void;
   onChecklistToggle?: (itemIndex: number) => void;
   onQuestionExecute?: () => void;
   onQuestionSuggestionToggle?: (itemIndex: number, prompt: string) => void;
@@ -339,11 +341,13 @@ function PropertyCard({
   item,
   index,
   disabled = false,
+  onCompareToggle,
   onActionExecute,
 }: {
   item: Record<string, unknown>;
   index: number;
   disabled?: boolean;
+  onCompareToggle?: () => void;
   onActionExecute?: (action: ActionDescriptor) => void;
 }) {
   const rent = toDisplayNumber(item.rent);
@@ -351,11 +355,28 @@ function PropertyCard({
   const title = toDisplayText(item.title) || `候補物件 ${index + 1}`;
   const walk = toDisplayText(item.station_walk_min);
   const station = toDisplayText(item.station);
+  const address = toDisplayText(item.address);
   const layout = toDisplayText(item.layout);
   const area = toDisplayText(item.area);
   const whySelected = toDisplayText(item.why_selected);
   const whyNotSelected = toDisplayText(item.why_not_selected);
   const action = (item.action as ActionDescriptor | undefined) ?? undefined;
+  const secondaryActions = Array.isArray(item.secondary_actions)
+    ? (item.secondary_actions as ActionDescriptor[])
+    : [];
+  const featureTags = Array.isArray(item.feature_tags)
+    ? item.feature_tags.map((tag) => toDisplayText(tag)).filter(Boolean)
+    : [];
+  const compareSelected = Boolean(item.compare_selected);
+  const reactionState = toDisplayText(item.reaction_state);
+  const reactionLabel =
+    reactionState === "favorite" ? "気になる" : reactionState === "exclude" ? "除外済み" : "";
+  const reactionTone =
+    reactionState === "favorite"
+      ? "bg-amber-100 text-amber-800"
+      : reactionState === "exclude"
+        ? "bg-slate-200 text-slate-700"
+        : "";
 
   return (
     <article className="group relative overflow-hidden rounded-2xl border border-hairline bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-cardHover">
@@ -371,12 +392,19 @@ function PropertyCard({
             <span className="text-[11px] font-medium text-inkMuted">円 / 月</span>
           </p>
         </div>
-        {score && (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-100 px-2 py-1 text-[11px] font-semibold text-sky-700">
-            <StarIcon className="h-3 w-3" />
-            {score}
-          </span>
-        )}
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          {score && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-1 text-[11px] font-semibold text-sky-700">
+              <StarIcon className="h-3 w-3" />
+              {score}
+            </span>
+          )}
+          {reactionLabel && (
+            <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${reactionTone}`}>
+              {reactionLabel}
+            </span>
+          )}
+        </div>
       </header>
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-hairline pt-3 text-[11px] text-inkMuted">
@@ -437,6 +465,21 @@ function PropertyCard({
         )}
       </dl>
 
+      {address && <p className="mt-3 text-[11px] leading-5 text-inkMuted">{address}</p>}
+
+      {featureTags.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {featureTags.map((tag) => (
+            <span
+              key={`${title}-${tag}`}
+              className="rounded-full bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+
       {(whySelected || whyNotSelected) && (
         <div className="mt-3 space-y-1.5">
           {whySelected && (
@@ -454,16 +497,47 @@ function PropertyCard({
         </div>
       )}
 
-      {action && (
+      <div className="mt-4 space-y-2">
         <button
           type="button"
           disabled={disabled}
-          onClick={() => onActionExecute?.(action)}
-          className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-sky-500/20 bg-accent px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-accentDeep disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-100 disabled:text-sky-400"
+          onClick={onCompareToggle}
+          className={`inline-flex w-full items-center justify-center rounded-xl border px-3 py-2 text-sm font-medium transition ${
+            compareSelected
+              ? "border-sky-700 bg-sky-700 text-white"
+              : "border-sky-200 bg-sky-50 text-sky-800 hover:border-sky-300 hover:bg-sky-100"
+          } disabled:cursor-not-allowed disabled:opacity-60`}
         >
-          {action.label}
+          {compareSelected ? "比較対象から外す" : "比較に追加する"}
         </button>
-      )}
+
+        {action && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onActionExecute?.(action)}
+            className="inline-flex w-full items-center justify-center rounded-xl border border-sky-500/20 bg-accent px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-accentDeep disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-100 disabled:text-sky-400"
+          >
+            {action.label}
+          </button>
+        )}
+
+        {secondaryActions.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            {secondaryActions.map((secondaryAction) => (
+              <button
+                key={`${title}-${secondaryAction.label}`}
+                type="button"
+                disabled={disabled}
+                onClick={() => onActionExecute?.(secondaryAction)}
+                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {secondaryAction.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </article>
   );
 }
@@ -473,6 +547,8 @@ function PropertyCard({
 export default function StructuredBlock({
   block,
   disabled = false,
+  onCompareExecute,
+  onCompareToggle,
   onChecklistToggle,
   onQuestionExecute,
   onQuestionSuggestionToggle,
@@ -578,20 +654,41 @@ export default function StructuredBlock({
 
   if (block.type === "cards") {
     const items = (block.content.items as Array<Record<string, unknown>>) ?? [];
+    const selectedCount = items.filter((item) => Boolean(item.compare_selected)).length;
     const tone = TONES.cards;
     return (
       <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
         <SectionHeader block={block} count={items.length} />
-        <div className="grid gap-3 p-4 sm:grid-cols-2">
-          {items.map((item, idx) => (
-            <PropertyCard
-              key={toDisplayText(item.id) || `card-${idx}`}
-              item={item}
-              index={idx}
-              disabled={disabled}
-              onActionExecute={onActionExecute}
-            />
-          ))}
+        <div className="space-y-3 p-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {items.map((item, idx) => (
+              <PropertyCard
+                key={toDisplayText(item.id) || `card-${idx}`}
+                item={item}
+                index={idx}
+                disabled={disabled}
+                onCompareToggle={() => onCompareToggle?.(idx)}
+                onActionExecute={onActionExecute}
+              />
+            ))}
+          </div>
+          {items.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-100 bg-cyan-50/70 px-3 py-3">
+              <p className="text-xs font-medium text-cyan-900">
+                {selectedCount >= 2
+                  ? `${selectedCount}件を選択中です。まとめて比較できます。`
+                  : "比較したい候補を2件以上選ぶと、まとめて比較できます。"}
+              </p>
+              <button
+                type="button"
+                disabled={disabled || selectedCount < 2}
+                onClick={onCompareExecute}
+                className="rounded-full border border-cyan-700 bg-cyan-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:border-cyan-200 disabled:bg-cyan-100 disabled:text-cyan-400"
+              >
+                選択中の物件を比較
+              </button>
+            </div>
+          )}
         </div>
       </section>
     );

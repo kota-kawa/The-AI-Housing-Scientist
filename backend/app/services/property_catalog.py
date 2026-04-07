@@ -148,4 +148,19 @@ class PropertyCatalogService:
             if token and token in haystack:
                 score += 3
 
+        learned = user_memory.get("learned_preferences", {}) or {}
+        frequent_area = str(learned.get("frequent_area") or "").strip()
+        if frequent_area and frequent_area in haystack:
+            score += 4
+
+        for token in learned.get("liked_features", []) or []:
+            text = str(token).strip()
+            if text and text in haystack:
+                score += 2
+
+        for token in learned.get("excluded_features", []) or []:
+            text = str(token).strip()
+            if text and text in haystack:
+                score -= 3
+
         return score

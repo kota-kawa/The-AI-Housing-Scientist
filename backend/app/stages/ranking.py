@@ -58,6 +58,34 @@ def _score_property(prop: dict[str, Any], user_memory: dict[str, Any]) -> tuple[
         score += 5
         positives.append("専有面積が25㎡以上")
 
+    learned = user_memory.get("learned_preferences", {}) or {}
+    frequent_area = str(learned.get("frequent_area") or "").strip()
+    area_name = str(prop.get("area_name") or prop.get("address") or "")
+    if frequent_area and frequent_area in area_name:
+        score += 4
+        positives.append(f"過去に好んだエリア {frequent_area} に近い")
+
+    notes_haystack = " ".join(
+        [
+            str(prop.get("building_name") or ""),
+            str(prop.get("notes") or ""),
+            " ".join(str(item) for item in prop.get("features", []) or []),
+            area_name,
+            layout,
+        ]
+    )
+    for token in learned.get("liked_features", []) or []:
+        text = str(token).strip()
+        if text and text in notes_haystack:
+            score += 2
+            positives.append(f"過去の反応で好まれた条件 {text} に合致")
+
+    for token in learned.get("excluded_features", []) or []:
+        text = str(token).strip()
+        if text and text in notes_haystack:
+            score -= 3
+            negatives.append(f"過去に除外した条件 {text} と重なる")
+
     why_selected = "、".join(positives) if positives else "大きな加点要素は未確認"
     why_not_selected = "、".join(negatives) if negatives else "明確な減点要素は未確認"
 
