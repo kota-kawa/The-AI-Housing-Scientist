@@ -797,10 +797,14 @@ class HousingOrchestrator:
     def _build_research_summary_body(
         self,
         *,
+        research_summary: str,
         ranked_properties: list[dict[str, Any]],
         normalized_properties: list[dict[str, Any]],
         source_items: list[dict[str, Any]],
     ) -> str:
+        if str(research_summary).strip():
+            return str(research_summary).strip()
+
         if not ranked_properties:
             return (
                 "結論: 現時点では問い合わせ候補を十分に絞り込めませんでした。\n"
@@ -845,6 +849,7 @@ class HousingOrchestrator:
     def _build_research_result_blocks(
         self,
         *,
+        research_summary: str,
         ranked_properties: list[dict[str, Any]],
         normalized_properties: list[dict[str, Any]],
         search_summary: dict[str, Any],
@@ -863,6 +868,7 @@ class HousingOrchestrator:
                 title="調査サマリー",
                 content={
                     "body": self._build_research_summary_body(
+                        research_summary=research_summary,
                         ranked_properties=ranked_properties,
                         normalized_properties=normalized_properties,
                         source_items=source_items,
@@ -1508,6 +1514,7 @@ class HousingOrchestrator:
         task_memory["last_duplicate_groups"] = execution_result.duplicate_groups
         task_memory["last_search_summary"] = execution_result.search_summary
         task_memory["last_source_items"] = execution_result.source_items
+        task_memory["last_research_summary"] = execution_result.research_summary
         task_memory["selected_property_id"] = None
         task_memory["risk_items"] = []
         task_memory["property_reactions"] = {}
@@ -1529,7 +1536,7 @@ class HousingOrchestrator:
             status="completed",
             current_stage="synthesize",
             progress_percent=100,
-            latest_summary="調査が完了しました。",
+            latest_summary=execution_result.research_summary or "調査が完了しました。",
             finished_at=utc_now_iso(),
         )
         completed_job = self.db.get_research_job(job_id)
@@ -1540,12 +1547,16 @@ class HousingOrchestrator:
         response = ChatMessageResponse(
             status="research_completed",
             assistant_message=(
-                f"調査が完了しました。{len(visible_ranked_properties)}件の候補を比較し、"
-                "問い合わせに進める候補を整理しました。"
+                execution_result.research_summary
+                or (
+                    f"調査が完了しました。{len(visible_ranked_properties)}件の候補を比較し、"
+                    "問い合わせに進める候補を整理しました。"
+                )
             ),
             missing_slots=[],
             next_action="select_property",
             blocks=self._build_research_result_blocks(
+                research_summary=execution_result.research_summary,
                 ranked_properties=visible_ranked_properties,
                 normalized_properties=execution_result.normalized_properties,
                 search_summary=execution_result.search_summary,
@@ -1976,6 +1987,7 @@ class HousingOrchestrator:
                 missing_slots=[],
                 next_action="select_property",
                 blocks=self._build_research_result_blocks(
+                    research_summary=task_memory.get("last_research_summary", ""),
                     ranked_properties=visible_ranked_properties,
                     normalized_properties=normalized_properties,
                     search_summary=task_memory.get("last_search_summary", {}),

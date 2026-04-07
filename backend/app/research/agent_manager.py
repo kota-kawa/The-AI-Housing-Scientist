@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -53,6 +54,7 @@ class ResearchExecutionState:
     search_summary: dict[str, Any] = field(default_factory=dict)
     offline_evaluation: dict[str, Any] = field(default_factory=dict)
     failure_summary: dict[str, Any] = field(default_factory=dict)
+    research_summary: str = ""
 
 
 @dataclass
@@ -68,6 +70,7 @@ class ResearchExecutionResult:
     search_summary: dict[str, Any]
     offline_evaluation: dict[str, Any]
     failure_summary: dict[str, Any]
+    research_summary: str
 
 
 class HousingResearchAgentManager:
@@ -110,6 +113,137 @@ class HousingResearchAgentManager:
         )
         self.toolbox = self._build_toolbox()
         self.state_machine = self._build_state_machine()
+
+    def _build_condition_summary(self, user_memory: dict[str, Any]) -> str:
+        parts: list[str] = []
+        area = str(user_memory.get("target_area") or "").strip()
+        if area:
+            parts.append(area)
+        budget_max = int(user_memory.get("budget_max") or 0)
+        if budget_max > 0:
+            parts.append(f"家賃{budget_max:,}円以内")
+        station_walk_max = int(user_memory.get("station_walk_max") or 0)
+        if station_walk_max > 0:
+            parts.append(f"駅徒歩{station_walk_max}分以内")
+        layout = str(user_memory.get("layout_preference") or "").strip()
+        if layout:
+            parts.append(layout)
+        return "・".join(parts)
+
+    def _build_fallback_research_summary(
+        self,
+        *,
+        ranked_properties: list[dict[str, Any]],
+        normalized_properties: list[dict[str, Any]],
+        search_summary: dict[str, Any],
+        source_items: list[dict[str, Any]],
+        offline_evaluation: dict[str, Any],
+    ) -> str:
+        user_memory = self.approved_plan.get("user_memory_snapshot", self.user_memory)
+        condition_summary = self._build_condition_summary(user_memory)
+
+        if not ranked_properties:
+            lead = (
+                f"{condition_summary}の条件で調査しましたが、問い合わせに進める候補は十分に揃いませんでした。"
+                if condition_summary
+                else "今回の条件で調査しましたが、問い合わせに進める候補は十分に揃いませんでした。"
+            )
+            detail_hit_count = int(search_summary.get("detail_hit_count") or 0)
+            follow_up = (
+                f"詳細ページを確認できた候補は{detail_hit_count}件にとどまっているため、条件を少し広げて再調査するのが安全です。"
+            )
+            return f"{lead}{follow_up}"
+
+        by_id = {item["property_id_norm"]: item for item in normalized_properties}
+        top_ranked = ranked_properties[0]
+        top_property = by_id.get(top_ranked["property_id_norm"], {})
+        candidate_count = len(ranked_properties)
+        lead = (
+            f"{condition_summary}の条件で{candidate_count}件を比較できました。"
+            if condition_summary
+            else f"今回の条件で{candidate_count}件を比較できました。"
+        )
+        top_name = str(top_property.get("building_name") or "第一候補の物件")
+        rent = int(top_property.get("rent") or 0)
+        station_walk = int(top_property.get("station_walk_min") or 0)
+        top_detail_parts = [top_name]
+        if rent > 0:
+            top_detail_parts.append(f"家賃{rent:,}円")
+        if station_walk > 0:
+            top_detail_parts.append(f"駅徒歩{station_walk}分")
+        top_detail = "、".join(top_detail_parts)
+
+        detail_coverage = float(offline_evaluation.get("detail_coverage") or 0.0)
+        top_reason = str(top_ranked.get("why_selected") or "").strip() or "条件との整合が高い候補です。"
+        caution = str(top_ranked.get("why_not_selected") or "").strip()
+        action = "まずは問い合わせに進める候補です。"
+        if detail_coverage < 0.5 or not source_items:
+            action = "ただし、掲載条件の最新性は問い合わせ前提で確認したい候補です。"
+        elif caution:
+            action = f"現時点では有力ですが、{caution}"
+        return f"{lead}最上位候補は{top_detail}で、{top_reason}{action}"
+
+    def _build_llm_research_summary(
+        self,
+        *,
+        ranked_properties: list[dict[str, Any]],
+        normalized_properties: list[dict[str, Any]],
+        search_summary: dict[str, Any],
+        source_items: list[dict[str, Any]],
+        offline_evaluation: dict[str, Any],
+    ) -> str:
+        if self.research_adapter is None or not ranked_properties:
+            return ""
+
+        user_memory = self.approved_plan.get("user_memory_snapshot", self.user_memory)
+        by_id = {item["property_id_norm"]: item for item in normalized_properties}
+        top_candidates: list[dict[str, Any]] = []
+        for ranked in ranked_properties[:3]:
+            prop = by_id.get(ranked["property_id_norm"], {})
+            top_candidates.append(
+                {
+                    "property_id_norm": ranked["property_id_norm"],
+                    "building_name": str(prop.get("building_name") or "候補物件"),
+                    "rent": int(prop.get("rent") or 0),
+                    "station_walk_min": int(prop.get("station_walk_min") or 0),
+                    "layout": str(prop.get("layout") or ""),
+                    "area_m2": float(prop.get("area_m2") or 0.0),
+                    "why_selected": str(ranked.get("why_selected") or ""),
+                    "why_not_selected": str(ranked.get("why_not_selected") or ""),
+                }
+            )
+        payload = {
+            "condition_summary": self._build_condition_summary(user_memory),
+            "candidate_count": len(ranked_properties),
+            "top_candidates": top_candidates,
+            "search_summary": {
+                "detail_hit_count": int(search_summary.get("detail_hit_count") or 0),
+                "normalized_count": int(search_summary.get("normalized_count") or 0),
+                "duplicate_group_count": int(search_summary.get("duplicate_group_count") or 0),
+            },
+            "offline_evaluation": {
+                "readiness": str(offline_evaluation.get("readiness") or ""),
+                "detail_coverage": float(offline_evaluation.get("detail_coverage") or 0.0),
+                "recommendations": [
+                    str(item).strip()
+                    for item in offline_evaluation.get("recommendations", [])[:3]
+                    if str(item).strip()
+                ],
+            },
+            "source_count": len(source_items),
+            "required_next_action": "候補がある場合は問い合わせに進めるかどうかを自然に述べる。候補が弱い場合は再調査や条件調整を促す。",
+        }
+        summary = self.research_adapter.generate_text(
+            system=(
+                "You are a Japanese rental research assistant. "
+                "Write a concise natural-language summary of the overall search result. "
+                "Use only the provided facts. Do not invent properties, numbers, or conditions. "
+                "Return only a short paragraph in Japanese, ideally 2 to 3 sentences."
+            ),
+            user=json.dumps(payload, ensure_ascii=False, indent=2),
+            temperature=0.2,
+        ).strip()
+        return " ".join(summary.split())
 
     def _build_state_machine(self) -> ResearchStateMachine:
         return ResearchStateMachine(
@@ -1155,6 +1289,26 @@ class HousingResearchAgentManager:
             visible_ranked_properties=selected_rank.get("ranked_properties", []),
             search_summary=state.search_summary,
         )
+        state.research_summary = self._build_fallback_research_summary(
+            ranked_properties=selected_rank.get("ranked_properties", []),
+            normalized_properties=selected_normalize.get("normalized_properties", []),
+            search_summary=state.search_summary,
+            source_items=state.source_items,
+            offline_evaluation=state.offline_evaluation,
+        )
+        if self.research_adapter is not None:
+            try:
+                llm_summary = self._build_llm_research_summary(
+                    ranked_properties=selected_rank.get("ranked_properties", []),
+                    normalized_properties=selected_normalize.get("normalized_properties", []),
+                    search_summary=state.search_summary,
+                    source_items=state.source_items,
+                    offline_evaluation=state.offline_evaluation,
+                )
+                if llm_summary:
+                    state.research_summary = llm_summary
+            except Exception:
+                pass
 
         self.db.add_audit_event(
             self.session_id,
@@ -1194,6 +1348,7 @@ class HousingResearchAgentManager:
             runner=lambda: {
                 "selected_branch_id": state.selected_branch_summary["branch_id"],
                 "source_item_count": len(state.source_items),
+                "research_summary": state.research_summary,
                 "offline_evaluation": state.offline_evaluation,
                 "failure_summary": state.failure_summary,
             },
@@ -1221,4 +1376,5 @@ class HousingResearchAgentManager:
             search_summary=state.search_summary,
             offline_evaluation=state.offline_evaluation,
             failure_summary=state.failure_summary,
+            research_summary=state.research_summary,
         )

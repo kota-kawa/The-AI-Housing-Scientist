@@ -94,6 +94,7 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     assert len(task_memory["branch_summaries"]) == 3
     assert task_memory["offline_evaluation"]["readiness"] in {"low", "medium", "high"}
     assert task_memory["failure_summary"]["recommendations"]
+    assert task_memory["last_research_summary"]
 
     audit_stages = [event["stage"] for event in db.list_audit_events(session_id)]
     assert "search_normalize" in audit_stages

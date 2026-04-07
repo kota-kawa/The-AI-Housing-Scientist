@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.db import Database
+from app.llm.base import LLMAdapter
 from app.main import app, create_session as create_session_endpoint
 from app.models import CreateSessionRequest
 from app.orchestrator import HousingOrchestrator
@@ -28,6 +29,51 @@ def build_settings(database_path: str) -> Settings:
         groq_model_secondary="qwen/qwen3-32b",
         claude_model="claude-sonnet-4-6",
     )
+
+
+class FakeResearchSummaryAdapter(LLMAdapter):
+    def __init__(self, summary: str):
+        self.summary = summary
+
+    def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
+        return self.summary
+
+    def generate_structured(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: dict,
+        temperature: float = 0.2,
+    ) -> dict:
+        properties = schema.get("properties", {})
+        if "branches" in properties:
+            return {
+                "branches": [
+                    {
+                        "branch_id": "balanced",
+                        "query_suggestions": [],
+                        "description_hint": "バランス重視",
+                    },
+                    {
+                        "branch_id": "strict",
+                        "query_suggestions": [],
+                        "description_hint": "厳しめ条件",
+                    },
+                    {
+                        "branch_id": "broad",
+                        "query_suggestions": [],
+                        "description_hint": "広めに収集",
+                    },
+                ],
+                "summary": "3本の探索分岐を維持します。",
+            }
+        if "assessments" in properties:
+            return {"assessments": []}
+        raise AssertionError(f"unexpected schema keys: {list(properties.keys())}")
+
+    def list_models(self) -> list[str]:
+        return ["fake-research-model"]
 
 
 def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
@@ -149,6 +195,47 @@ def test_profile_memory_is_available_across_sessions(tmp_path: Path):
     assert initial_response.status == "awaiting_profile_resume"
     assert initial_response.assistant_message == "前回の条件を引き継ぎますか？"
     assert any("江東区" in str(block.content.get("body", "")) for block in initial_response.blocks)
+
+
+def test_research_completed_response_prefers_llm_summary(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+    summary = (
+        "江東区で家賃12万円以内・駅徒歩7分以内・1LDKの条件では3件を比較できました。"
+        "最上位候補は駅徒歩4分で条件に最も近く、まずは問い合わせに進める候補です。"
+    )
+    adapter = FakeResearchSummaryAdapter(summary)
+    orchestrator._get_adapter_for_route = (
+        lambda **kwargs: adapter if kwargs.get("route_key") == "research_default" else None
+    )
+
+    session_id, _ = db.create_session()
+    orchestrator.process_user_message(
+        session_id=session_id,
+        message="江東区で家賃12万円以下、駅徒歩7分以内の1LDKを探しています",
+        provider="openai",
+    )
+    orchestrator.execute_action(
+        session_id=session_id,
+        action_type="approve_research_plan",
+        payload={},
+    )
+
+    assert orchestrator.process_next_research_job() is True
+
+    research_state = orchestrator.get_research_state(session_id)
+    assert research_state.latest_summary == summary
+    assert research_state.response is not None
+    assert research_state.response.assistant_message == summary
+    summary_block = next(
+        block for block in research_state.response.blocks if block.title == "調査サマリー"
+    )
+    assert summary_block.content["body"] == summary
+
+    _, task_memory = db.get_memories(session_id)
+    assert task_memory["last_research_summary"] == summary
 
 
 def test_fresh_start_session_skips_profile_resume_prompt(tmp_path: Path):
