@@ -71,6 +71,28 @@ class HousingOrchestrator:
         query = " ".join(parts).strip()
         return query if query and query != "賃貸" else fallback_message
 
+    def _build_question_block(
+        self,
+        *,
+        questions: list[dict[str, Any]],
+        optional: bool,
+    ) -> UIBlock:
+        intro = (
+            "検索精度を上げるため、分かるものだけ追加入力してください。"
+            if optional
+            else "検索を始めるため、まずは次の条件を教えてください。"
+        )
+        title = "追加で確認したい条件" if optional else "検索前に確認したい条件"
+        return UIBlock(
+            type="question",
+            title=title,
+            content={
+                "mode": "optional" if optional else "blocking",
+                "intro": intro,
+                "items": questions,
+            },
+        )
+
     def _build_blocks(
         self,
         *,
@@ -170,25 +192,36 @@ class HousingOrchestrator:
         )
 
         updated_user_memory = planner_result["user_memory"]
+        follow_up_questions = planner_result.get("follow_up_questions", [])
         if planner_result["missing_slots"]:
-            missing = "、".join(planner_result["missing_slots"])
-            assistant_text = f"不足条件があります。次を教えてください: {missing}"
+            assistant_text = "検索を始める前に、条件を少しだけ確認させてください。"
             task_memory["status"] = "awaiting_user_slots"
             self.db.update_memories(session_id, updated_user_memory, task_memory)
             self.db.set_pending_action(session_id, None)
+
+            blocks = []
+            if follow_up_questions:
+                blocks.append(
+                    self._build_question_block(
+                        questions=follow_up_questions,
+                        optional=False,
+                    )
+                )
+            else:
+                blocks.append(
+                    UIBlock(
+                        type="warning",
+                        title="不足情報",
+                        content={"body": assistant_text},
+                    )
+                )
 
             response = ChatMessageResponse(
                 status="awaiting_user_input",
                 assistant_message=assistant_text,
                 missing_slots=planner_result["missing_slots"],
                 next_action=planner_result["next_action"],
-                blocks=[
-                    UIBlock(
-                        type="warning",
-                        title="不足情報",
-                        content={"body": assistant_text},
-                    )
-                ],
+                blocks=blocks,
                 pending_confirmation=False,
                 pending_action=None,
             )
@@ -261,11 +294,18 @@ class HousingOrchestrator:
             communication=communication_result,
             risk_result=risk_result,
         )
+        if follow_up_questions:
+            blocks.append(
+                self._build_question_block(
+                    questions=follow_up_questions,
+                    optional=True,
+                )
+            )
 
-        assistant_message = (
-            "条件に沿って候補を比較し、問い合わせ文と契約前チェック項目を作成しました。"
-            "送信前に確認操作を実行してください。"
-        )
+        assistant_message = "条件に沿って候補を比較し、問い合わせ文と契約前チェック項目を作成しました。"
+        if follow_up_questions:
+            assistant_message += "追加で分かると精度が上がる条件も下にまとめています。"
+        assistant_message += "送信前に確認操作を実行してください。"
 
         response = ChatMessageResponse(
             status="completed",

@@ -4,6 +4,7 @@ import type { UIBlock } from "../lib/api";
 
 type Props = {
   block: UIBlock;
+  onSuggestionPick?: (prompt: string) => void;
 };
 
 type IconProps = { className?: string };
@@ -75,6 +76,17 @@ const TONES: Record<UIBlock["type"], BlockTone> = {
     surface: "bg-amber-50/70",
     badgeBg: "bg-amber-100",
     badgeText: "text-amber-800",
+  },
+  question: {
+    label: "質問",
+    iconBg: "bg-emerald-100",
+    iconColor: "text-emerald-700",
+    accentTitle: "text-emerald-800",
+    accentLabel: "text-emerald-600",
+    border: "border-emerald-200",
+    surface: "bg-emerald-50/60",
+    badgeBg: "bg-emerald-100",
+    badgeText: "text-emerald-800",
   },
 };
 
@@ -154,6 +166,22 @@ function WarningIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+function QuestionIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <circle cx="10" cy="10" r="7.2" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M8.4 7.5C8.4 6.45 9.2 5.7 10.3 5.7C11.36 5.7 12.1 6.36 12.1 7.32C12.1 8.15 11.62 8.68 10.72 9.22C9.92 9.7 9.55 10.16 9.55 11.1"
+        stroke="currentColor"
+        strokeWidth="1.55"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="9.95" cy="13.65" r="0.85" fill="currentColor" />
+    </svg>
+  );
+}
+
 function CheckmarkIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -220,6 +248,7 @@ const TYPE_ICONS: Record<UIBlock["type"], ComponentType<IconProps & SVGProps<SVG
   table: TableIcon,
   checklist: ChecklistIcon,
   warning: WarningIcon,
+  question: QuestionIcon,
 };
 
 /* ---------- Helpers ---------- */
@@ -389,7 +418,7 @@ function PropertyCard({ item, index }: { item: Record<string, unknown>; index: n
 
 /* ---------- Block dispatcher ---------- */
 
-export default function StructuredBlock({ block }: Props) {
+export default function StructuredBlock({ block, onSuggestionPick }: Props) {
   if (block.type === "text") {
     const tone = TONES.text;
     return (
@@ -413,6 +442,53 @@ export default function StructuredBlock({ block }: Props) {
           <p className="whitespace-pre-wrap text-[14px] leading-7 text-amber-900">
             {toDisplayText(block.content.body)}
           </p>
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === "question") {
+    const items = (block.content.items as Array<Record<string, unknown>>) ?? [];
+    const intro = toDisplayText(block.content.intro);
+    const tone = TONES.question;
+    return (
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} count={items.length} />
+        <div className="space-y-3 px-4 py-3.5">
+          {intro && <p className="text-[14px] leading-7 text-emerald-900">{intro}</p>}
+          {items.map((item, idx) => {
+            const label = toDisplayText(item.label) || `質問 ${idx + 1}`;
+            const question = toDisplayText(item.question);
+            const examples = Array.isArray(item.examples)
+              ? item.examples.map((example) => toDisplayText(example)).filter(Boolean)
+              : [];
+
+            return (
+              <div
+                key={`${label}-${idx}`}
+                className="rounded-2xl border border-emerald-100 bg-white/90 p-3 shadow-sm"
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-600">
+                  {label}
+                </p>
+                <p className="mt-1 text-sm leading-6 text-ink">{question}</p>
+                {examples.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {examples.map((example) => (
+                      <button
+                        key={example}
+                        type="button"
+                        onClick={() => onSuggestionPick?.(example)}
+                        className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 transition hover:border-emerald-300 hover:bg-emerald-100"
+                      >
+                        {example}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </section>
     );

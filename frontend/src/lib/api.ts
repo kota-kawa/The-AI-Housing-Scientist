@@ -1,7 +1,7 @@
 export type Provider = "openai" | "gemini" | "groq" | "claude";
 
 export type UIBlock = {
-  type: "text" | "table" | "checklist" | "cards" | "warning";
+  type: "text" | "table" | "checklist" | "cards" | "warning" | "question";
   title: string;
   content: Record<string, unknown>;
 };

@@ -5,7 +5,43 @@ from typing import Any
 
 from app.llm.base import LLMAdapter
 
-REQUIRED_SLOTS = ["budget_max", "target_area", "station_walk_max"]
+FOLLOW_UP_SLOT_ORDER = ["target_area", "budget_max", "station_walk_max"]
+SEARCH_SIGNAL_KEYS = (
+    "budget_max",
+    "target_area",
+    "station_walk_max",
+    "move_in_date",
+    "layout_preference",
+    "must_conditions",
+    "nice_to_have",
+)
+GENERIC_SEARCH_PATTERNS = (
+    re.compile(r"^(おすすめ|相談|比較|教えて|探したい|探して|お願いします)$"),
+    re.compile(
+        r"^(おすすめの)?(賃貸|物件|部屋|家)(を)?"
+        r"(探したい|探して|教えて|比較して)(ください|お願いします)?$"
+    ),
+)
+FOLLOW_UP_QUESTIONS: dict[str, dict[str, Any]] = {
+    "target_area": {
+        "slot": "target_area",
+        "label": "希望エリア",
+        "question": "どのエリアで探しますか？",
+        "examples": ["江東区", "吉祥寺", "横浜駅周辺"],
+    },
+    "budget_max": {
+        "slot": "budget_max",
+        "label": "家賃上限",
+        "question": "家賃の上限はいくらですか？",
+        "examples": ["家賃12万円以内", "家賃15万円まで", "管理費込みで18万円以下"],
+    },
+    "station_walk_max": {
+        "slot": "station_walk_max",
+        "label": "駅徒歩",
+        "question": "駅から徒歩何分以内を希望しますか？",
+        "examples": ["駅徒歩10分以内", "徒歩7分まで", "駅近だとうれしい"],
+    },
+}
 
 
 def _extract_budget_yen(text: str) -> int | None:
@@ -27,9 +63,11 @@ def _extract_station_walk(text: str) -> int | None:
 
 def _extract_target_area(text: str) -> str | None:
     patterns = [
+        r"((?:東京都|大阪府|神奈川県|埼玉県|千葉県|愛知県|京都府|兵庫県|福岡県|北海道)"
+        r"[^\s、。]{1,12}(?:区|市|町|村))",
+        r"([^\s、。]{1,12}(?:区|市|町|村))",
+        r"([^\s、。]{1,12}駅(?:周辺|近辺)?)",
         r"(渋谷|新宿|池袋|品川|目黒|中野|吉祥寺|横浜|梅田|難波|天神|札幌|名古屋)",
-        r"(東京都[^\s、。]+区)",
-        r"(大阪府[^\s、。]+区)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -102,6 +140,26 @@ def _llm_parse(message: str, adapter: LLMAdapter) -> dict[str, Any]:
     )
 
 
+def _has_structured_search_signal(merged: dict[str, Any]) -> bool:
+    return any(merged.get(key) not in (None, "", [], {}) for key in SEARCH_SIGNAL_KEYS)
+
+
+def _is_generic_search_request(message: str) -> bool:
+    normalized = re.sub(r"[\s　、。,.!！?？・]+", "", message)
+    return any(pattern.fullmatch(normalized) for pattern in GENERIC_SEARCH_PATTERNS)
+
+
+def _build_follow_up_questions(
+    merged: dict[str, Any],
+    *,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    slots = [slot for slot in FOLLOW_UP_SLOT_ORDER if merged.get(slot) in (None, "", [], {})]
+    if limit is not None:
+        slots = slots[:limit]
+    return [dict(FOLLOW_UP_QUESTIONS[slot]) for slot in slots]
+
+
 def run_planner(
     *,
     message: str,
@@ -121,10 +179,13 @@ def run_planner(
             # Rule-based fallback is the deterministic baseline for PoC.
             pass
 
-    missing_slots = [slot for slot in REQUIRED_SLOTS if slot not in merged]
-    if missing_slots:
+    follow_up_questions = _build_follow_up_questions(merged)
+
+    if not _has_structured_search_signal(merged) and _is_generic_search_request(message):
+        missing_slots = [item["slot"] for item in _build_follow_up_questions(merged, limit=3)]
         next_action = "missing_slots_question"
     else:
+        missing_slots = []
         next_action = "search_and_compare"
 
     plan_summary = {
@@ -138,6 +199,7 @@ def run_planner(
     return {
         "plan": plan_summary,
         "missing_slots": missing_slots,
+        "follow_up_questions": follow_up_questions,
         "next_action": next_action,
         "user_memory": merged,
     }

@@ -38,6 +38,16 @@ function toAssistantMessage(payload: ChatMessageResponse): Message {
   };
 }
 
+function toStatusLabel(payload: ChatMessageResponse): string {
+  if (payload.status === "awaiting_user_input") {
+    return "追加条件の回答待ち";
+  }
+  if (payload.pending_confirmation) {
+    return "確認待ち";
+  }
+  return "処理完了";
+}
+
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg
@@ -230,7 +240,7 @@ export default function App() {
     try {
       const response = await sendMessage(sessionId, userText, provider);
       setMessages((prev) => [...prev, toAssistantMessage(response)]);
-      setStatus(response.pending_confirmation ? "確認待ち" : "処理完了");
+      setStatus(toStatusLabel(response));
     } catch (e) {
       setError(e instanceof Error ? e.message : "送信に失敗しました");
       setStatus("エラー");
@@ -392,7 +402,11 @@ export default function App() {
                   {message.blocks && message.blocks.length > 0 && (
                     <div className="mt-4 space-y-3">
                       {message.blocks.map((block, idx) => (
-                        <StructuredBlock key={`${message.id}-${idx}`} block={block} />
+                        <StructuredBlock
+                          key={`${message.id}-${idx}`}
+                          block={block}
+                          onSuggestionPick={handlePromptPick}
+                        />
                       ))}
                     </div>
                   )}

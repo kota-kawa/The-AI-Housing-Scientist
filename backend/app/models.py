@@ -50,7 +50,7 @@ class ChecklistItem(BaseModel):
 
 
 class UIBlock(BaseModel):
-    type: Literal["text", "table", "checklist", "cards", "warning"]
+    type: Literal["text", "table", "checklist", "cards", "warning", "question"]
     title: str = ""
     content: dict[str, Any] = Field(default_factory=dict)
 
