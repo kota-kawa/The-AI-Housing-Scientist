@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from typing import Any
+
+from app.llm.base import LLMAdapter
 
 
 MAX_SEARCH_HISTORY = 12
@@ -72,6 +75,7 @@ def update_profile_memory_with_search(
     query: str,
     user_memory: dict[str, Any],
     searched_at: str,
+    adapter: LLMAdapter | None = None,
 ) -> dict[str, Any]:
     updated = dict(profile_memory)
     search_history = list(updated.get("search_history", []) or [])
@@ -90,6 +94,7 @@ def update_profile_memory_with_search(
     updated["learned_preferences"] = infer_learned_preferences(
         updated["search_history"],
         updated.get("reaction_history", []) or [],
+        adapter=adapter,
     )
     return updated
 
@@ -100,6 +105,7 @@ def update_profile_memory_with_reaction(
     reaction: str,
     property_snapshot: dict[str, Any],
     recorded_at: str,
+    adapter: LLMAdapter | None = None,
 ) -> dict[str, Any]:
     updated = dict(profile_memory)
     reaction_history = list(updated.get("reaction_history", []) or [])
@@ -118,13 +124,82 @@ def update_profile_memory_with_reaction(
     updated["learned_preferences"] = infer_learned_preferences(
         updated.get("search_history", []) or [],
         updated["reaction_history"],
+        adapter=adapter,
     )
     return updated
+
+
+def _infer_preferences_with_llm(
+    *,
+    adapter: LLMAdapter,
+    search_history: list[dict[str, Any]],
+    reaction_history: list[dict[str, Any]],
+) -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "properties": {
+            "primary_driver": {"type": "string"},
+            "hidden_preferences": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "temporal_trend": {"type": "string"},
+            "reliability": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        "required": ["primary_driver", "hidden_preferences", "temporal_trend", "reliability"],
+        "additionalProperties": False,
+    }
+    payload = {
+        "search_history": [
+            {
+                "searched_at": entry.get("searched_at", ""),
+                "query": entry.get("query", ""),
+                "target_area": str((entry.get("user_memory") or {}).get("target_area") or ""),
+                "budget_max": int((entry.get("user_memory") or {}).get("budget_max") or 0),
+                "layout_preference": str((entry.get("user_memory") or {}).get("layout_preference") or ""),
+                "station_walk_max": int((entry.get("user_memory") or {}).get("station_walk_max") or 0),
+            }
+            for entry in search_history
+        ],
+        "reaction_history": [
+            {
+                "recorded_at": entry.get("recorded_at", ""),
+                "reaction": entry.get("reaction", ""),
+                "building_name": str(entry.get("building_name") or ""),
+                "area_name": str(entry.get("area_name") or ""),
+                "layout": str(entry.get("layout") or ""),
+                "features": (entry.get("features") or [])[:5],
+            }
+            for entry in reaction_history
+        ],
+        "output_rules": [
+            "primary_driver: 検索・反応履歴から読み取れるユーザーの最重要条件を1文で",
+            "hidden_preferences: 表明条件には現れないが行動（お気に入り・除外）から読み取れる隠れた好みのリスト（最大5件）",
+            "temporal_trend: 時系列で変化しているパターンの説明。変化が見られなければ空文字",
+            "reliability: 履歴が少ない・矛盾が多い場合は低く、一貫性が高い場合は高く（0〜1）",
+        ],
+    }
+    try:
+        return adapter.generate_structured(
+            system=(
+                "You analyze a user's Japanese rental property search and reaction history "
+                "to infer latent preferences not captured by explicit filter conditions. "
+                "Look for contradictions between stated budget/conditions and actual favorites. "
+                "Identify implicit requirements that appear consistently in liked properties."
+            ),
+            user=json.dumps(payload, ensure_ascii=False, indent=2),
+            schema=schema,
+            temperature=0.1,
+        )
+    except Exception:
+        return {}
 
 
 def infer_learned_preferences(
     search_history: list[dict[str, Any]],
     reaction_history: list[dict[str, Any]],
+    *,
+    adapter: LLMAdapter | None = None,
 ) -> dict[str, Any]:
     area_counter: Counter[str] = Counter()
     layout_counter: Counter[str] = Counter()
@@ -177,7 +252,7 @@ def infer_learned_preferences(
         if count >= 2:
             frequent_area = area_label
 
-    return {
+    result: dict[str, Any] = {
         "frequent_area": frequent_area,
         "stable_preferences": stable_preferences,
         "liked_features": [label for label, count in liked_feature_counter.most_common(3) if count >= 1],
@@ -185,3 +260,14 @@ def infer_learned_preferences(
             label for label, count in excluded_feature_counter.most_common(3) if count >= 1
         ],
     }
+
+    if adapter is not None and (len(search_history) >= 2 or len(reaction_history) >= 2):
+        llm_inferred = _infer_preferences_with_llm(
+            adapter=adapter,
+            search_history=search_history[-10:],
+            reaction_history=reaction_history[-10:],
+        )
+        if llm_inferred:
+            result["llm_inferred"] = llm_inferred
+
+    return result

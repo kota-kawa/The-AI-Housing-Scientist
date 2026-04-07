@@ -377,7 +377,8 @@ def _build_fallback_property(
 ) -> PropertyNormalized:
     title = item.get("title", "")
     description = item.get("description", "")
-    combined = f"{title} {description} {' '.join(item.get('extra_snippets', []))}"
+    snippet_summary = str(item.get("snippet_summary") or "")
+    combined = f"{title} {description} {snippet_summary} {' '.join(item.get('extra_snippets', []))}"
     seed = f"{source_id}:{item.get('url', '')}:{title}"
     property_id_norm = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
 
@@ -578,7 +579,99 @@ def _duplicate_match(left: PropertyNormalized, right: PropertyNormalized) -> tup
     return None
 
 
-def _build_duplicate_groups(properties: list[PropertyNormalized]) -> list[DuplicateGroup]:
+_LLM_DUPLICATE_CANDIDATE_LIMIT = 20
+
+
+def _llm_verify_duplicate_pairs(
+    *,
+    adapter: LLMAdapter,
+    candidate_pairs: list[tuple[int, int, PropertyNormalized, PropertyNormalized]],
+) -> set[tuple[int, int]]:
+    schema = {
+        "type": "object",
+        "properties": {
+            "verdicts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "pair_index": {"type": "integer"},
+                        "is_same_building": {"type": "boolean"},
+                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    },
+                    "required": ["pair_index", "is_same_building", "confidence"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["verdicts"],
+        "additionalProperties": False,
+    }
+    pairs_payload = [
+        {
+            "pair_index": i,
+            "property_a": {
+                "building_name": left.building_name,
+                "building_name_norm": left.building_name_norm,
+                "address": left.address,
+                "layout": left.layout,
+                "area_m2": left.area_m2,
+                "rent": left.rent,
+                "nearest_station": left.nearest_station,
+            },
+            "property_b": {
+                "building_name": right.building_name,
+                "building_name_norm": right.building_name_norm,
+                "address": right.address,
+                "layout": right.layout,
+                "area_m2": right.area_m2,
+                "rent": right.rent,
+                "nearest_station": right.nearest_station,
+            },
+        }
+        for i, (_, _, left, right) in enumerate(candidate_pairs)
+    ]
+    try:
+        result = adapter.generate_structured(
+            system=(
+                "You are a Japanese property deduplication assistant. "
+                "Determine whether each pair of rental listings refers to the same physical building. "
+                "Account for name variations: English/Japanese transliterations, abbreviations, and "
+                "formatting differences (e.g. 'PARK COURT SHIBUYA' = 'パークコート渋谷')."
+            ),
+            user=json.dumps(
+                {
+                    "pairs": pairs_payload,
+                    "output_rules": [
+                        "is_same_building: true なら同一建物と判断",
+                        "confidence: 0〜1。名前・住所・物件情報の一致度に基づく確信度",
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            schema=schema,
+            temperature=0.0,
+        )
+    except Exception:
+        return set()
+
+    confirmed: set[tuple[int, int]] = set()
+    for verdict in result.get("verdicts", []) or []:
+        pair_idx = int(verdict.get("pair_index") or -1)
+        if pair_idx < 0 or pair_idx >= len(candidate_pairs):
+            continue
+        if verdict.get("is_same_building") and float(verdict.get("confidence") or 0) >= 0.7:
+            left_index, right_index, _, _ = candidate_pairs[pair_idx]
+            confirmed.add((left_index, right_index))
+    return confirmed
+
+
+def _build_duplicate_groups(
+    properties: list[PropertyNormalized],
+    *,
+    adapter: LLMAdapter | None = None,
+) -> list[DuplicateGroup]:
     parent = list(range(len(properties)))
     group_reasons: dict[int, list[tuple[float, str]]] = defaultdict(list)
 
@@ -598,14 +691,27 @@ def _build_duplicate_groups(properties: list[PropertyNormalized]) -> list[Duplic
         group_reasons[left_root].extend(group_reasons.pop(right_root, []))
         group_reasons[left_root].append((confidence, reason))
 
+    llm_candidates: list[tuple[int, int, PropertyNormalized, PropertyNormalized]] = []
+
     for left_index, left_prop in enumerate(properties):
         for right_index in range(left_index + 1, len(properties)):
             right_prop = properties[right_index]
             match = _duplicate_match(left_prop, right_prop)
-            if match is None:
-                continue
-            confidence, reason = match
-            union(left_index, right_index, confidence, reason)
+            if match is not None:
+                confidence, reason = match
+                union(left_index, right_index, confidence, reason)
+            elif adapter is not None and len(llm_candidates) < _LLM_DUPLICATE_CANDIDATE_LIMIT:
+                name_sim = _levenshtein_ratio(left_prop.building_name_norm, right_prop.building_name_norm)
+                if name_sim > 0.6:
+                    llm_candidates.append((left_index, right_index, left_prop, right_prop))
+
+    if llm_candidates:
+        llm_confirmed = _llm_verify_duplicate_pairs(
+            adapter=adapter,  # type: ignore[arg-type]
+            candidate_pairs=llm_candidates,
+        )
+        for left_index, right_index in llm_confirmed:
+            union(left_index, right_index, 0.72, "LLM判定: 同一建物（表記ゆれ）")
 
     grouped: dict[int, list[PropertyNormalized]] = defaultdict(list)
     for index, prop in enumerate(properties):
@@ -671,7 +777,7 @@ def run_search_and_normalize(
 
         properties.append(prop)
 
-    duplicates = _build_duplicate_groups(properties)
+    duplicates = _build_duplicate_groups(properties, adapter=adapter)
 
     return {
         "query": query,

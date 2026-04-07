@@ -537,6 +537,7 @@ class HousingOrchestrator:
         profile_id: str,
         user_memory: dict[str, Any],
         query: str,
+        adapter: LLMAdapter | None = None,
     ) -> dict[str, Any]:
         profile = self.db.get_profile(profile_id)
         if profile is None:
@@ -547,6 +548,7 @@ class HousingOrchestrator:
             query=query,
             user_memory=user_memory,
             searched_at=utc_now_iso(),
+            adapter=adapter,
         )
         merged_user_memory = merge_learned_preferences(
             {key: value for key, value in user_memory.items() if key != "learned_preferences"},
@@ -561,6 +563,7 @@ class HousingOrchestrator:
         profile_id: str,
         property_snapshot: dict[str, Any],
         reaction: str,
+        adapter: LLMAdapter | None = None,
     ) -> dict[str, Any] | None:
         profile = self.db.get_profile(profile_id)
         if profile is None:
@@ -571,6 +574,7 @@ class HousingOrchestrator:
             reaction=reaction,
             property_snapshot=property_snapshot,
             recorded_at=utc_now_iso(),
+            adapter=adapter,
         )
         merged_user_memory = merge_learned_preferences(
             {key: value for key, value in profile["user_memory"].items() if key != "learned_preferences"},
@@ -1318,7 +1322,7 @@ class HousingOrchestrator:
                 brave_results = BraveSearchClient(
                     self.settings.brave_search_api_key,
                     timeout_seconds=self.settings.llm_timeout_seconds,
-                ).search(query=query, count=6)
+                ).search(query=query, count=6, adapter=adapter)
                 for item in brave_results:
                     item["source_name"] = "brave"
             except Exception as exc:
@@ -1509,6 +1513,7 @@ class HousingOrchestrator:
                 profile_id=profile_id,
                 user_memory=updated_user_memory,
                 query=execution_result.query,
+                adapter=research_adapter,
             )
 
         task_memory["status"] = "research_completed"
@@ -1963,10 +1968,17 @@ class HousingOrchestrator:
 
             profile_user_memory = None
             if session["profile_id"] and reaction in {"favorite", "exclude"}:
+                profile_adapter = self._get_adapter_for_route(
+                    llm_config=llm_config,
+                    route_key="planner",
+                    session_id=session_id,
+                    interaction_type="profile",
+                )
                 profile_user_memory = self._sync_profile_after_reaction(
                     profile_id=session["profile_id"],
                     property_snapshot=property_snapshot,
                     reaction=reaction,
+                    adapter=profile_adapter,
                 )
             if profile_user_memory is not None:
                 user_memory = merge_learned_preferences(

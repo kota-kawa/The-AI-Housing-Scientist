@@ -5,6 +5,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from app.llm.base import LLMAdapter
+
 
 def _structured_property_ratio(normalized_properties: list[dict[str, Any]]) -> float:
     if not normalized_properties:
@@ -206,11 +208,75 @@ def evaluate_final_result(
     }
 
 
+def generate_branch_selection_rationale(
+    *,
+    selected_branch: dict[str, Any],
+    other_branches: list[dict[str, Any]],
+    adapter: LLMAdapter,
+) -> str:
+    schema = {
+        "type": "object",
+        "properties": {
+            "why_selected": {"type": "string"},
+            "improvement_suggestions": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": ["why_selected", "improvement_suggestions"],
+        "additionalProperties": False,
+    }
+
+    def _branch_metrics(branch: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "branch_id": branch.get("branch_id", ""),
+            "label": branch.get("label", ""),
+            "branch_score": branch.get("branch_score", 0),
+            "normalized_count": branch.get("normalized_count", 0),
+            "detail_coverage": branch.get("detail_coverage", 0),
+            "structured_ratio": branch.get("structured_ratio", 0),
+            "avg_top3_score": branch.get("avg_top3_score", 0),
+            "source_diversity": branch.get("source_diversity", 0),
+            "duplicate_ratio": branch.get("duplicate_ratio", 0),
+            "issues": branch.get("issues", []),
+        }
+
+    payload = {
+        "selected_branch": _branch_metrics(selected_branch),
+        "other_branches": [_branch_metrics(b) for b in other_branches],
+        "output_rules": [
+            "why_selected: 選ばれた分岐が他より優れていた理由を2〜3文の日本語で説明",
+            "improvement_suggestions: 次回の探索で試すべき改善点のリスト（最大3件）",
+        ],
+    }
+    try:
+        result = adapter.generate_structured(
+            system=(
+                "You analyze branch evaluation metrics from a Japanese rental property research system "
+                "and explain why the selected branch outperformed alternatives. "
+                "Focus on concrete metric differences and actionable next steps."
+            ),
+            user=json.dumps(payload, ensure_ascii=False, indent=2),
+            schema=schema,
+            temperature=0.1,
+        )
+        why = str(result.get("why_selected") or "").strip()
+        suggestions = [str(s).strip() for s in (result.get("improvement_suggestions") or []) if str(s).strip()]
+        parts = [why] + suggestions
+        return " / ".join(p for p in parts if p)
+    except Exception:
+        return ""
+
+
 def load_offline_eval_cases(path: str | Path) -> list[dict[str, Any]]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def run_offline_eval_case(case: dict[str, Any]) -> dict[str, Any]:
+def run_offline_eval_case(
+    case: dict[str, Any],
+    *,
+    adapter: LLMAdapter | None = None,
+) -> dict[str, Any]:
     branch_summaries = [
         evaluate_branch(
             branch_id=str(branch["branch_id"]),
@@ -232,6 +298,17 @@ def run_offline_eval_case(case: dict[str, Any]) -> dict[str, Any]:
     )
     failure_summary = summarize_branch_failures(branch_summaries)
 
+    analysis: dict[str, Any] = {}
+    if adapter is not None and selected_branch is not None and len(branch_summaries) > 1:
+        other_branches = [b for b in branch_summaries if b.get("branch_id") != selected_branch.get("branch_id")]
+        rationale = generate_branch_selection_rationale(
+            selected_branch=selected_branch,
+            other_branches=other_branches,
+            adapter=adapter,
+        )
+        if rationale:
+            analysis["rationale"] = rationale
+
     expectations = case.get("expectations", {}) or {}
     checks = {
         "selected_branch_id": selected_branch is not None
@@ -242,7 +319,7 @@ def run_offline_eval_case(case: dict[str, Any]) -> dict[str, Any]:
             or expectations.get("top_issue_contains") in failure_summary.get("top_issues", [])
         ),
     }
-    return {
+    result: dict[str, Any] = {
         "name": case.get("name", "unnamed"),
         "selected_branch": selected_branch,
         "final_result": final_result,
@@ -250,10 +327,17 @@ def run_offline_eval_case(case: dict[str, Any]) -> dict[str, Any]:
         "checks": checks,
         "passed": all(checks.values()),
     }
+    if analysis:
+        result["analysis"] = analysis
+    return result
 
 
-def run_offline_eval_suite(cases: list[dict[str, Any]]) -> dict[str, Any]:
-    case_results = [run_offline_eval_case(case) for case in cases]
+def run_offline_eval_suite(
+    cases: list[dict[str, Any]],
+    *,
+    adapter: LLMAdapter | None = None,
+) -> dict[str, Any]:
+    case_results = [run_offline_eval_case(case, adapter=adapter) for case in cases]
     passed_count = sum(1 for case in case_results if case["passed"])
     return {
         "case_count": len(case_results),
