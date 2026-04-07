@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from app.config import ProviderName, Settings, get_provider_model
 from app.db import Database, utc_now_iso
 from app.llm import create_adapter
+from app.llm.observability import (
+    DatabaseLLMObserver,
+    LLMObservationContext,
+    ObservedLLMAdapter,
+    build_cost_estimator,
+)
 from app.models import ChatMessageResponse, ResearchStateResponse, UIBlock
 from app.profile_memory import (
     build_profile_resume_summary,
@@ -14,8 +19,9 @@ from app.profile_memory import (
     update_profile_memory_with_reaction,
     update_profile_memory_with_search,
 )
+from app.research import HousingResearchAgentManager
 from app.services import BraveSearchClient, PropertyCatalogService
-from app.stages import run_communication, run_ranking, run_risk_check, run_search_and_normalize
+from app.stages import run_communication, run_risk_check
 from app.stages.planner import detect_search_signal, run_planner
 from app.stages.risk_check import looks_like_contract_text
 
@@ -37,8 +43,19 @@ class HousingOrchestrator:
         self.db = db
         self.catalog = PropertyCatalogService(db)
         self._model_cache: dict[str, list[str]] = {}
+        self._llm_observer = DatabaseLLMObserver(
+            db,
+            cost_estimator=build_cost_estimator(settings.llm_pricing_overrides_json),
+        )
 
-    def _get_adapter_or_none(self, provider: ProviderName):
+    def _get_adapter_or_none(
+        self,
+        provider: ProviderName,
+        *,
+        session_id: str | None = None,
+        job_id: str | None = None,
+        interaction_type: str = "general",
+    ):
         key_map = {
             "openai": self.settings.openai_api_key,
             "gemini": self.settings.gemini_api_key,
@@ -65,6 +82,21 @@ class HousingOrchestrator:
                     )
             elif wanted not in models:
                 raise RuntimeError(f"strict mode: model ID not available for {provider}: {wanted}")
+
+        if session_id is not None or job_id is not None:
+            model_name = getattr(adapter, "model", get_provider_model(self.settings, provider))
+            adapter = ObservedLLMAdapter(
+                wrapped=adapter,
+                observer=self._llm_observer,
+                context_factory=lambda operation, metadata: LLMObservationContext(
+                    session_id=session_id,
+                    job_id=job_id,
+                    operation=f"{interaction_type}:{operation}",
+                    provider=provider,
+                    model=model_name,
+                    metadata=metadata,
+                ),
+            )
 
         return adapter
 
@@ -211,7 +243,7 @@ class HousingOrchestrator:
         completed_nodes = {
             node["stage"]: node
             for node in self.db.list_research_journal_nodes(job["id"])
-            if node["status"] == "completed"
+            if node["status"] == "completed" and node["node_type"] == "stage"
         }
         items: list[dict[str, str]] = []
         for stage_name, label in RESEARCH_STAGE_ORDER:
@@ -655,8 +687,82 @@ class HousingOrchestrator:
             )
         )
 
+        branch_summaries = task_memory.get("branch_summaries") or []
+        selected_branch_id = str(task_memory.get("selected_branch_id") or "")
+        if branch_summaries:
+            rows = []
+            for item in sorted(
+                branch_summaries,
+                key=lambda summary: float(summary.get("branch_score") or 0.0),
+                reverse=True,
+            ):
+                label = str(item.get("label") or item.get("branch_id") or "branch")
+                if str(item.get("branch_id") or "") == selected_branch_id:
+                    label = f"{label} (selected)"
+                rows.append(
+                    {
+                        "branch": label,
+                        "score": float(item.get("branch_score") or 0.0),
+                        "query_count": int(item.get("query_count") or 0),
+                        "normalized_count": int(item.get("normalized_count") or 0),
+                        "detail_coverage": f"{round(float(item.get('detail_coverage') or 0.0) * 100)}%",
+                        "summary": str(item.get("summary") or ""),
+                    }
+                )
+            blocks.append(
+                UIBlock(
+                    type="table",
+                    title="探索分岐の比較",
+                    content={
+                        "columns": [
+                            "branch",
+                            "score",
+                            "query_count",
+                            "normalized_count",
+                            "detail_coverage",
+                            "summary",
+                        ],
+                        "rows": rows,
+                    },
+                )
+            )
+
         if source_items:
             blocks.append(self._build_sources_block(source_items))
+
+        offline_evaluation = task_memory.get("offline_evaluation") or {}
+        if offline_evaluation:
+            blocks.append(
+                UIBlock(
+                    type="text",
+                    title="オフライン評価",
+                    content={
+                        "body": (
+                            f"readiness: {offline_evaluation.get('readiness', 'unknown')}\n"
+                            f"候補数: {offline_evaluation.get('visible_candidate_count', 0)}\n"
+                            f"詳細補完率: {round(float(offline_evaluation.get('detail_coverage', 0.0)) * 100)}%\n"
+                            f"構造化率: {round(float(offline_evaluation.get('structured_ratio', 0.0)) * 100)}%\n"
+                            f"次の改善候補: {' / '.join(offline_evaluation.get('recommendations', [])[:3])}"
+                        )
+                    },
+                )
+            )
+
+        failure_summary = task_memory.get("failure_summary") or {}
+        if failure_summary and failure_summary.get("top_issues"):
+            blocks.append(
+                UIBlock(
+                    type="warning",
+                    title="探索の改善余地",
+                    content={
+                        "body": (
+                            f"{failure_summary.get('summary', '')}\n"
+                            f"主な課題: {' / '.join(failure_summary.get('top_issues', [])[:3])}\n"
+                            f"改善候補: {' / '.join(failure_summary.get('recommendations', [])[:3])}"
+                        )
+                    },
+                )
+            )
 
         return blocks
 
@@ -1150,162 +1256,6 @@ class HousingOrchestrator:
         self.db.add_message(session_id, "assistant", response.model_dump())
         return response
 
-    def _run_research_stage(
-        self,
-        *,
-        job_id: str,
-        stage_name: str,
-        progress_percent: int,
-        latest_summary: str,
-        input_payload: dict[str, Any],
-        reasoning: str,
-        runner: Any,
-    ) -> dict[str, Any]:
-        self.db.update_research_job(
-            job_id,
-            current_stage=stage_name,
-            progress_percent=progress_percent,
-            latest_summary=latest_summary,
-        )
-        started = time.perf_counter()
-        try:
-            output = runner()
-        except Exception as exc:
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            self.db.add_research_journal_node(
-                job_id=job_id,
-                stage=stage_name,
-                node_type="stage",
-                status="failed",
-                input_payload=input_payload,
-                output_payload={"error": str(exc)},
-                reasoning=reasoning,
-                duration_ms=duration_ms,
-            )
-            raise
-
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        self.db.add_research_journal_node(
-            job_id=job_id,
-            stage=stage_name,
-            node_type="stage",
-            status="completed",
-            input_payload=input_payload,
-            output_payload=output,
-            reasoning=reasoning,
-            duration_ms=duration_ms,
-        )
-        return output
-
-    def _retrieve_across_queries(
-        self,
-        *,
-        job_id: str,
-        queries: list[str],
-        user_memory: dict[str, Any],
-    ) -> dict[str, Any]:
-        merged_by_url: dict[str, dict[str, Any]] = {}
-        per_query: list[dict[str, Any]] = []
-        catalog_total = 0
-        brave_total = 0
-        brave_errors: list[str] = []
-
-        for index, query in enumerate(queries, start=1):
-            self.db.update_research_job(
-                job_id,
-                current_stage="retrieve",
-                progress_percent=25,
-                latest_summary=f"{index}/{len(queries)}件目のクエリを収集中: {query}",
-            )
-            results, source_summary = self._collect_search_results(
-                query=query,
-                user_memory=user_memory,
-            )
-            catalog_total += int(source_summary["catalog_result_count"])
-            brave_total += int(source_summary["brave_result_count"])
-            if source_summary["brave_error"]:
-                brave_errors.append(str(source_summary["brave_error"]))
-
-            per_query.append(
-                {
-                    "query": query,
-                    "result_count": len(results),
-                    "catalog_result_count": source_summary["catalog_result_count"],
-                    "brave_result_count": source_summary["brave_result_count"],
-                }
-            )
-
-            for item in results:
-                url = str(item.get("url") or "").strip()
-                if not url:
-                    continue
-                source_name = str(item.get("source_name") or "unknown")
-                if url not in merged_by_url:
-                    merged_by_url[url] = {
-                        **item,
-                        "matched_queries": [query],
-                        "source_names": [source_name],
-                        "source_name": source_name,
-                    }
-                    continue
-                existing = merged_by_url[url]
-                if query not in existing["matched_queries"]:
-                    existing["matched_queries"].append(query)
-                if source_name not in existing["source_names"]:
-                    existing["source_names"].append(source_name)
-                snippets = list(existing.get("extra_snippets", []) or [])
-                for snippet in item.get("extra_snippets", []) or []:
-                    text = str(snippet).strip()
-                    if text and text not in snippets:
-                        snippets.append(text)
-                existing["extra_snippets"] = snippets[:6]
-                if len(existing["source_names"]) > 1:
-                    existing["source_name"] = "multi_source"
-
-        raw_results = list(merged_by_url.values())
-        return {
-            "raw_results": raw_results,
-            "summary": {
-                "query_count": len(queries),
-                "unique_url_count": len(raw_results),
-                "catalog_result_count": catalog_total,
-                "brave_result_count": brave_total,
-                "brave_error_count": len(brave_errors),
-            },
-            "per_query": per_query,
-        }
-
-    def _prefetch_detail_pages(
-        self,
-        *,
-        job_id: str,
-        raw_results: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        detail_html_map: dict[str, str] = {}
-        total = len(raw_results)
-        for index, item in enumerate(raw_results, start=1):
-            url = str(item.get("url") or "").strip()
-            if not url:
-                continue
-            detail_html = self.catalog.fetch_detail_html(url)
-            if detail_html:
-                detail_html_map[url] = detail_html
-            if total and (index == 1 or index == total or index % 3 == 0):
-                self.db.update_research_job(
-                    job_id,
-                    current_stage="enrich",
-                    progress_percent=45,
-                    latest_summary=f"詳細ページを補完中: {index}/{total}件",
-                )
-        return {
-            "detail_html_map": detail_html_map,
-            "summary": {
-                "detail_attempt_count": total,
-                "detail_hit_count": len(detail_html_map),
-                "summary": f"詳細ページを {len(detail_html_map)} 件取得",
-            },
-        }
-
     def _execute_research_job(self, job_id: str) -> dict[str, Any]:
         job = self.db.get_research_job(job_id)
         if job is None:
@@ -1315,108 +1265,20 @@ class HousingOrchestrator:
         approved_plan = job["approved_plan"]
         user_memory, task_memory = self.db.get_memories(session_id)
         provider = str(job.get("provider") or task_memory.get("last_provider") or self.settings.llm_default_provider)
-        adapter = self._get_adapter_or_none(provider) if provider in {"openai", "gemini", "groq", "claude"} else None
-
-        plan_result = self._run_research_stage(
+        manager = HousingResearchAgentManager(
+            db=self.db,
+            session_id=session_id,
             job_id=job_id,
-            stage_name="plan_finalize",
-            progress_percent=10,
-            latest_summary="承認済み計画を確認しています。",
-            input_payload={"approved_plan": approved_plan},
-            reasoning="ユーザー承認済みの計画を固定し、以降の調査に使う条件を確定する。",
-            runner=lambda: {
-                "summary": f"条件 {len(approved_plan.get('conditions', []))} 件で調査開始",
-                "search_query": approved_plan.get("search_query", ""),
-            },
+            approved_plan=approved_plan,
+            user_memory=user_memory,
+            task_memory=task_memory,
+            provider=provider,
+            build_research_queries=self._build_research_queries,
+            collect_search_results=self._collect_search_results,
+            fetch_detail_html=self.catalog.fetch_detail_html,
+            collect_source_items=self._collect_research_source_items,
         )
-
-        queries_result = self._run_research_stage(
-            job_id=job_id,
-            stage_name="query_expand",
-            progress_percent=18,
-            latest_summary="複数の検索クエリに展開しています。",
-            input_payload={"search_query": plan_result["search_query"]},
-            reasoning="単発検索を避け、条件ごとの観点で収集漏れを減らす。",
-            runner=lambda: {
-                "queries": self._build_research_queries(
-                    approved_plan.get("user_memory_snapshot", user_memory),
-                    str(approved_plan.get("search_query") or ""),
-                ),
-                "summary": "検索クエリを展開",
-            },
-        )
-        queries = queries_result["queries"]
-
-        retrieve_result = self._run_research_stage(
-            job_id=job_id,
-            stage_name="retrieve",
-            progress_percent=25,
-            latest_summary="検索結果を収集しています。",
-            input_payload={"queries": queries},
-            reasoning="複数クエリの結果をまとめて収集し、URL単位で統合する。",
-            runner=lambda: self._retrieve_across_queries(
-                job_id=job_id,
-                queries=queries,
-                user_memory=approved_plan.get("user_memory_snapshot", user_memory),
-            ),
-        )
-        raw_results = retrieve_result["raw_results"]
-
-        enrich_result = self._run_research_stage(
-            job_id=job_id,
-            stage_name="enrich",
-            progress_percent=45,
-            latest_summary="候補の詳細ページを確認しています。",
-            input_payload={"raw_result_count": len(raw_results)},
-            reasoning="詳細ページを優先して読み、賃料や駅距離などの精度を上げる。",
-            runner=lambda: self._prefetch_detail_pages(job_id=job_id, raw_results=raw_results),
-        )
-        detail_html_map = enrich_result["detail_html_map"]
-
-        query = str(approved_plan.get("search_query") or self._build_search_query(user_memory, "賃貸"))
-        def normalize_runner() -> dict[str, Any]:
-            return run_search_and_normalize(
-                query=query,
-                search_results=raw_results,
-                detail_fetcher=lambda url: detail_html_map.get(url),
-            )
-
-        search_result = self._run_research_stage(
-            job_id=job_id,
-            stage_name="normalize_dedupe",
-            progress_percent=62,
-            latest_summary="表記ゆれと重複掲載を整理しています。",
-            input_payload={"query": query, "raw_result_count": len(raw_results)},
-            reasoning="詳細ページとスニペットを共通スキーマへ揃え、重複候補を統合する。",
-            runner=normalize_runner,
-        )
-        self.db.add_audit_event(
-            session_id,
-            "search_normalize",
-            {"query": query, "query_expand": queries, "retrieve_summary": retrieve_result["summary"]},
-            search_result,
-            "複数検索結果を詳細優先で正規化し、重複候補を整理",
-        )
-
-        ranking_result = self._run_research_stage(
-            job_id=job_id,
-            stage_name="rank",
-            progress_percent=78,
-            latest_summary="候補の優先順位を評価しています。",
-            input_payload={"normalized_property_count": len(search_result["normalized_properties"])},
-            reasoning="条件一致度と不足情報を見て問い合わせ候補を順位付けする。",
-            runner=lambda: run_ranking(
-                normalized_properties=search_result["normalized_properties"],
-                user_memory=approved_plan.get("user_memory_snapshot", user_memory),
-            ),
-        )
-        self.db.add_audit_event(
-            session_id,
-            "ranking",
-            {"user_memory": approved_plan.get("user_memory_snapshot", user_memory)},
-            ranking_result,
-            "条件スコアと取得情報の充実度から順位付け",
-        )
+        execution_result = manager.execute()
 
         session = self.db.get_session(session_id)
         profile_id = session["profile_id"] if session is not None else ""
@@ -1425,38 +1287,18 @@ class HousingOrchestrator:
             updated_user_memory = self._sync_profile_after_search(
                 profile_id=profile_id,
                 user_memory=updated_user_memory,
-                query=query,
+                query=execution_result.query,
             )
-
-        source_items = self._collect_research_source_items(
-            ranked_properties=ranking_result["ranked_properties"],
-            normalized_properties=search_result["normalized_properties"],
-            raw_results=raw_results,
-        )
-        search_summary = search_result["summary"] | retrieve_result["summary"] | enrich_result["summary"]
-
-        self._run_research_stage(
-            job_id=job_id,
-            stage_name="synthesize",
-            progress_percent=92,
-            latest_summary="結果を人向けに整理しています。",
-            input_payload={"ranked_property_count": len(ranking_result["ranked_properties"])},
-            reasoning="比較結果・不確実性・参照ソースをユーザー向けに整理する。",
-            runner=lambda: {
-                "summary": "結果要約を作成",
-                "source_item_count": len(source_items),
-            },
-        )
 
         task_memory["status"] = "research_completed"
         task_memory["awaiting_contract_text"] = False
         task_memory["profile_resume_pending"] = False
-        task_memory["last_query"] = query
-        task_memory["last_normalized_properties"] = search_result["normalized_properties"]
-        task_memory["last_ranked_properties"] = ranking_result["ranked_properties"]
-        task_memory["last_duplicate_groups"] = search_result["duplicate_groups"]
-        task_memory["last_search_summary"] = search_summary
-        task_memory["last_source_items"] = source_items
+        task_memory["last_query"] = execution_result.query
+        task_memory["last_normalized_properties"] = execution_result.normalized_properties
+        task_memory["last_ranked_properties"] = execution_result.ranked_properties
+        task_memory["last_duplicate_groups"] = execution_result.duplicate_groups
+        task_memory["last_search_summary"] = execution_result.search_summary
+        task_memory["last_source_items"] = execution_result.source_items
         task_memory["selected_property_id"] = None
         task_memory["risk_items"] = []
         task_memory["property_reactions"] = {}
@@ -1466,6 +1308,10 @@ class HousingOrchestrator:
         task_memory["active_research_job_id"] = None
         task_memory["last_research_job_id"] = job_id
         task_memory["last_provider"] = provider
+        task_memory["selected_branch_id"] = execution_result.selected_branch_id
+        task_memory["branch_summaries"] = execution_result.branch_summaries
+        task_memory["offline_evaluation"] = execution_result.offline_evaluation
+        task_memory["failure_summary"] = execution_result.failure_summary
         self.db.set_pending_action(session_id, None)
         self.db.update_memories(session_id, updated_user_memory, task_memory)
 
@@ -1479,7 +1325,7 @@ class HousingOrchestrator:
         )
         completed_job = self.db.get_research_job(job_id)
         visible_ranked_properties = self._visible_ranked_properties(
-            ranking_result["ranked_properties"],
+            execution_result.ranked_properties,
             task_memory,
         )
         response = ChatMessageResponse(
@@ -1492,9 +1338,9 @@ class HousingOrchestrator:
             next_action="select_property",
             blocks=self._build_research_result_blocks(
                 ranked_properties=visible_ranked_properties,
-                normalized_properties=search_result["normalized_properties"],
-                search_summary=search_summary,
-                source_items=source_items,
+                normalized_properties=execution_result.normalized_properties,
+                search_summary=execution_result.search_summary,
+                source_items=execution_result.source_items,
                 task_memory=task_memory,
                 job_id=completed_job["id"] if completed_job else job_id,
             ),
@@ -1663,7 +1509,11 @@ class HousingOrchestrator:
                 message=message,
             )
 
-        adapter = self._get_adapter_or_none(provider)
+        adapter = self._get_adapter_or_none(
+            provider,
+            session_id=session_id,
+            interaction_type="planner",
+        )
         return self._process_search_message(
             session_id=session_id,
             message=message,
@@ -1923,7 +1773,12 @@ class HousingOrchestrator:
                 raise RuntimeError("property_id is required")
 
             provider = task_memory.get("last_provider") or self.settings.llm_default_provider
-            adapter = self._get_adapter_or_none(provider)
+            adapter = self._get_adapter_or_none(
+                provider,
+                session_id=session_id,
+                job_id=latest_job_id or None,
+                interaction_type="communication",
+            )
 
             communication_result = run_communication(
                 ranked_properties=ranked_properties,

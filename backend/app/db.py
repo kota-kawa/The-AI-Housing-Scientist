@@ -110,6 +110,26 @@ class Database:
                     FOREIGN KEY(job_id) REFERENCES research_jobs(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS llm_call_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    job_id TEXT,
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    prompt_chars INTEGER NOT NULL,
+                    response_chars INTEGER NOT NULL,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    estimated_cost_usd REAL,
+                    duration_ms INTEGER NOT NULL,
+                    success INTEGER NOT NULL,
+                    error_message TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS property_catalog (
                     property_id TEXT PRIMARY KEY,
                     detail_url TEXT NOT NULL UNIQUE,
@@ -136,6 +156,19 @@ class Database:
                 """
             )
             self._ensure_column(conn, "sessions", "profile_id", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "research_journal_nodes", "parent_node_id", "INTEGER")
+            self._ensure_column(conn, "research_journal_nodes", "branch_id", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "research_journal_nodes", "selected", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(
+                conn,
+                "research_journal_nodes",
+                "metrics_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            )
+            self._ensure_column(conn, "llm_call_events", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "llm_call_events", "completion_tokens", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "llm_call_events", "total_tokens", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "llm_call_events", "estimated_cost_usd", "REAL")
             self._seed_property_catalog(conn)
             conn.commit()
 
@@ -747,10 +780,14 @@ class Database:
         output_payload: dict[str, Any],
         reasoning: str,
         duration_ms: int = 0,
-    ) -> None:
+        parent_node_id: int | None = None,
+        branch_id: str = "",
+        selected: bool = False,
+        metrics_payload: dict[str, Any] | None = None,
+    ) -> int:
         now = utc_now_iso()
         with self.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO research_journal_nodes(
                     job_id,
@@ -761,8 +798,12 @@ class Database:
                     output_json,
                     reasoning,
                     duration_ms,
+                    parent_node_id,
+                    branch_id,
+                    selected,
+                    metrics_json,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -773,10 +814,15 @@ class Database:
                     json.dumps(output_payload, ensure_ascii=False),
                     reasoning,
                     duration_ms,
+                    parent_node_id,
+                    branch_id,
+                    1 if selected else 0,
+                    json.dumps(metrics_payload or {}, ensure_ascii=False),
                     now,
                 ),
             )
             conn.commit()
+        return int(cursor.lastrowid)
 
     def list_research_journal_nodes(self, job_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -792,6 +838,10 @@ class Database:
                     output_json,
                     reasoning,
                     duration_ms,
+                    parent_node_id,
+                    branch_id,
+                    selected,
+                    metrics_json,
                     created_at
                 FROM research_journal_nodes
                 WHERE job_id = ?
@@ -810,6 +860,138 @@ class Database:
                 "output": json.loads(row["output_json"]),
                 "reasoning": row["reasoning"],
                 "duration_ms": row["duration_ms"],
+                "parent_node_id": row["parent_node_id"],
+                "branch_id": row["branch_id"],
+                "selected": bool(row["selected"]),
+                "metrics": json.loads(row["metrics_json"]) if row["metrics_json"] else {},
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def add_llm_call_event(
+        self,
+        *,
+        session_id: str | None,
+        job_id: str | None,
+        provider: str,
+        model: str,
+        operation: str,
+        prompt_chars: int,
+        response_chars: int,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        estimated_cost_usd: float | None,
+        duration_ms: int,
+        success: bool,
+        error_message: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO llm_call_events(
+                    session_id,
+                    job_id,
+                    provider,
+                    model,
+                    operation,
+                    prompt_chars,
+                    response_chars,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost_usd,
+                    duration_ms,
+                    success,
+                    error_message,
+                    metadata_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    job_id,
+                    provider,
+                    model,
+                    operation,
+                    prompt_chars,
+                    response_chars,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost_usd,
+                    duration_ms,
+                    1 if success else 0,
+                    error_message,
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                    now,
+                ),
+            )
+            conn.commit()
+        return int(cursor.lastrowid)
+
+    def list_llm_call_events(
+        self,
+        *,
+        session_id: str | None = None,
+        job_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT
+                id,
+                session_id,
+                job_id,
+                provider,
+                model,
+                operation,
+                prompt_chars,
+                response_chars,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                estimated_cost_usd,
+                duration_ms,
+                success,
+                error_message,
+                metadata_json,
+                created_at
+            FROM llm_call_events
+        """
+        params: list[Any] = []
+        conditions: list[str] = []
+        if session_id is not None:
+            conditions.append("session_id = ?")
+            params.append(session_id)
+        if job_id is not None:
+            conditions.append("job_id = ?")
+            params.append(job_id)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY id ASC"
+
+        with self.connect() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "session_id": row["session_id"],
+                "job_id": row["job_id"],
+                "provider": row["provider"],
+                "model": row["model"],
+                "operation": row["operation"],
+                "prompt_chars": row["prompt_chars"],
+                "response_chars": row["response_chars"],
+                "prompt_tokens": row["prompt_tokens"],
+                "completion_tokens": row["completion_tokens"],
+                "total_tokens": row["total_tokens"],
+                "estimated_cost_usd": row["estimated_cost_usd"],
+                "duration_ms": row["duration_ms"],
+                "success": bool(row["success"]),
+                "error_message": row["error_message"],
+                "metadata": json.loads(row["metadata_json"]) if row["metadata_json"] else {},
                 "created_at": row["created_at"],
             }
             for row in rows

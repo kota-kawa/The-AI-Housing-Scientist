@@ -5,8 +5,40 @@ from typing import Any
 from app.models import RankedProperty
 
 
-def _score_property(prop: dict[str, Any], user_memory: dict[str, Any]) -> tuple[float, str, str]:
-    score = 50.0
+DEFAULT_RANKING_PROFILE = {
+    "base_score": 50.0,
+    "budget_match_bonus": 25.0,
+    "budget_near_bonus": 5.0,
+    "budget_far_penalty": 20.0,
+    "station_match_bonus": 15.0,
+    "station_far_penalty": 10.0,
+    "layout_match_bonus": 10.0,
+    "rent_missing_penalty": 15.0,
+    "station_missing_penalty": 6.0,
+    "layout_missing_penalty": 5.0,
+    "large_area_bonus": 5.0,
+    "frequent_area_bonus": 4.0,
+    "liked_feature_bonus": 2.0,
+    "excluded_feature_penalty": 3.0,
+}
+
+
+def _resolve_profile(profile: dict[str, Any] | None) -> dict[str, float]:
+    resolved = dict(DEFAULT_RANKING_PROFILE)
+    for key, value in (profile or {}).items():
+        try:
+            resolved[key] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return resolved
+
+
+def _score_property(
+    prop: dict[str, Any],
+    user_memory: dict[str, Any],
+    profile: dict[str, float],
+) -> tuple[float, str, str]:
+    score = profile["base_score"]
     positives: list[str] = []
     negatives: list[str] = []
 
@@ -14,55 +46,55 @@ def _score_property(prop: dict[str, Any], user_memory: dict[str, Any]) -> tuple[
     rent = int(prop.get("rent") or 0)
     if budget_max > 0 and rent > 0:
         if rent <= budget_max:
-            score += 25
+            score += profile["budget_match_bonus"]
             positives.append(f"家賃{rent:,}円が上限{budget_max:,}円以内")
         elif rent <= budget_max + 20000:
-            score += 5
+            score += profile["budget_near_bonus"]
             negatives.append(f"家賃{rent:,}円が上限をやや超過")
         else:
-            score -= 20
+            score -= profile["budget_far_penalty"]
             negatives.append(f"家賃{rent:,}円が上限を超過")
 
     station_walk_max = int(user_memory.get("station_walk_max") or 0)
     station_walk_min = int(prop.get("station_walk_min") or 0)
     if station_walk_max > 0 and station_walk_min > 0:
         if station_walk_min <= station_walk_max:
-            score += 15
+            score += profile["station_match_bonus"]
             positives.append(f"駅徒歩{station_walk_min}分で条件内")
         else:
-            score -= 10
+            score -= profile["station_far_penalty"]
             negatives.append(f"駅徒歩{station_walk_min}分で条件超過")
 
     layout_pref = user_memory.get("layout_preference")
     layout = prop.get("layout") or ""
     if layout_pref:
         if layout == layout_pref:
-            score += 10
+            score += profile["layout_match_bonus"]
             positives.append(f"間取り{layout}が希望一致")
         else:
             negatives.append(f"間取り{layout or '不明'}が希望{layout_pref}と不一致")
 
     if rent <= 0:
-        score -= 15
+        score -= profile["rent_missing_penalty"]
         negatives.append("家賃情報が取得できていない")
 
     if station_walk_min <= 0:
-        score -= 6
+        score -= profile["station_missing_penalty"]
         negatives.append("駅徒歩情報が取得できていない")
 
     if not layout:
-        score -= 5
+        score -= profile["layout_missing_penalty"]
         negatives.append("間取り情報が取得できていない")
 
     if prop.get("area_m2", 0) and float(prop["area_m2"]) >= 25:
-        score += 5
+        score += profile["large_area_bonus"]
         positives.append("専有面積が25㎡以上")
 
     learned = user_memory.get("learned_preferences", {}) or {}
     frequent_area = str(learned.get("frequent_area") or "").strip()
     area_name = str(prop.get("area_name") or prop.get("address") or "")
     if frequent_area and frequent_area in area_name:
-        score += 4
+        score += profile["frequent_area_bonus"]
         positives.append(f"過去に好んだエリア {frequent_area} に近い")
 
     notes_haystack = " ".join(
@@ -77,13 +109,13 @@ def _score_property(prop: dict[str, Any], user_memory: dict[str, Any]) -> tuple[
     for token in learned.get("liked_features", []) or []:
         text = str(token).strip()
         if text and text in notes_haystack:
-            score += 2
+            score += profile["liked_feature_bonus"]
             positives.append(f"過去の反応で好まれた条件 {text} に合致")
 
     for token in learned.get("excluded_features", []) or []:
         text = str(token).strip()
         if text and text in notes_haystack:
-            score -= 3
+            score -= profile["excluded_feature_penalty"]
             negatives.append(f"過去に除外した条件 {text} と重なる")
 
     why_selected = "、".join(positives) if positives else "大きな加点要素は未確認"
@@ -92,10 +124,16 @@ def _score_property(prop: dict[str, Any], user_memory: dict[str, Any]) -> tuple[
     return round(score, 2), why_selected, why_not_selected
 
 
-def run_ranking(*, normalized_properties: list[dict[str, Any]], user_memory: dict[str, Any]) -> dict[str, Any]:
+def run_ranking(
+    *,
+    normalized_properties: list[dict[str, Any]],
+    user_memory: dict[str, Any],
+    ranking_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    profile = _resolve_profile(ranking_profile)
     ranked: list[RankedProperty] = []
     for prop in normalized_properties:
-        score, why_selected, why_not_selected = _score_property(prop, user_memory)
+        score, why_selected, why_not_selected = _score_property(prop, user_memory, profile)
         ranked.append(
             RankedProperty(
                 property_id_norm=prop["property_id_norm"],
@@ -117,4 +155,5 @@ def run_ranking(*, normalized_properties: list[dict[str, Any]], user_memory: dic
             item.property_id_norm: item.why_not_selected
             for item in ranked
         },
+        "ranking_profile": profile,
     }

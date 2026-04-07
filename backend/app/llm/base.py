@@ -1,7 +1,17 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Any
+
+
+@dataclass(frozen=True)
+class LLMUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 class LLMAdapter(ABC):
@@ -23,3 +33,6 @@ class LLMAdapter(ABC):
     @abstractmethod
     def list_models(self) -> list[str]:
         raise NotImplementedError
+
+    def get_last_usage(self) -> LLMUsage | None:
+        return None

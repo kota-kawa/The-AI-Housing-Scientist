@@ -15,6 +15,7 @@ from app.models import (
     AuditEventResponse,
     ChatMessageRequest,
     ChatMessageResponse,
+    LLMCallEventResponse,
     ConfirmActionRequest,
     CreateSessionRequest,
     CreateSessionResponse,
@@ -199,6 +200,36 @@ def get_audit_log(session_id: str) -> list[AuditEventResponse]:
             input=item["input"],
             output=item["output"],
             reasoning=item["reasoning"],
+            created_at=datetime.fromisoformat(item["created_at"]),
+        )
+        for item in events
+    ]
+
+
+@app.get("/api/audit/sessions/{session_id}/llm-calls", response_model=list[LLMCallEventResponse])
+def get_llm_call_events(session_id: str) -> list[LLMCallEventResponse]:
+    if not app.state.db.session_exists(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+
+    events = app.state.db.list_llm_call_events(session_id=session_id)
+    return [
+        LLMCallEventResponse(
+            id=item["id"],
+            session_id=item["session_id"],
+            job_id=item["job_id"],
+            provider=item["provider"],
+            model=item["model"],
+            operation=item["operation"],
+            prompt_chars=item["prompt_chars"],
+            response_chars=item["response_chars"],
+            prompt_tokens=item["prompt_tokens"],
+            completion_tokens=item["completion_tokens"],
+            total_tokens=item["total_tokens"],
+            estimated_cost_usd=item["estimated_cost_usd"],
+            duration_ms=item["duration_ms"],
+            success=item["success"],
+            error_message=item["error_message"],
+            metadata=item["metadata"],
             created_at=datetime.fromisoformat(item["created_at"]),
         )
         for item in events

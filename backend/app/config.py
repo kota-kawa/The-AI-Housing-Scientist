@@ -34,6 +34,7 @@ class Settings:
     groq_model_primary: str
     groq_model_secondary: str
     claude_model: str
+    llm_pricing_overrides_json: str = ""
 
 
 def _clean(value: str | None) -> str:
@@ -123,6 +124,7 @@ def load_settings() -> Settings:
         groq_model_primary=_env("GROQ_MODEL_PRIMARY", "openai/gpt-oss-120b"),
         groq_model_secondary=_env("GROQ_MODEL_SECONDARY", "qwen/qwen3-32b"),
         claude_model=_env("CLAUDE_MODEL", "claude-sonnet-4-6"),
+        llm_pricing_overrides_json=_env("LLM_PRICING_OVERRIDES_JSON", ""),
     )
 
 

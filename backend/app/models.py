@@ -141,6 +141,26 @@ class AuditEventResponse(BaseModel):
     created_at: datetime
 
 
+class LLMCallEventResponse(BaseModel):
+    id: int
+    session_id: str | None = None
+    job_id: str | None = None
+    provider: str
+    model: str
+    operation: str
+    prompt_chars: int
+    response_chars: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float | None = None
+    duration_ms: int
+    success: bool
+    error_message: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
 class PreflightProviderReport(BaseModel):
     key_present: bool
     reachable: bool

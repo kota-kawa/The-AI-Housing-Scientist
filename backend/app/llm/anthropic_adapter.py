@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 import jsonschema
 
-from .base import LLMAdapter
+from .base import LLMAdapter, LLMUsage
 from .utils import extract_json_object
 
 
@@ -23,6 +23,7 @@ class AnthropicAdapter(LLMAdapter):
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.base_url = "https://api.anthropic.com/v1"
+        self._last_usage: LLMUsage | None = None
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -51,6 +52,18 @@ class AnthropicAdapter(LLMAdapter):
 
         raise RuntimeError(f"claude request failed: {last_error}")
 
+    def _extract_usage(self, response: dict[str, Any]) -> LLMUsage:
+        usage = response.get("usage", {}) or {}
+        prompt_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+        total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+        return LLMUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            raw=usage if isinstance(usage, dict) else {},
+        )
+
     def _messages_create(self, *, system: str, user: str, temperature: float) -> str:
         response = self._request(
             "POST",
@@ -63,6 +76,7 @@ class AnthropicAdapter(LLMAdapter):
                 "messages": [{"role": "user", "content": user}],
             },
         )
+        self._last_usage = self._extract_usage(response)
         content = response.get("content", [])
         texts = [part.get("text", "") for part in content if part.get("type") == "text"]
         return "\n".join([t for t in texts if t])
@@ -83,15 +97,35 @@ class AnthropicAdapter(LLMAdapter):
             "Return only one JSON object that satisfies this JSON Schema:\n"
             f"{schema}"
         )
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_usage_raw: dict[str, Any] = {}
 
         for attempt in range(self.max_retries + 1):
             text = self._messages_create(system=system, user=strict_user, temperature=temperature)
+            usage = self._last_usage or LLMUsage()
+            total_prompt_tokens += usage.prompt_tokens
+            total_completion_tokens += usage.completion_tokens
+            if usage.raw:
+                total_usage_raw = usage.raw
             try:
                 payload = extract_json_object(text)
                 jsonschema.validate(payload, schema)
+                self._last_usage = LLMUsage(
+                    prompt_tokens=total_prompt_tokens,
+                    completion_tokens=total_completion_tokens,
+                    total_tokens=total_prompt_tokens + total_completion_tokens,
+                    raw=total_usage_raw,
+                )
                 return payload
             except Exception as exc:
                 if attempt == self.max_retries:
+                    self._last_usage = LLMUsage(
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
+                        total_tokens=total_prompt_tokens + total_completion_tokens,
+                        raw=total_usage_raw,
+                    )
                     raise RuntimeError(f"claude structured response validation failed: {exc}") from exc
                 strict_user = (
                     strict_user
@@ -104,3 +138,6 @@ class AnthropicAdapter(LLMAdapter):
         response = self._request("GET", "/models")
         data = response.get("data", [])
         return sorted([item.get("id", "") for item in data if item.get("id")])
+
+    def get_last_usage(self) -> LLMUsage | None:
+        return self._last_usage

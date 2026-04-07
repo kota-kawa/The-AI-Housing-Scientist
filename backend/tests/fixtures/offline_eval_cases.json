@@ -1,0 +1,72 @@
+[
+  {
+    "name": "balanced branch wins with dense structured data",
+    "branches": [
+      {
+        "branch_id": "balanced",
+        "label": "balanced",
+        "queries": ["江東区 賃貸 1LDK", "江東区 徒歩7分 賃貸"],
+        "raw_results": [
+          {"source_name": "catalog"},
+          {"source_name": "brave"},
+          {"source_name": "catalog"}
+        ],
+        "normalized_properties": [
+          {"rent": 118000, "station_walk_min": 6, "layout": "1LDK", "address_norm": "東京都江東区"},
+          {"rent": 119000, "station_walk_min": 7, "layout": "1LDK", "address_norm": "東京都江東区"},
+          {"rent": 115000, "station_walk_min": 5, "layout": "1LDK", "address_norm": "東京都江東区"}
+        ],
+        "ranked_properties": [{"score": 92.0}, {"score": 84.0}, {"score": 78.0}],
+        "duplicate_groups": [{"property_ids": ["a", "b"]}],
+        "search_summary": {"detail_hit_count": 3}
+      },
+      {
+        "branch_id": "broad",
+        "label": "broad",
+        "queries": ["江東区 賃貸"],
+        "raw_results": [],
+        "normalized_properties": [],
+        "ranked_properties": [],
+        "duplicate_groups": [],
+        "search_summary": {"detail_hit_count": 0}
+      }
+    ],
+    "visible_ranked_properties": [
+      {"property_id_norm": "p1"},
+      {"property_id_norm": "p2"},
+      {"property_id_norm": "p3"}
+    ],
+    "search_summary": {"detail_hit_count": 3},
+    "expectations": {
+      "selected_branch_id": "balanced",
+      "readiness": "high",
+      "top_issue_contains": "検索結果が取得できていない"
+    }
+  },
+  {
+    "name": "low coverage remains low readiness",
+    "branches": [
+      {
+        "branch_id": "strict",
+        "label": "strict",
+        "queries": ["横浜駅 1LDK 賃貸"],
+        "raw_results": [{"source_name": "catalog"}],
+        "normalized_properties": [
+          {"rent": 145000, "station_walk_min": 0, "layout": "", "address_norm": "横浜市西区"}
+        ],
+        "ranked_properties": [{"score": 52.0}],
+        "duplicate_groups": [],
+        "search_summary": {"detail_hit_count": 0}
+      }
+    ],
+    "visible_ranked_properties": [
+      {"property_id_norm": "p1"}
+    ],
+    "search_summary": {"detail_hit_count": 0},
+    "expectations": {
+      "selected_branch_id": "strict",
+      "readiness": "low",
+      "top_issue_contains": "詳細ページ補完率が低い"
+    }
+  }
+]

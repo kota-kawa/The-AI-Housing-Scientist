@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 import jsonschema
 
-from .base import LLMAdapter
+from .base import LLMAdapter, LLMUsage
 from .utils import extract_json_object, flatten_content
 
 
@@ -27,6 +27,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self._last_usage: LLMUsage | None = None
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -54,6 +55,18 @@ class OpenAICompatibleAdapter(LLMAdapter):
 
         raise RuntimeError(f"{self.provider_name} request failed: {last_error}")
 
+    def _extract_usage(self, response: dict[str, Any]) -> LLMUsage:
+        usage = response.get("usage", {}) or {}
+        prompt_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+        total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+        return LLMUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            raw=usage if isinstance(usage, dict) else {},
+        )
+
     def _chat(self, messages: list[dict[str, Any]], temperature: float, response_format: dict[str, Any] | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -63,7 +76,9 @@ class OpenAICompatibleAdapter(LLMAdapter):
         if response_format is not None:
             payload["response_format"] = response_format
 
-        return self._request("POST", "/chat/completions", payload)
+        response = self._request("POST", "/chat/completions", payload)
+        self._last_usage = self._extract_usage(response)
+        return response
 
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
         response = self._chat(
@@ -96,6 +111,9 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 "strict": True,
             },
         }
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_usage_raw: dict[str, Any] = {}
 
         for attempt in range(self.max_retries + 1):
             response = self._chat(
@@ -103,14 +121,31 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 temperature=temperature,
                 response_format=response_format,
             )
+            usage = self._last_usage or LLMUsage()
+            total_prompt_tokens += usage.prompt_tokens
+            total_completion_tokens += usage.completion_tokens
+            if usage.raw:
+                total_usage_raw = usage.raw
             message = response["choices"][0]["message"]
             content = flatten_content(message.get("content", ""))
             try:
                 payload = extract_json_object(content)
                 jsonschema.validate(payload, schema)
+                self._last_usage = LLMUsage(
+                    prompt_tokens=total_prompt_tokens,
+                    completion_tokens=total_completion_tokens,
+                    total_tokens=total_prompt_tokens + total_completion_tokens,
+                    raw=total_usage_raw,
+                )
                 return payload
             except Exception as exc:
                 if attempt == self.max_retries:
+                    self._last_usage = LLMUsage(
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
+                        total_tokens=total_prompt_tokens + total_completion_tokens,
+                        raw=total_usage_raw,
+                    )
                     raise RuntimeError(
                         f"{self.provider_name} structured response validation failed: {exc}"
                     ) from exc
@@ -131,3 +166,6 @@ class OpenAICompatibleAdapter(LLMAdapter):
         response = self._request("GET", "/models")
         data = response.get("data", [])
         return sorted([item.get("id", "") for item in data if item.get("id")])
+
+    def get_last_usage(self) -> LLMUsage | None:
+        return self._last_usage
