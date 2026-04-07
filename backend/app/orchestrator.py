@@ -1302,8 +1302,14 @@ class HousingOrchestrator:
         *,
         query: str,
         user_memory: dict[str, Any],
+        adapter: LLMAdapter | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        catalog_results = self.catalog.search(query=query, user_memory=user_memory, count=8)
+        catalog_results = self.catalog.search(
+            query=query,
+            user_memory=user_memory,
+            count=8,
+            adapter=adapter,
+        )
         brave_results: list[dict[str, Any]] = []
         brave_error = ""
 

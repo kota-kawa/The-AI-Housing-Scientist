@@ -183,6 +183,40 @@ class HousingResearchAgentManager:
             action = f"現時点では有力ですが、{caution}"
         return f"{lead}最上位候補は{top_detail}で、{top_reason}{action}"
 
+    def _build_confirmation_items(
+        self,
+        *,
+        ranked_properties: list[dict[str, Any]],
+        normalized_properties: list[dict[str, Any]],
+        source_items: list[dict[str, Any]],
+        failure_summary: dict[str, Any],
+    ) -> list[str]:
+        by_id = {item["property_id_norm"]: item for item in normalized_properties}
+        top_property = by_id.get(str(ranked_properties[0]["property_id_norm"]), {}) if ranked_properties else {}
+
+        items: list[str] = []
+        if source_items:
+            items.append("掲載元ごとの差分条件")
+        if top_property.get("notes"):
+            items.append("募集条件の最新状況")
+        if not top_property.get("rent"):
+            items.append("家賃と管理費の内訳")
+        if not top_property.get("station_walk_min"):
+            items.append("駅徒歩分数")
+        if not top_property.get("layout"):
+            items.append("間取りと居室の広さ")
+        items.extend(
+            [
+                "初期費用の内訳",
+                "短期解約違約金・更新料・解約予告",
+            ]
+        )
+        for recommendation in failure_summary.get("recommendations", []) or []:
+            text = str(recommendation).strip()
+            if text and text not in items:
+                items.append(text)
+        return items[:5]
+
     def _build_llm_research_summary(
         self,
         *,
@@ -191,8 +225,11 @@ class HousingResearchAgentManager:
         search_summary: dict[str, Any],
         source_items: list[dict[str, Any]],
         offline_evaluation: dict[str, Any],
+        selected_branch_summary: dict[str, Any] | None = None,
+        branch_summaries: list[dict[str, Any]] | None = None,
+        failure_summary: dict[str, Any] | None = None,
     ) -> str:
-        if self.research_adapter is None or not ranked_properties:
+        if self.research_adapter is None:
             return ""
 
         user_memory = self.approved_plan.get("user_memory_snapshot", self.user_memory)
@@ -204,18 +241,45 @@ class HousingResearchAgentManager:
                 {
                     "property_id_norm": ranked["property_id_norm"],
                     "building_name": str(prop.get("building_name") or "候補物件"),
+                    "address": str(prop.get("address") or ""),
                     "rent": int(prop.get("rent") or 0),
                     "station_walk_min": int(prop.get("station_walk_min") or 0),
                     "layout": str(prop.get("layout") or ""),
                     "area_m2": float(prop.get("area_m2") or 0.0),
+                    "score": float(ranked.get("score") or 0.0),
                     "why_selected": str(ranked.get("why_selected") or ""),
                     "why_not_selected": str(ranked.get("why_not_selected") or ""),
                 }
             )
+        selected_branch = selected_branch_summary or {}
+        other_branches = [
+            {
+                "branch_id": str(item.get("branch_id") or ""),
+                "label": str(item.get("label") or ""),
+                "branch_score": float(item.get("branch_score") or 0.0),
+                "detail_coverage": float(item.get("detail_coverage") or 0.0),
+                "structured_ratio": float(item.get("structured_ratio") or 0.0),
+                "normalized_count": int(item.get("normalized_count") or 0),
+                "issues": [str(issue).strip() for issue in item.get("issues", [])[:2] if str(issue).strip()],
+            }
+            for item in (branch_summaries or [])
+            if str(item.get("branch_id") or "") != str(selected_branch.get("branch_id") or "")
+        ][:2]
+        failure_info = failure_summary or {}
         payload = {
             "condition_summary": self._build_condition_summary(user_memory),
             "candidate_count": len(ranked_properties),
             "top_candidates": top_candidates,
+            "selected_branch": {
+                "branch_id": str(selected_branch.get("branch_id") or ""),
+                "label": str(selected_branch.get("label") or ""),
+                "branch_score": float(selected_branch.get("branch_score") or 0.0),
+                "detail_coverage": float(selected_branch.get("detail_coverage") or 0.0),
+                "structured_ratio": float(selected_branch.get("structured_ratio") or 0.0),
+                "normalized_count": int(selected_branch.get("normalized_count") or 0),
+                "summary": str(selected_branch.get("summary") or ""),
+            },
+            "alternative_branches": other_branches,
             "search_summary": {
                 "detail_hit_count": int(search_summary.get("detail_hit_count") or 0),
                 "normalized_count": int(search_summary.get("normalized_count") or 0),
@@ -224,26 +288,52 @@ class HousingResearchAgentManager:
             "offline_evaluation": {
                 "readiness": str(offline_evaluation.get("readiness") or ""),
                 "detail_coverage": float(offline_evaluation.get("detail_coverage") or 0.0),
+                "structured_ratio": float(offline_evaluation.get("structured_ratio") or 0.0),
                 "recommendations": [
                     str(item).strip()
                     for item in offline_evaluation.get("recommendations", [])[:3]
                     if str(item).strip()
                 ],
             },
+            "failure_summary": {
+                "summary": str(failure_info.get("summary") or ""),
+                "top_issues": [
+                    str(item).strip()
+                    for item in failure_info.get("top_issues", [])[:3]
+                    if str(item).strip()
+                ],
+                "recommendations": [
+                    str(item).strip()
+                    for item in failure_info.get("recommendations", [])[:3]
+                    if str(item).strip()
+                ],
+            },
             "source_count": len(source_items),
-            "required_next_action": "候補がある場合は問い合わせに進めるかどうかを自然に述べる。候補が弱い場合は再調査や条件調整を促す。",
+            "confirmation_items": self._build_confirmation_items(
+                ranked_properties=ranked_properties,
+                normalized_properties=normalized_properties,
+                source_items=source_items,
+                failure_summary=failure_info,
+            ),
+            "required_output_format": [
+                "結論: ...",
+                "理由: ...",
+                "懸念: ...",
+                "次の確認事項: ...",
+            ],
         }
         summary = self.research_adapter.generate_text(
             system=(
                 "You are a Japanese rental research assistant. "
-                "Write a concise natural-language summary of the overall search result. "
+                "Summarize the final research result for a user making a rental decision. "
                 "Use only the provided facts. Do not invent properties, numbers, or conditions. "
-                "Return only a short paragraph in Japanese, ideally 2 to 3 sentences."
+                "Return exactly four lines in Japanese starting with "
+                "'結論:', '理由:', '懸念:', and '次の確認事項:'."
             ),
             user=json.dumps(payload, ensure_ascii=False, indent=2),
             temperature=0.2,
         ).strip()
-        return " ".join(summary.split())
+        return "\n".join(" ".join(line.split()) for line in summary.splitlines() if line.strip())
 
     def _build_state_machine(self) -> ResearchStateMachine:
         return ResearchStateMachine(
@@ -739,6 +829,7 @@ class HousingResearchAgentManager:
             results, source_summary = self.collect_search_results(
                 query=query,
                 user_memory=self.approved_plan.get("user_memory_snapshot", self.user_memory),
+                adapter=self.research_adapter,
             )
             catalog_total += int(source_summary["catalog_result_count"])
             brave_total += int(source_summary["brave_result_count"])
@@ -837,6 +928,7 @@ class HousingResearchAgentManager:
             query=query,
             search_results=raw_results,
             detail_fetcher=lambda url: detail_html_map.get(url),
+            adapter=self.research_adapter,
         )
 
     def _tool_rank(
@@ -1304,6 +1396,9 @@ class HousingResearchAgentManager:
                     search_summary=state.search_summary,
                     source_items=state.source_items,
                     offline_evaluation=state.offline_evaluation,
+                    selected_branch_summary=state.selected_branch_summary,
+                    branch_summaries=state.branch_summaries,
+                    failure_summary=state.failure_summary,
                 )
                 if llm_summary:
                     state.research_summary = llm_summary

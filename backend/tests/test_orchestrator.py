@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from app.config import Settings
@@ -34,8 +35,10 @@ def build_settings(database_path: str) -> Settings:
 class FakeResearchSummaryAdapter(LLMAdapter):
     def __init__(self, summary: str):
         self.summary = summary
+        self.last_text_user = ""
 
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
+        self.last_text_user = user
         return self.summary
 
     def generate_structured(
@@ -236,6 +239,42 @@ def test_research_completed_response_prefers_llm_summary(tmp_path: Path):
 
     _, task_memory = db.get_memories(session_id)
     assert task_memory["last_research_summary"] == summary
+
+
+def test_research_summary_prompt_includes_branch_tradeoffs_and_followups(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+    adapter = FakeResearchSummaryAdapter(
+        "結論: 問い合わせ候補があります。\n"
+        "理由: 条件一致度が最も高い分岐を採用しました。\n"
+        "懸念: 一部の条件は再確認が必要です。\n"
+        "次の確認事項: 初期費用と契約条件を確認してください。"
+    )
+    orchestrator._get_adapter_for_route = (
+        lambda **kwargs: adapter if kwargs.get("route_key") == "research_default" else None
+    )
+
+    session_id, _ = db.create_session()
+    orchestrator.process_user_message(
+        session_id=session_id,
+        message="江東区で家賃12万円以下、駅徒歩7分以内の1LDKを探しています",
+        provider="openai",
+    )
+    orchestrator.execute_action(
+        session_id=session_id,
+        action_type="approve_research_plan",
+        payload={},
+    )
+
+    assert orchestrator.process_next_research_job() is True
+
+    payload = json.loads(adapter.last_text_user)
+    assert payload["selected_branch"]["branch_id"]
+    assert payload["alternative_branches"]
+    assert payload["failure_summary"]["recommendations"]
+    assert payload["confirmation_items"]
 
 
 def test_fresh_start_session_skips_profile_resume_prompt(tmp_path: Path):

@@ -1,4 +1,28 @@
+from app.llm.base import LLMAdapter
 from app.stages.search_normalize import run_search_and_normalize
+
+
+class FakeNormalizeAdapter(LLMAdapter):
+    def __init__(self, payload: dict):
+        self.payload = payload
+        self.calls = 0
+
+    def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
+        raise AssertionError("generate_text should not be called in search_normalize")
+
+    def generate_structured(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: dict,
+        temperature: float = 0.2,
+    ) -> dict:
+        self.calls += 1
+        return self.payload
+
+    def list_models(self) -> list[str]:
+        return ["fake-normalize-model"]
 
 
 def test_search_normalize_dedup_group_with_structured_address():
@@ -91,6 +115,76 @@ def test_search_normalize_prefers_detail_page_payload():
     assert prop["address"] == "東京都江東区東雲1-4-8"
     assert prop["nearest_station"] == "豊洲駅"
     assert prop["rent"] == 118000
+    assert result["summary"]["detail_parsed_count"] == 1
+
+
+def test_search_normalize_extracts_base_rent_without_confusing_management_fee():
+    items = [
+        {
+            "title": "東雲ベイテラス 1LDK",
+            "description": "東京都江東区東雲1-4-8 管理費8,000円 家賃118,000円 徒歩6分 42.1㎡",
+            "url": "https://example.com/shinonome",
+            "extra_snippets": [],
+        }
+    ]
+
+    result = run_search_and_normalize(
+        query="江東区 賃貸 12万円",
+        search_results=items,
+    )
+
+    prop = result["normalized_properties"][0]
+    assert prop["rent"] == 118000
+
+
+def test_search_normalize_llm_supplements_natural_detail_html():
+    adapter = FakeNormalizeAdapter(
+        {
+            "rent": 118000,
+            "layout": "1LDK",
+            "station_walk_min": 6,
+            "area_m2": 42.1,
+            "extraction_confidence": 0.92,
+        }
+    )
+    items = [
+        {
+            "title": "東雲ベイテラス | External Listing",
+            "description": "江東区東雲の募集",
+            "url": "https://example.com/external-shinonome",
+            "extra_snippets": ["在宅勤務にも使いやすい広さ"],
+            "source_name": "external",
+        }
+    ]
+
+    def fetch_detail(url: str) -> str | None:
+        if "external-shinonome" not in url:
+            return None
+        return """
+        <html>
+          <body>
+            <h1>東雲ベイテラス</h1>
+            <p>東京都江東区東雲1-4-8</p>
+            <p>月額賃料は11万8000円、共益費8000円です。</p>
+            <p>間取りは1LDK。専有面積は42.1平方メートル。</p>
+            <p>有楽町線 豊洲駅まで徒歩およそ6分。</p>
+          </body>
+        </html>
+        """
+
+    result = run_search_and_normalize(
+        query="江東区 賃貸 12万円",
+        search_results=items,
+        detail_fetcher=fetch_detail,
+        adapter=adapter,
+    )
+
+    prop = result["normalized_properties"][0]
+    assert adapter.calls == 1
+    assert prop["rent"] == 118000
+    assert prop["layout"] == "1LDK"
+    assert prop["area_m2"] == 42.1
+    assert prop["station_walk_min"] == 6
     assert result["summary"]["detail_parsed_count"] == 1
 
 

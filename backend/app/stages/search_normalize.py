@@ -8,6 +8,7 @@ import unicodedata
 from collections import defaultdict
 from typing import Any, Callable
 
+from app.llm.base import LLMAdapter
 from app.models import DuplicateGroup, PropertyNormalized
 
 
@@ -37,6 +38,18 @@ ADDRESS_PATTERN = re.compile(
     r"((?:東京都|北海道|(?:京都|大阪)府|.{2,3}県)?"
     r"[^\s|/]{1,24}(?:区|市|町|村)[^\s|/]{0,24}\d[^\s|/]{0,16})"
 )
+LAYOUT_PATTERN = re.compile(r"(\d(?:SLDK|SDK|LDK|DK|K|R))", re.IGNORECASE)
+RENT_CONTEXT_EXCLUSION_TOKENS = (
+    "管理費",
+    "共益費",
+    "敷金",
+    "礼金",
+    "保証金",
+    "更新料",
+    "初期費用",
+)
+LLM_HTML_MAX_CHARS = 9000
+LLM_EXTRACTION_CONFIDENCE_THRESHOLD = 0.35
 
 
 def _normalize_text(value: str) -> str:
@@ -121,20 +134,50 @@ def _levenshtein_ratio(left: str, right: str) -> float:
 
 
 def _extract_rent(text: str) -> int:
-    match_man = re.search(r"(\d+(?:\.\d+)?)\s*万", text)
-    if match_man:
-        return int(float(match_man.group(1)) * 10000)
+    normalized = unicodedata.normalize("NFKC", text or "")
+    normalized_no_commas = normalized.replace(",", "")
+    rent_label_prefix = r"(?:賃料|家賃)[^0-9]{0,6}"
+    match_mixed = re.search(
+        rf"{rent_label_prefix}(\d+)\s*万\s*(\d{{1,4}})\s*円?",
+        normalized_no_commas,
+    )
+    if match_mixed:
+        return int(match_mixed.group(1)) * 10000 + int(match_mixed.group(2))
 
-    match_yen = re.search(r"(\d{2,3})(?:,|，)?(\d{3})\s*円", text)
-    if match_yen:
-        return int(f"{match_yen.group(1)}{match_yen.group(2)}")
+    for pattern in [
+        rf"{rent_label_prefix}(\d+(?:\.\d+)?)\s*万",
+        rf"{rent_label_prefix}(\d{{2,3}}(?:,\d{{3}})?)\s*円",
+    ]:
+        match = re.search(pattern, normalized)
+        if not match:
+            continue
+        raw = match.group(1).replace(",", "")
+        if raw.isdigit():
+            return int(raw)
+        return int(float(raw) * 10000)
+
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*万", normalized):
+        window_start = max(0, match.start() - 10)
+        window = normalized[window_start : match.start()]
+        if any(token in window for token in RENT_CONTEXT_EXCLUSION_TOKENS):
+            continue
+        return int(float(match.group(1)) * 10000)
+
+    for match in re.finditer(r"(\d{2,3}(?:,\d{3})?)\s*円", normalized):
+        window_start = max(0, match.start() - 10)
+        window = normalized[window_start : match.start()]
+        if any(token in window for token in RENT_CONTEXT_EXCLUSION_TOKENS):
+            continue
+        return int(match.group(1).replace(",", ""))
 
     return 0
 
 
 def _extract_layout(text: str) -> str:
-    match = re.search(r"(1R|1K|1DK|1LDK|2K|2DK|2LDK|3LDK|4LDK)", text)
-    return match.group(1) if match else ""
+    normalized = unicodedata.normalize("NFKC", text or "").upper().replace(" ", "")
+    normalized = normalized.replace("ワンルーム", "1R")
+    match = LAYOUT_PATTERN.search(normalized)
+    return match.group(1).upper() if match else ""
 
 
 def _extract_station_walk(text: str) -> int:
@@ -194,7 +237,144 @@ def _extract_html_json_field(value: str, field_name: str) -> list[str]:
     return [str(item) for item in payload if str(item).strip()]
 
 
-def _build_fallback_property(source_id: str, item: dict[str, Any]) -> PropertyNormalized:
+def _compact_llm_text(value: str, *, max_chars: int) -> str:
+    text = re.sub(r"<!--[\s\S]*?-->", " ", value or "")
+    text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
+    text = html.unescape(re.sub(r"\s+", " ", text)).strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "…"
+
+
+def _coerce_positive_int(value: Any) -> int:
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0
+
+
+def _coerce_positive_float(value: Any) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if number > 0 else 0.0
+
+
+def _extract_property_fields_with_llm(
+    *,
+    adapter: LLMAdapter | None,
+    item: dict[str, Any],
+    source_kind: str,
+    known_fields: dict[str, Any],
+    detail_html: str = "",
+    text: str = "",
+) -> tuple[dict[str, Any], float]:
+    if adapter is None:
+        return {}, 0.0
+
+    missing_fields = [
+        field_name
+        for field_name in ["rent", "layout", "station_walk_min", "area_m2"]
+        if not known_fields.get(field_name)
+    ]
+    if not missing_fields:
+        return {}, 0.0
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "rent": {"type": "integer", "minimum": 0},
+            "layout": {"type": "string"},
+            "station_walk_min": {"type": "integer", "minimum": 0},
+            "area_m2": {"type": "number", "minimum": 0},
+            "extraction_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        "required": [
+            "rent",
+            "layout",
+            "station_walk_min",
+            "area_m2",
+            "extraction_confidence",
+        ],
+        "additionalProperties": False,
+    }
+    payload = {
+        "source_kind": source_kind,
+        "missing_fields": missing_fields,
+        "known_fields": {
+            "rent": _coerce_positive_int(known_fields.get("rent")),
+            "layout": str(known_fields.get("layout") or ""),
+            "station_walk_min": _coerce_positive_int(known_fields.get("station_walk_min")),
+            "area_m2": _coerce_positive_float(known_fields.get("area_m2")),
+        },
+        "listing": {
+            "title": str(item.get("title") or ""),
+            "description": str(item.get("description") or ""),
+            "extra_snippets": [
+                str(snippet).strip()
+                for snippet in item.get("extra_snippets", []) or []
+                if str(snippet).strip()
+            ][:8],
+            "url": str(item.get("url") or ""),
+            "detail_text_excerpt": _compact_llm_text(text, max_chars=2400),
+            "detail_html_excerpt": _compact_llm_text(detail_html, max_chars=LLM_HTML_MAX_CHARS),
+        },
+        "output_rules": [
+            "rent は月額賃料本体のみ。管理費、共益費、敷金、礼金、更新料は含めない",
+            "station_walk_min は徒歩分数のみ。バス分数や距離は含めない",
+            "area_m2 は専有面積のみ",
+            "layout は 1R, 1K, 1DK, 1LDK, 2LDK のような表記で返す。分からなければ空文字",
+            "明示されていない値は推測せず 0 または空文字にする",
+        ],
+    }
+
+    try:
+        result = adapter.generate_structured(
+            system=(
+                "You extract structured rental listing facts from Japanese property pages. "
+                "Use only explicit evidence from the provided text or HTML. "
+                "Never confuse management fee, deposit, or key money with monthly rent."
+            ),
+            user=json.dumps(payload, ensure_ascii=False, indent=2),
+            schema=schema,
+            temperature=0.0,
+        )
+    except Exception:
+        return {}, 0.0
+
+    confidence = float(result.get("extraction_confidence") or 0.0)
+    if confidence < LLM_EXTRACTION_CONFIDENCE_THRESHOLD:
+        return {}, confidence
+
+    supplements: dict[str, Any] = {}
+    rent = _coerce_positive_int(result.get("rent"))
+    if not known_fields.get("rent") and rent > 0:
+        supplements["rent"] = rent
+
+    layout = _extract_layout(str(result.get("layout") or ""))
+    if not known_fields.get("layout") and layout:
+        supplements["layout"] = layout
+
+    station_walk_min = _coerce_positive_int(result.get("station_walk_min"))
+    if not known_fields.get("station_walk_min") and station_walk_min > 0:
+        supplements["station_walk_min"] = station_walk_min
+
+    area_m2 = _coerce_positive_float(result.get("area_m2"))
+    if not known_fields.get("area_m2") and area_m2 > 0:
+        supplements["area_m2"] = area_m2
+
+    return supplements, confidence
+
+
+def _build_fallback_property(
+    source_id: str,
+    item: dict[str, Any],
+    *,
+    adapter: LLMAdapter | None = None,
+) -> PropertyNormalized:
     title = item.get("title", "")
     description = item.get("description", "")
     combined = f"{title} {description} {' '.join(item.get('extra_snippets', []))}"
@@ -207,6 +387,22 @@ def _build_fallback_property(source_id: str, item: dict[str, Any]) -> PropertyNo
 
     address = _extract_address(combined)
     features = [str(item).strip() for item in item.get("extra_snippets", []) if str(item).strip()]
+    layout = _extract_layout(combined)
+    area_m2 = _extract_area(combined)
+    rent = _extract_rent(combined)
+    station_walk_min = _extract_station_walk(combined)
+    llm_fields, _ = _extract_property_fields_with_llm(
+        adapter=adapter,
+        item=item,
+        source_kind="search_result_snippet",
+        known_fields={
+            "rent": rent,
+            "layout": layout,
+            "station_walk_min": station_walk_min,
+            "area_m2": area_m2,
+        },
+        text=combined,
+    )
 
     return PropertyNormalized(
         property_id_norm=property_id_norm,
@@ -219,13 +415,13 @@ def _build_fallback_property(source_id: str, item: dict[str, Any]) -> PropertyNo
         area_name=_extract_area_name(address),
         nearest_station="",
         line_name="",
-        layout=_extract_layout(combined),
-        area_m2=_extract_area(combined),
-        rent=_extract_rent(combined),
+        layout=layout or str(llm_fields.get("layout") or ""),
+        area_m2=area_m2 or float(llm_fields.get("area_m2") or 0.0),
+        rent=rent or int(llm_fields.get("rent") or 0),
         management_fee=0,
         deposit=_extract_deposit_or_key_money(combined, "敷金"),
         key_money=_extract_deposit_or_key_money(combined, "礼金"),
-        station_walk_min=_extract_station_walk(combined),
+        station_walk_min=station_walk_min or int(llm_fields.get("station_walk_min") or 0),
         available_date="要確認",
         agency_name="要確認",
         notes=(description[:200] if description else "検索結果から抽出"),
@@ -237,6 +433,8 @@ def _build_detail_property(
     source_id: str,
     item: dict[str, Any],
     detail_html: str,
+    *,
+    adapter: LLMAdapter | None = None,
 ) -> PropertyNormalized | None:
     text = _strip_html(detail_html)
     building_name = _extract_html_field(detail_html, "building_name") or item.get("title", "").split("|")[0].strip()
@@ -264,6 +462,23 @@ def _build_detail_property(
     deposit = int(deposit_raw) if deposit_raw.isdigit() else _extract_deposit_or_key_money(text, "敷金")
     key_money = int(key_money_raw) if key_money_raw.isdigit() else _extract_deposit_or_key_money(text, "礼金")
     station_walk_min = int(station_walk_raw) if station_walk_raw.isdigit() else _extract_station_walk(text)
+    llm_fields, _ = _extract_property_fields_with_llm(
+        adapter=adapter,
+        item=item,
+        source_kind="detail_page_html",
+        known_fields={
+            "rent": rent,
+            "layout": layout,
+            "station_walk_min": station_walk_min,
+            "area_m2": area_m2,
+        },
+        detail_html=detail_html,
+        text=text,
+    )
+    layout = layout or str(llm_fields.get("layout") or "")
+    area_m2 = area_m2 or float(llm_fields.get("area_m2") or 0.0)
+    rent = rent or int(llm_fields.get("rent") or 0)
+    station_walk_min = station_walk_min or int(llm_fields.get("station_walk_min") or 0)
     nearest_station = _extract_html_field(detail_html, "nearest_station")
     line_name = _extract_html_field(detail_html, "line_name")
     available_date = _extract_html_field(detail_html, "available_date") or "要確認"
@@ -422,6 +637,7 @@ def run_search_and_normalize(
     query: str,
     search_results: list[dict[str, Any]],
     detail_fetcher: Callable[[str], str | None] | None = None,
+    adapter: LLMAdapter | None = None,
 ) -> dict[str, Any]:
     properties: list[PropertyNormalized] = []
     detail_parsed_count = 0
@@ -441,12 +657,12 @@ def run_search_and_normalize(
 
         prop = None
         if detail_html:
-            prop = _build_detail_property(source_id, item, detail_html)
+            prop = _build_detail_property(source_id, item, detail_html, adapter=adapter)
             if prop is not None:
                 detail_parsed_count += 1
 
         if prop is None:
-            prop = _build_fallback_property(source_id, item)
+            prop = _build_fallback_property(source_id, item, adapter=adapter)
             if _has_structured_payload(prop):
                 fallback_count += 1
             else:
