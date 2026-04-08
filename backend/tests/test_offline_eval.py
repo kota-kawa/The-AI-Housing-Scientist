@@ -101,3 +101,71 @@ def test_select_best_branch_returns_none_when_all_branches_failed():
         )
         is None
     )
+
+
+def test_select_best_branch_rejects_small_gain_when_issue_class_repeats():
+    parent = {
+        "branch_id": "tighten-root",
+        "node_key": "tighten-root",
+        "label": "条件厳格化",
+        "status": "completed",
+        "branch_score": 84.0,
+        "frontier_score": 84.0,
+        "detail_coverage": 0.72,
+        "avg_top3_score": 86.0,
+        "normalized_count": 4,
+        "top_issue_class": "match_low",
+        "parent_key": "",
+    }
+    child = {
+        "branch_id": "tighten-child",
+        "node_key": "tighten-child",
+        "label": "条件厳格化 深掘り",
+        "status": "completed",
+        "branch_score": 87.0,
+        "frontier_score": 87.0,
+        "detail_coverage": 0.76,
+        "avg_top3_score": 88.0,
+        "normalized_count": 4,
+        "top_issue_class": "match_low",
+        "parent_key": "tighten-root",
+    }
+
+    selected = select_best_branch([parent, child])
+
+    assert selected is not None
+    assert selected["branch_id"] == "tighten-root"
+
+
+def test_select_best_branch_allows_large_gain_when_issue_class_repeats():
+    parent = {
+        "branch_id": "tighten-root",
+        "node_key": "tighten-root",
+        "label": "条件厳格化",
+        "status": "completed",
+        "branch_score": 84.0,
+        "frontier_score": 84.0,
+        "detail_coverage": 0.62,
+        "avg_top3_score": 82.0,
+        "normalized_count": 3,
+        "top_issue_class": "match_low",
+        "parent_key": "",
+    }
+    child = {
+        "branch_id": "tighten-child",
+        "node_key": "tighten-child",
+        "label": "条件厳格化 深掘り",
+        "status": "completed",
+        "branch_score": 93.0,
+        "frontier_score": 93.0,
+        "detail_coverage": 0.8,
+        "avg_top3_score": 90.0,
+        "normalized_count": 5,
+        "top_issue_class": "match_low",
+        "parent_key": "tighten-root",
+    }
+
+    selected = select_best_branch([parent, child])
+
+    assert selected is not None
+    assert selected["branch_id"] == "tighten-child"
