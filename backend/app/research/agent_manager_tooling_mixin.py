@@ -360,6 +360,7 @@ class AgentManagerToolingMixin:
         catalog_total = 0
         brave_total = 0
         brave_errors: list[str] = []
+        cache_hit_count = 0
 
         for index, query in enumerate(branch.queries, start=1):
             self._update_job(
@@ -367,11 +368,17 @@ class AgentManagerToolingMixin:
                 progress_percent=36,
                 latest_summary=f"{branch.label}: {index}/{len(branch.queries)}件目を収集中",
             )
-            results, source_summary = self.collect_search_results(
-                query=query,
-                user_memory=self._active_user_memory(),
-                adapter=self.research_adapter,
-            )
+            cached = self.search_result_cache.get(query)
+            if cached is None:
+                results, source_summary = self.collect_search_results(
+                    query=query,
+                    user_memory=self._active_user_memory(),
+                    adapter=self.research_adapter,
+                )
+                self.search_result_cache[query] = self._cache_copy((results, source_summary))
+            else:
+                cache_hit_count += 1
+                results, source_summary = self._cache_copy(cached)
             catalog_total += int(source_summary["catalog_result_count"])
             brave_total += int(source_summary["brave_result_count"])
             if source_summary["brave_error"]:
@@ -422,6 +429,7 @@ class AgentManagerToolingMixin:
                 "catalog_result_count": catalog_total,
                 "brave_result_count": brave_total,
                 "brave_error_count": len(brave_errors),
+                "cache_hit_count": cache_hit_count,
             },
             "per_query": per_query,
         }
@@ -435,11 +443,17 @@ class AgentManagerToolingMixin:
     ) -> dict[str, Any]:
         detail_html_map: dict[str, str] = {}
         total = len(raw_results)
+        cache_hit_count = 0
         for index, item in enumerate(raw_results, start=1):
             url = str(item.get("url") or "").strip()
             if not url:
                 continue
-            detail_html = self.fetch_detail_html(url)
+            if url in self.detail_html_cache:
+                cache_hit_count += 1
+                detail_html = self.detail_html_cache[url]
+            else:
+                detail_html = self.fetch_detail_html(url)
+                self.detail_html_cache[url] = detail_html
             if detail_html:
                 detail_html_map[url] = detail_html
             if total and (index == 1 or index == total or index % 3 == 0):
@@ -453,6 +467,7 @@ class AgentManagerToolingMixin:
             "summary": {
                 "detail_attempt_count": total,
                 "detail_hit_count": len(detail_html_map),
+                "cache_hit_count": cache_hit_count,
                 "summary": f"詳細ページを {len(detail_html_map)} 件取得",
             },
         }

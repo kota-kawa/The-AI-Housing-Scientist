@@ -600,7 +600,72 @@ class AgentManagerTreeMixin:
             ),
             reverse=True,
         )
-        return [artifact.plan.node_key for artifact in queued[: self.tree_batch_size]]
+        if self.tree_batch_size <= 1 or not queued:
+            return [artifact.plan.node_key for artifact in queued[: self.tree_batch_size]]
+
+        selected: list[str] = []
+        selected_keys: set[str] = set()
+        if state.best_node_key:
+            deepen_candidate = next(
+                (
+                    artifact
+                    for artifact in queued
+                    if self._plan_is_descendant_of(
+                        state,
+                        node_key=artifact.plan.node_key,
+                        ancestor_key=state.best_node_key,
+                    )
+                ),
+                None,
+            )
+            if deepen_candidate is not None:
+                selected.append(deepen_candidate.plan.node_key)
+                selected_keys.add(deepen_candidate.plan.node_key)
+
+            explore_candidate = next(
+                (
+                    artifact
+                    for artifact in queued
+                    if artifact.plan.node_key not in selected_keys
+                    and not self._plan_is_descendant_of(
+                        state,
+                        node_key=artifact.plan.node_key,
+                        ancestor_key=state.best_node_key,
+                    )
+                ),
+                None,
+            )
+            if explore_candidate is not None and len(selected) < self.tree_batch_size:
+                selected.append(explore_candidate.plan.node_key)
+                selected_keys.add(explore_candidate.plan.node_key)
+
+        for artifact in queued:
+            if len(selected) >= self.tree_batch_size:
+                break
+            if artifact.plan.node_key in selected_keys:
+                continue
+            selected.append(artifact.plan.node_key)
+            selected_keys.add(artifact.plan.node_key)
+        return selected
+
+    def _plan_is_descendant_of(
+        self,
+        state: ResearchExecutionState,
+        *,
+        node_key: str,
+        ancestor_key: str,
+    ) -> bool:
+        current_key = node_key
+        seen: set[str] = set()
+        while current_key and current_key not in seen:
+            seen.add(current_key)
+            plan = state.node_plans.get(current_key)
+            if plan is None or not plan.parent_key:
+                return False
+            if plan.parent_key == ancestor_key:
+                return True
+            current_key = plan.parent_key
+        return False
 
     def _compute_frontier_score(
         self,
@@ -1103,6 +1168,52 @@ class AgentManagerTreeMixin:
         artifacts.readiness = str(result.get("readiness") or "low")
         summary["readiness"] = artifacts.readiness
 
+    def _eligible_completed_artifacts(
+        self,
+        state: ResearchExecutionState,
+    ) -> list[SearchNodeArtifacts]:
+        completed = [
+            artifact
+            for artifact in state.node_artifacts.values()
+            if artifact.summary.get("status") == "completed"
+        ]
+        lookup = {artifact.plan.node_key: artifact for artifact in completed}
+        eligible = [
+            artifact
+            for artifact in completed
+            if is_branch_selection_eligible(
+                artifact.summary,
+                parent_summary=(
+                    lookup[artifact.plan.parent_key].summary
+                    if artifact.plan.parent_key and artifact.plan.parent_key in lookup
+                    else None
+                ),
+            )
+        ]
+        return eligible or completed
+
+    def _best_score_gap(self, state: ResearchExecutionState) -> float:
+        candidates = self._eligible_completed_artifacts(state)
+        if len(candidates) < 2:
+            return 0.0
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda artifact: branch_selection_sort_key(artifact.summary),
+            reverse=True,
+        )
+        best_score = float(sorted_candidates[0].summary.get("branch_score") or 0.0)
+        second_score = float(sorted_candidates[1].summary.get("branch_score") or 0.0)
+        return round(best_score - second_score, 2)
+
+    def _can_stop_for_stable_best(self, state: ResearchExecutionState) -> bool:
+        if self._best_node_readiness(state) != "high":
+            return False
+        if state.best_node_stability < self.tree_stability_patience:
+            return False
+        if self._executed_tree_node_count(state) < self.tree_min_nodes_before_stable_stop:
+            return False
+        return state.best_score_gap >= self.tree_min_best_score_gap
+
     def _refresh_best_node(self, state: ResearchExecutionState, *, candidate_key: str) -> None:
         previous_best_key = state.best_node_key
         best_artifacts = state.node_artifacts.get(previous_best_key) if previous_best_key else None
@@ -1132,6 +1243,7 @@ class AgentManagerTreeMixin:
             state.best_node_key = ""
             state.best_node_stability = 0
             state.best_node_readiness = "low"
+            state.best_score_gap = 0.0
             return
 
         best_key = best_artifacts.plan.node_key
@@ -1142,6 +1254,7 @@ class AgentManagerTreeMixin:
         else:
             state.best_node_key = best_key
             state.best_node_stability = 1
+        state.best_score_gap = self._best_score_gap(state)
 
     def _best_node_readiness(self, state: ResearchExecutionState) -> str:
         if not state.best_node_key:
@@ -1212,10 +1325,7 @@ class AgentManagerTreeMixin:
                     summary = self._execute_candidate(state, plan=plan)
                     self._refresh_best_node(state, candidate_key=node_key)
 
-                    if (
-                        self._best_node_readiness(state) == "high"
-                        and state.best_node_stability >= self.tree_stability_patience
-                    ):
+                    if self._can_stop_for_stable_best(state):
                         state.termination_reason = "stable_high_readiness"
                         should_stop = True
                         break

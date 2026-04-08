@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import Any, Callable
 
 from app.db import Database
@@ -51,6 +52,8 @@ class HousingResearchAgentManager(
         tree_children_per_expansion: int = 2,
         tree_prune_score: int = 35,
         tree_stability_patience: int = 2,
+        tree_min_nodes_before_stable_stop: int = 5,
+        tree_min_best_score_gap: float = 5.0,
     ):
         self.db = db
         self.session_id = session_id
@@ -70,6 +73,11 @@ class HousingResearchAgentManager(
         self.tree_children_per_expansion = max(1, tree_children_per_expansion)
         self.tree_prune_score = max(1, tree_prune_score)
         self.tree_stability_patience = max(1, tree_stability_patience)
+        self.tree_min_nodes_before_stable_stop = max(1, tree_min_nodes_before_stable_stop)
+        self.tree_min_best_score_gap = max(0.0, float(tree_min_best_score_gap))
+        self.search_result_cache: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {}
+        self.detail_html_cache: dict[str, str | None] = {}
+        self._cache_copy = copy.deepcopy
         self.journal = ResearchJournal()
         self.context = ToolContext(
             session_id=session_id,

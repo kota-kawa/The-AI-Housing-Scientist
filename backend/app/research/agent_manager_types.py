@@ -55,6 +55,7 @@ class ResearchExecutionState:
     best_node_key: str = ""
     best_node_stability: int = 0
     best_node_readiness: str = "low"
+    best_score_gap: float = 0.0
     termination_reason: str = ""
     source_items: list[dict[str, Any]] = field(default_factory=list)
     search_summary: dict[str, Any] = field(default_factory=dict)

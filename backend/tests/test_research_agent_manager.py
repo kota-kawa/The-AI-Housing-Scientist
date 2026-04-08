@@ -362,6 +362,173 @@ def test_initial_node_plans_use_retry_issues_to_change_seed_strategies(tmp_path:
     assert operators[:2] == ["detail_first", "schema_first"]
 
 
+def test_research_tools_reuse_query_and_detail_caches(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    search_calls: list[str] = []
+    detail_calls: list[str] = []
+
+    def collect_search_results(**kwargs):
+        query = kwargs["query"]
+        search_calls.append(query)
+        return (
+            [{"url": f"https://example.com/{query}", "source_name": "catalog"}],
+            {
+                "catalog_result_count": 1,
+                "brave_result_count": 0,
+                "brave_error": "",
+            },
+        )
+
+    def fetch_detail_html(url: str) -> str | None:
+        detail_calls.append(url)
+        return f"<html>{url}</html>"
+
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=collect_search_results,
+        fetch_detail_html=fetch_detail_html,
+        collect_source_items=lambda **kwargs: [],
+    )
+    plan_a = SearchNodePlan(
+        node_key="a",
+        label="a",
+        description="a",
+        queries=["q1", "q2"],
+        ranking_profile={},
+        strategy_tags=["a"],
+        depth=1,
+    )
+    plan_b = SearchNodePlan(
+        node_key="b",
+        label="b",
+        description="b",
+        queries=["q2"],
+        ranking_profile={},
+        strategy_tags=["b"],
+        depth=1,
+    )
+
+    retrieve_a = manager._tool_retrieve(context=manager.context, branch=plan_a)
+    retrieve_b = manager._tool_retrieve(context=manager.context, branch=plan_b)
+    enrich_a = manager._tool_enrich(
+        context=manager.context,
+        branch=plan_a,
+        raw_results=retrieve_a["raw_results"],
+    )
+    enrich_b = manager._tool_enrich(
+        context=manager.context,
+        branch=plan_b,
+        raw_results=retrieve_b["raw_results"],
+    )
+
+    assert search_calls == ["q1", "q2"]
+    assert retrieve_b["summary"]["cache_hit_count"] == 1
+    assert detail_calls == ["https://example.com/q1", "https://example.com/q2"]
+    assert enrich_b["summary"]["cache_hit_count"] == 1
+
+
+def test_select_frontier_nodes_balances_best_branch_and_alternative(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+        tree_batch_size=2,
+    )
+    state = ResearchExecutionState(best_node_key="best")
+    best_plan = SearchNodePlan(
+        node_key="best",
+        label="best",
+        description="best",
+        queries=["best"],
+        ranking_profile={},
+        strategy_tags=["best"],
+        depth=1,
+    )
+    deep_a = SearchNodePlan(
+        node_key="deep-a",
+        label="deep-a",
+        description="deep-a",
+        queries=["deep-a"],
+        ranking_profile={},
+        strategy_tags=["deep"],
+        depth=2,
+        parent_key="best",
+    )
+    deep_b = SearchNodePlan(
+        node_key="deep-b",
+        label="deep-b",
+        description="deep-b",
+        queries=["deep-b"],
+        ranking_profile={},
+        strategy_tags=["deep"],
+        depth=2,
+        parent_key="best",
+    )
+    alt = SearchNodePlan(
+        node_key="alt",
+        label="alt",
+        description="alt",
+        queries=["alt"],
+        ranking_profile={},
+        strategy_tags=["alt"],
+        depth=1,
+    )
+    for plan, score in ((best_plan, 99.0), (deep_a, 95.0), (deep_b, 92.0), (alt, 80.0)):
+        state.node_plans[plan.node_key] = plan
+        state.node_artifacts[plan.node_key] = SearchNodeArtifacts(
+            plan=plan,
+            query_hash=manager._hash_queries(plan.queries, plan.ranking_profile),
+            frontier_score=score,
+            status="completed" if plan.node_key == "best" else "queued",
+            summary={"status": "completed"} if plan.node_key == "best" else {},
+        )
+    state.frontier = ["deep-a", "deep-b", "alt"]
+
+    selected = manager._select_frontier_nodes(state)
+
+    assert selected == ["deep-a", "alt"]
+
+
 def test_best_node_readiness_uses_cached_artifact_value(tmp_path: Path, monkeypatch):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
@@ -417,6 +584,86 @@ def test_best_node_readiness_uses_cached_artifact_value(tmp_path: Path, monkeypa
     )
 
     assert manager._best_node_readiness(state) == "high"
+
+
+def test_tree_search_waits_for_min_nodes_before_stable_stop(tmp_path: Path, monkeypatch):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+        tree_max_nodes=5,
+        tree_batch_size=1,
+        tree_stability_patience=1,
+        tree_min_nodes_before_stable_stop=3,
+        tree_min_best_score_gap=0,
+    )
+    plans = [
+        SearchNodePlan(
+            node_key=f"node-{index}",
+            label=f"node-{index}",
+            description="node",
+            queries=[f"query-{index}"],
+            ranking_profile={},
+            strategy_tags=[f"op-{index}"],
+            depth=1,
+        )
+        for index in range(3)
+    ]
+    monkeypatch.setattr(manager, "_initial_node_plans", lambda state: plans)
+
+    def fake_execute_candidate(state, *, plan):
+        order = len(state.branch_summaries)
+        artifacts = state.node_artifacts[plan.node_key]
+        summary = {
+            "branch_id": plan.node_key,
+            "node_key": plan.node_key,
+            "label": plan.label,
+            "status": "completed",
+            "depth": plan.depth,
+            "detail_coverage": 0.8,
+            "avg_top3_score": 90.0,
+            "normalized_count": 3,
+            "branch_score": 95.0 - order,
+            "frontier_score": 95.0 - order,
+            "top_issue_class": "healthy",
+            "prune_reasons": [],
+            "parent_key": plan.parent_key or "",
+            "strategy_tags": plan.strategy_tags,
+        }
+        artifacts.summary = summary
+        artifacts.status = "completed"
+        artifacts.readiness = "high"
+        state.branch_summaries.append(summary)
+        return summary
+
+    monkeypatch.setattr(manager, "_execute_candidate", fake_execute_candidate)
+
+    state = ResearchExecutionState(query="q", seed_queries=["q"])
+
+    assert manager._handle_tree_search(state) is None
+    assert len(state.branch_summaries) == 3
+    assert state.termination_reason == "stable_high_readiness"
 
 
 def test_tree_search_expands_recovery_nodes_after_initial_failures(tmp_path: Path):

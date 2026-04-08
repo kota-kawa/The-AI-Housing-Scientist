@@ -324,6 +324,10 @@ class OrchestratorResearchMixin:
             tree_children_per_expansion=self.settings.research_tree_children_per_expansion,
             tree_prune_score=self.settings.research_tree_prune_score,
             tree_stability_patience=self.settings.research_tree_stability_patience,
+            tree_min_nodes_before_stable_stop=(
+                self.settings.research_tree_min_nodes_before_stable_stop
+            ),
+            tree_min_best_score_gap=self.settings.research_tree_min_best_score_gap,
         )
         execution_result = manager.execute()
 
