@@ -190,3 +190,104 @@ def test_planner_uses_llm_intent_for_natural_search_request_without_structured_s
     assert result["intent"] == "search"
     assert result["next_action"] == "missing_slots_question"
     assert result["missing_slots"] == ["target_area", "budget_max", "layout_preference"]
+
+
+def test_planner_does_not_backfill_default_follow_up_questions_when_llm_selects_subset():
+    adapter = FakePlannerAdapter(
+        {
+            "intent": "search",
+            "extracted_slots": {
+                "target_area": None,
+                "budget_max": None,
+                "station_walk_max": None,
+                "layout_preference": None,
+                "move_in_date": None,
+                "must_conditions": [],
+                "nice_to_have": [],
+            },
+            "follow_up_questions": [
+                {
+                    "slot": "target_area",
+                    "question": "まずはどのエリアを優先したいですか？",
+                    "examples": ["中野", "横浜駅周辺", "江東区"],
+                }
+            ],
+            "seed_queries": [],
+            "research_plan": {
+                "summary": "",
+                "goal": "",
+                "strategy": [],
+                "rationale": "",
+            },
+            "condition_reasons": {
+                "target_area": "",
+                "budget_max": "",
+                "station_walk_max": "",
+                "move_in_date": "",
+                "layout_preference": "",
+                "must_conditions": "",
+                "nice_to_have": "",
+            },
+        }
+    )
+
+    result = run_planner(
+        message="部屋を探したい",
+        user_memory={},
+        adapter=adapter,
+    )
+
+    assert result["next_action"] == "missing_slots_question"
+    assert result["missing_slots"] == ["target_area"]
+    assert [item["slot"] for item in result["follow_up_questions"]] == ["target_area"]
+
+
+def test_planner_uses_llm_condition_reasons_as_is_without_default_backfill():
+    adapter = FakePlannerAdapter(
+        {
+            "intent": "search",
+            "extracted_slots": {
+                "target_area": "江東区",
+                "budget_max": 120000,
+                "station_walk_max": 7,
+                "layout_preference": "1LDK",
+                "move_in_date": None,
+                "must_conditions": ["ペット可"],
+                "nice_to_have": [],
+            },
+            "follow_up_questions": [],
+            "seed_queries": [],
+            "research_plan": {
+                "summary": "",
+                "goal": "",
+                "strategy": [],
+                "rationale": "",
+            },
+            "condition_reasons": {
+                "target_area": "",
+                "budget_max": "",
+                "station_walk_max": "",
+                "move_in_date": "",
+                "layout_preference": "",
+                "must_conditions": "",
+                "nice_to_have": "",
+            },
+        }
+    )
+
+    result = run_planner(
+        message="江東区で家賃12万円以下、駅徒歩7分以内の1LDKを探したい",
+        user_memory={},
+        adapter=adapter,
+    )
+
+    assert result["next_action"] == "search_and_compare"
+    assert result["condition_reasons"] == {
+        "budget_max": "",
+        "target_area": "",
+        "station_walk_max": "",
+        "move_in_date": "",
+        "layout_preference": "",
+        "must_conditions": "",
+        "nice_to_have": "",
+    }

@@ -511,6 +511,7 @@ def _build_follow_up_questions(
     *,
     llm_questions: list[dict[str, Any]] | None = None,
     limit: int | None = None,
+    allow_default_fill: bool = True,
 ) -> list[dict[str, Any]]:
     llm_questions = llm_questions or []
     items: list[dict[str, Any]] = []
@@ -535,12 +536,13 @@ def _build_follow_up_questions(
         if limit is not None and len(items) >= limit:
             return items
 
-    for slot in FOLLOW_UP_SLOT_ORDER + FOLLOW_UP_OPTIONAL_SLOTS:
-        if slot in seen_slots or not should_include(slot):
-            continue
-        items.append(_build_default_follow_up(slot))
-        if limit is not None and len(items) >= limit:
-            break
+    if allow_default_fill:
+        for slot in FOLLOW_UP_SLOT_ORDER + FOLLOW_UP_OPTIONAL_SLOTS:
+            if slot in seen_slots or not should_include(slot):
+                continue
+            items.append(_build_default_follow_up(slot))
+            if limit is not None and len(items) >= limit:
+                break
     return items
 
 
@@ -670,12 +672,14 @@ def run_planner(
     }
     merged = dict(user_memory)
     message_slots = _rule_based_slots(message)
+    used_llm_output = False
 
     if adapter is not None:
         try:
             llm_output = _normalize_llm_output(
                 _llm_parse(message, user_memory, profile_memory, adapter)
             )
+            used_llm_output = True
             merged = _merge_memory(user_memory, llm_output["extracted_slots"])
             for key, value in message_slots.items():
                 if _is_empty(merged.get(key)):
@@ -691,6 +695,7 @@ def run_planner(
         merged,
         llm_questions=llm_output["follow_up_questions"],
         limit=3 if intent == "search" and not readiness else None,
+        allow_default_fill=not used_llm_output,
     )
 
     if intent == "search" and not readiness:
@@ -727,10 +732,11 @@ def run_planner(
         "open_questions": fallback_plan["open_questions"],
     }
     seed_queries = llm_output["seed_queries"] or fallback_plan["seed_queries"]
-    condition_reasons = _build_default_condition_reasons(merged)
-    for key, value in llm_output["condition_reasons"].items():
-        if value:
-            condition_reasons[key] = value
+    condition_reasons = (
+        dict(llm_output["condition_reasons"])
+        if used_llm_output
+        else _build_default_condition_reasons(merged)
+    )
 
     return {
         "intent": intent,
