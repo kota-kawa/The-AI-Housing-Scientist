@@ -287,6 +287,78 @@ class AgentManagerTreeMixin:
         }
         return descriptions.get(operator, "探索ノード")
 
+    def _available_tree_operators(self) -> list[str]:
+        return [
+            "tighten_match",
+            "relax_for_coverage",
+            "source_diversify",
+            "detail_first",
+            "schema_first",
+            "explore_adjacent",
+            "exploit_best",
+        ]
+
+    def _operators_for_issue_hints(self, issues: list[str]) -> list[str]:
+        joined = " / ".join(str(item).strip() for item in issues if str(item).strip())
+        operators: list[str] = []
+        if "検索結果" in joined:
+            operators.extend(["source_diversify", "relax_for_coverage", "explore_adjacent"])
+        if "詳細ページ補完率" in joined:
+            operators.extend(["detail_first", "schema_first"])
+        if "欠損" in joined:
+            operators.extend(["schema_first", "tighten_match"])
+        if "条件一致度" in joined:
+            operators.extend(["tighten_match", "relax_for_coverage"])
+        if "情報源" in joined:
+            operators.extend(["source_diversify", "relax_for_coverage"])
+        deduped: list[str] = []
+        for operator in operators:
+            if operator not in deduped:
+                deduped.append(operator)
+        return deduped
+
+    def _initial_operators(self) -> list[str]:
+        catalog = self._available_tree_operators()
+        catalog_set = set(catalog)
+        strategy_memory = self._strategy_memory()
+        preferred = [
+            str(tag).strip()
+            for tag in strategy_memory.get("preferred_strategy_tags", []) or []
+            if str(tag).strip() in catalog_set
+        ]
+        avoided = {
+            str(tag).strip()
+            for tag in strategy_memory.get("avoided_strategy_tags", []) or []
+            if str(tag).strip() in catalog_set
+        }
+        last_successful_path = [
+            str(tag).strip()
+            for tag in strategy_memory.get("last_successful_path", []) or []
+            if str(tag).strip() in catalog_set and str(tag).strip() not in avoided
+        ]
+        retry_driven = [
+            operator
+            for operator in self._operators_for_issue_hints(
+                list(self._retry_context().get("top_issues", []) or [])
+            )
+            if operator in catalog_set and operator not in avoided
+        ]
+        ordered: list[str] = []
+        if last_successful_path:
+            ordered.append(last_successful_path[0])
+        ordered.extend(tag for tag in preferred if tag not in avoided)
+        ordered.extend(retry_driven)
+        ordered.extend(last_successful_path[1:])
+        ordered.extend(operator for operator in catalog if operator not in avoided)
+
+        deduped: list[str] = []
+        for operator in ordered:
+            if operator and operator not in deduped:
+                deduped.append(operator)
+        if deduped:
+            return deduped[:3]
+        return catalog[:3]
+
     def _candidate_node_input_payload(self, plan: SearchNodePlan) -> dict[str, Any]:
         return {
             "node_key": plan.node_key,
@@ -384,34 +456,15 @@ class AgentManagerTreeMixin:
         return [
             self._make_node_plan(
                 state,
-                operator="tighten_match",
+                operator=operator,
                 base_queries=base_queries,
                 base_profile={},
                 parent_key=None,
                 parent_node_id=state.root_node.id if state.root_node else None,
                 depth=1,
                 extra_tags=extra_tags,
-            ),
-            self._make_node_plan(
-                state,
-                operator="relax_for_coverage",
-                base_queries=base_queries,
-                base_profile={},
-                parent_key=None,
-                parent_node_id=state.root_node.id if state.root_node else None,
-                depth=1,
-                extra_tags=extra_tags,
-            ),
-            self._make_node_plan(
-                state,
-                operator="source_diversify",
-                base_queries=base_queries,
-                base_profile={},
-                parent_key=None,
-                parent_node_id=state.root_node.id if state.root_node else None,
-                depth=1,
-                extra_tags=extra_tags,
-            ),
+            )
+            for operator in self._initial_operators()
         ]
 
     def seed_queries_for_search(self, state: ResearchExecutionState) -> list[str]:

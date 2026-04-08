@@ -261,6 +261,107 @@ def test_register_frontier_node_uses_executed_count_for_tree_budget(tmp_path: Pa
     assert state.frontier == ["existing-3", child_plan.node_key]
 
 
+def test_initial_node_plans_prioritize_success_path_and_exclude_avoided_strategies(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {
+        "user_memory_snapshot": {
+            "target_area": "江東区",
+            "budget_max": 120000,
+            "station_walk_max": 7,
+            "layout_preference": "1LDK",
+            "must_conditions": [],
+            "nice_to_have": [],
+            "learned_preferences": {
+                "strategy_memory": {
+                    "preferred_strategy_tags": ["detail_first", "schema_first"],
+                    "avoided_strategy_tags": ["relax_for_coverage"],
+                    "last_successful_path": ["source_diversify", "detail_first"],
+                }
+            },
+        }
+    }
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+    state = ResearchExecutionState(query="江東区 賃貸 1LDK", seed_queries=["江東区 賃貸 1LDK"])
+
+    plans = manager._initial_node_plans(state)
+    operators = [plan.strategy_tags[0] for plan in plans]
+
+    assert operators[0] == "source_diversify"
+    assert "relax_for_coverage" not in operators
+    assert "detail_first" in operators
+
+
+def test_initial_node_plans_use_retry_issues_to_change_seed_strategies(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {
+        "user_memory_snapshot": {
+            "target_area": "江東区",
+            "budget_max": 120000,
+            "station_walk_max": 7,
+            "layout_preference": "1LDK",
+            "must_conditions": [],
+            "nice_to_have": [],
+            "learned_preferences": {},
+        },
+        "retry_context": {
+            "top_issues": ["詳細ページ補完率が低い", "比較に必要な項目の欠損が多い"]
+        },
+    }
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+    state = ResearchExecutionState(query="江東区 賃貸 1LDK", seed_queries=["江東区 賃貸 1LDK"])
+
+    plans = manager._initial_node_plans(state)
+    operators = [plan.strategy_tags[0] for plan in plans]
+
+    assert operators[:2] == ["detail_first", "schema_first"]
+
+
 def test_best_node_readiness_uses_cached_artifact_value(tmp_path: Path, monkeypatch):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
