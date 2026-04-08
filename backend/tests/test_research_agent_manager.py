@@ -316,3 +316,57 @@ def test_best_node_readiness_uses_cached_artifact_value(tmp_path: Path, monkeypa
     )
 
     assert manager._best_node_readiness(state) == "high"
+
+
+def test_tree_search_expands_recovery_nodes_after_initial_failures(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {
+        "user_memory_snapshot": {
+            "target_area": "江東区",
+            "budget_max": 120000,
+            "station_walk_max": 7,
+            "layout_preference": "1LDK",
+            "must_conditions": [],
+            "nice_to_have": [],
+            "learned_preferences": {},
+        }
+    }
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+
+    def fail_collect_search_results(**kwargs):
+        raise RuntimeError("search backend unavailable")
+
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=fail_collect_search_results,
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+        tree_max_nodes=5,
+    )
+    state = ResearchExecutionState(
+        query="江東区 賃貸 1LDK",
+        seed_queries=["江東区 賃貸 1LDK"],
+    )
+
+    assert manager._handle_tree_search(state) is None
+
+    assert len(state.branch_summaries) == 5
+    assert any(int(summary.get("depth") or 0) >= 2 for summary in state.branch_summaries)
+    assert any(str(summary.get("parent_key") or "").strip() for summary in state.branch_summaries)

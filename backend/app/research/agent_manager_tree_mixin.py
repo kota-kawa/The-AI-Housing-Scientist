@@ -610,6 +610,7 @@ class AgentManagerTreeMixin:
         stage_name: str,
         parent_summary: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        failure_stage = self._failure_stage_hint(artifacts)
         search_summary = {}
         if artifacts.retrieve:
             search_summary |= artifacts.retrieve.get("summary", {})
@@ -645,7 +646,19 @@ class AgentManagerTreeMixin:
         summary["query_hash"] = artifacts.query_hash
         summary["depth"] = plan.depth
         summary["prune_reasons"] = []
+        summary["failure_stage"] = failure_stage
         return summary
+
+    def _failure_stage_hint(self, artifacts: SearchNodeArtifacts) -> str:
+        if not artifacts.retrieve:
+            return "retrieve"
+        if not artifacts.enrich:
+            return "enrich"
+        if not artifacts.normalize:
+            return "normalize_dedupe"
+        if not artifacts.rank:
+            return "rank"
+        return "tree_search"
 
     def _execute_candidate(
         self,
@@ -822,13 +835,14 @@ class AgentManagerTreeMixin:
         *,
         plan: SearchNodePlan,
         summary: dict[str, Any],
+        operators: list[str] | None = None,
     ) -> list[SearchNodePlan]:
-        operators = [
+        resolved_operators = operators or [
             str(item).strip()
             for item in summary.get("expand_recommendations", []) or []
             if str(item).strip()
         ]
-        if not operators:
+        if not resolved_operators:
             return []
 
         parent_artifacts = state.node_artifacts.get(plan.node_key)
@@ -837,7 +851,7 @@ class AgentManagerTreeMixin:
         if parent_artifacts and parent_artifacts.rank.get("ranking_profile"):
             base_profile = dict(parent_artifacts.rank.get("ranking_profile", {}))
         children: list[SearchNodePlan] = []
-        for operator in operators[: self.tree_children_per_expansion]:
+        for operator in resolved_operators[: self.tree_children_per_expansion]:
             children.append(
                 self._make_node_plan(
                     state,
@@ -852,6 +866,81 @@ class AgentManagerTreeMixin:
                 )
             )
         return children
+
+    def _recovery_operators_for_summary(
+        self,
+        *,
+        plan: SearchNodePlan,
+        summary: dict[str, Any],
+    ) -> list[str]:
+        prune_reasons = {str(item).strip() for item in summary.get("prune_reasons", []) if str(item).strip()}
+        if "depth_limit" in prune_reasons or any(
+            reason.startswith("repeated_issue:") for reason in prune_reasons
+        ):
+            return []
+
+        joined_issues = " / ".join(str(item) for item in summary.get("issues", []) or [])
+        failure_stage = str(summary.get("failure_stage") or "").strip()
+        operators: list[str] = []
+
+        if summary.get("status") == "failed":
+            if failure_stage == "retrieve" or "検索結果が取得できていない" in joined_issues:
+                operators.extend(["source_diversify", "relax_for_coverage"])
+            if failure_stage in {"enrich", "normalize_dedupe"} or "詳細ページ補完率が低い" in joined_issues:
+                operators.extend(["detail_first", "schema_first"])
+            if failure_stage == "rank" or "上位候補の条件一致度が低い" in joined_issues:
+                operators.extend(["tighten_match", "explore_adjacent"])
+
+        if "low_detail_coverage" in prune_reasons or "詳細ページ補完率が低い" in joined_issues:
+            operators.extend(["detail_first", "schema_first"])
+        if "low_branch_score" in prune_reasons or "上位候補の条件一致度が低い" in joined_issues:
+            operators.extend(["tighten_match", "explore_adjacent"])
+        if "情報源の多様性が低い" in joined_issues:
+            operators.extend(["source_diversify", "relax_for_coverage"])
+        if not operators:
+            operators.extend(
+                [
+                    str(item).strip()
+                    for item in summary.get("expand_recommendations", []) or []
+                    if str(item).strip()
+                ]
+            )
+        if not operators and summary.get("status") == "failed":
+            operators.extend(["source_diversify", "explore_adjacent"])
+
+        deduped: list[str] = []
+        preferred = [
+            operator
+            for operator in operators
+            if operator and operator not in plan.strategy_tags
+        ] + [operator for operator in operators if operator]
+        for operator in preferred:
+            if operator not in deduped:
+                deduped.append(operator)
+        return deduped[: self.tree_children_per_expansion]
+
+    def _next_candidates_after_summary(
+        self,
+        state: ResearchExecutionState,
+        *,
+        plan: SearchNodePlan,
+        summary: dict[str, Any],
+    ) -> list[SearchNodePlan]:
+        if summary.get("status") == "completed" and not summary.get("prune_reasons"):
+            return self._expand_candidates_from_summary(
+                state,
+                plan=plan,
+                summary=summary,
+            )
+        recovery_operators = self._recovery_operators_for_summary(plan=plan, summary=summary)
+        if not recovery_operators:
+            return []
+        return self._expand_candidates_from_summary(
+            state,
+            plan=plan,
+            summary=summary,
+            operators=recovery_operators,
+        )
 
     def _default_selected_branch_summary(self) -> dict[str, Any]:
         return {
@@ -1083,17 +1172,16 @@ class AgentManagerTreeMixin:
                         should_stop = True
                         break
 
-                    if summary.get("status") == "completed" and not summary.get("prune_reasons"):
-                        for child in self._expand_candidates_from_summary(
+                    for child in self._next_candidates_after_summary(
+                        state,
+                        plan=plan,
+                        summary=summary,
+                    ):
+                        self._register_frontier_node(
                             state,
-                            plan=plan,
-                            summary=summary,
-                        ):
-                            self._register_frontier_node(
-                                state,
-                                plan=child,
-                                parent_summary=summary,
-                            )
+                            plan=child,
+                            parent_summary=summary,
+                        )
 
                 if should_stop:
                     break
