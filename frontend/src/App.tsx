@@ -246,6 +246,7 @@ export default function App() {
   const [llmDraft, setLlmDraft] = useState<LLMConfig | null>(null);
   const [llmEditorOpen, setLlmEditorOpen] = useState<boolean>(false);
   const [llmSaving, setLlmSaving] = useState<boolean>(false);
+  const [openModelDropdown, setOpenModelDropdown] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -291,6 +292,13 @@ export default function App() {
 
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    if (!openModelDropdown) return;
+    const handle = () => setOpenModelDropdown(null);
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [openModelDropdown]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -982,26 +990,71 @@ export default function App() {
                               <p className="mt-1 text-xs leading-5 text-inkMuted">{route.description}</p>
                             </div>
 
-                            <label className="space-y-1">
+                            <div className="space-y-1">
                               <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-inkSubtle">
                                 Model
                               </span>
-                              <select
-                                value={routeConfig.model}
-                                disabled={!llmEditable || llmSaving}
-                                onChange={(e) => handleLlmRouteModelChange(route.key, e.target.value)}
-                                className="w-full rounded-2xl border border-sky-100 bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-sky-300 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
-                              >
-                                {llmCapabilities.models.map((item) => (
-                                  <option key={`${route.key}-${item.model}`} value={item.model}>
-                                    {item.model}
-                                  </option>
-                                ))}
-                              </select>
+                              <div className="relative">
+                                <button
+                                  type="button"
+                                  disabled={!llmEditable || llmSaving}
+                                  onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                    setOpenModelDropdown(openModelDropdown === route.key ? null : route.key);
+                                  }}
+                                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-sky-100 bg-white px-3 py-2 text-left text-sm text-ink shadow-sm transition hover:border-sky-300 hover:shadow focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                                >
+                                  <span className="truncate">{routeConfig.model}</span>
+                                  <svg
+                                    className={`h-4 w-4 flex-shrink-0 text-inkSubtle transition-transform duration-150 ${openModelDropdown === route.key ? "rotate-180" : ""}`}
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                </button>
+
+                                {openModelDropdown === route.key && (
+                                  <div
+                                    className="absolute z-50 mt-1 max-h-60 w-full overflow-y-auto rounded-xl border border-sky-100 bg-white py-1 shadow-lg"
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                  >
+                                    {llmCapabilities.models.map((item) => {
+                                      const isSelected = item.model === routeConfig.model;
+                                      return (
+                                        <button
+                                          key={`${route.key}-${item.model}`}
+                                          type="button"
+                                          onClick={() => {
+                                            handleLlmRouteModelChange(route.key, item.model);
+                                            setOpenModelDropdown(null);
+                                          }}
+                                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-sky-50 ${
+                                            isSelected
+                                              ? "bg-sky-50/60 font-medium text-accent"
+                                              : "text-ink"
+                                          }`}
+                                        >
+                                          <span className={`flex h-4 w-4 flex-shrink-0 items-center justify-center ${isSelected ? "text-accent" : ""}`}>
+                                            {isSelected && (
+                                              <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                                                <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
+                                              </svg>
+                                            )}
+                                          </span>
+                                          <span className="truncate">{item.model}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
                               <p className="text-xs text-inkMuted">
                                 選択可能モデル {llmCapabilities.models.length} 件
                               </p>
-                            </label>
+                            </div>
                           </div>
                         );
                       })}
