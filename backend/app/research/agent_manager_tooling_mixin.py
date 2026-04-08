@@ -241,6 +241,58 @@ class AgentManagerToolingMixin:
         self.journal.append(node)
         return node
 
+    def _update_recorded_node(
+        self,
+        node_id: int | None,
+        *,
+        status: str | None = None,
+        input_payload: dict[str, Any] | None = None,
+        output_payload: dict[str, Any] | None = None,
+        reasoning: str | None = None,
+        duration_ms: int | None = None,
+        parent_node_id: int | None = None,
+        branch_id: str | None = None,
+        selected: bool | None = None,
+        metrics: dict[str, Any] | None = None,
+    ) -> None:
+        if node_id is None:
+            return
+
+        self.db.update_research_journal_node(
+            node_id,
+            status=status,
+            input_payload=input_payload,
+            output_payload=output_payload,
+            reasoning=reasoning,
+            duration_ms=duration_ms,
+            parent_node_id=parent_node_id,
+            branch_id=branch_id,
+            selected=selected,
+            metrics_payload=metrics,
+        )
+
+        node = self.journal.get_node(node_id)
+        if node is None:
+            return
+        if status is not None:
+            node.status = status
+        if input_payload is not None:
+            node.input_payload = input_payload
+        if output_payload is not None:
+            node.output_payload = output_payload
+        if reasoning is not None:
+            node.reasoning = reasoning
+        if duration_ms is not None:
+            node.duration_ms = duration_ms
+        if parent_node_id is not None:
+            node.parent_node_id = parent_node_id
+        if branch_id is not None:
+            node.branch_id = branch_id
+        if selected is not None:
+            node.selected = selected
+        if metrics is not None:
+            node.metrics = metrics
+
     def _run_stage(
         self,
         *,

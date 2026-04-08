@@ -60,6 +60,7 @@ export type UIBlock = {
     | "actions"
     | "plan"
     | "timeline"
+    | "tree"
     | "sources";
   title: string;
   content: Record<string, unknown>;

@@ -256,6 +256,7 @@ def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
 
     assert queued_response.status == "research_queued"
     assert any(block.type == "timeline" for block in queued_response.blocks)
+    assert any(block.type == "tree" for block in queued_response.blocks)
 
     assert orchestrator.process_next_research_job() is True
     research_state = orchestrator.get_research_state(session_id)
@@ -263,6 +264,7 @@ def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
     assert research_state.response is not None
     assert research_state.response.status == "research_completed"
     assert any(block.type == "cards" for block in research_state.response.blocks)
+    assert any(block.type == "tree" for block in research_state.response.blocks)
 
     user_memory, task_memory = db.get_memories(session_id)
     selected_property_id = task_memory["last_ranked_properties"][0]["property_id_norm"]

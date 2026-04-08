@@ -247,7 +247,14 @@ class OrchestratorActionsMixin:
                 missing_slots=[],
                 next_action="select_property",
                 blocks=(
-                    ([self._build_timeline_block(latest_job)] if latest_job else [])
+                    (
+                        self._build_research_progress_blocks(
+                            latest_job,
+                            task_memory=task_memory,
+                        )
+                        if latest_job
+                        else []
+                    )
                     + self._build_compare_blocks(
                         property_ids=property_ids,
                         ranked_properties=self._visible_ranked_properties(ranked_properties, task_memory),

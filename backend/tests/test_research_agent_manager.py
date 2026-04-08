@@ -160,3 +160,9 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     block_titles = [block.title for block in research_state.response.blocks]
     assert "探索分岐の比較" in block_titles
     assert "オフライン評価" in block_titles
+    tree_block = next((block for block in research_state.response.blocks if block.type == "tree"), None)
+    assert tree_block is not None
+    tree_nodes = tree_block.content["nodes"]
+    assert isinstance(tree_nodes, list)
+    assert len(tree_nodes) >= len(search_roots) + len(candidate_nodes)
+    assert tree_block.content["selected_branch_id"] == selected_node["branch_id"]

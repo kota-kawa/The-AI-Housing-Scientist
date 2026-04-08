@@ -887,6 +887,62 @@ class Database:
             for row in rows
         ]
 
+    def update_research_journal_node(
+        self,
+        node_id: int,
+        *,
+        status: str | None = None,
+        input_payload: dict[str, Any] | None = None,
+        output_payload: dict[str, Any] | None = None,
+        reasoning: str | None = None,
+        duration_ms: int | None = None,
+        parent_node_id: int | None = None,
+        branch_id: str | None = None,
+        selected: bool | None = None,
+        metrics_payload: dict[str, Any] | None = None,
+    ) -> None:
+        updates: list[str] = []
+        params: list[Any] = []
+
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if input_payload is not None:
+            updates.append("input_json = ?")
+            params.append(json.dumps(input_payload, ensure_ascii=False))
+        if output_payload is not None:
+            updates.append("output_json = ?")
+            params.append(json.dumps(output_payload, ensure_ascii=False))
+        if reasoning is not None:
+            updates.append("reasoning = ?")
+            params.append(reasoning)
+        if duration_ms is not None:
+            updates.append("duration_ms = ?")
+            params.append(duration_ms)
+        if parent_node_id is not None:
+            updates.append("parent_node_id = ?")
+            params.append(parent_node_id)
+        if branch_id is not None:
+            updates.append("branch_id = ?")
+            params.append(branch_id)
+        if selected is not None:
+            updates.append("selected = ?")
+            params.append(1 if selected else 0)
+        if metrics_payload is not None:
+            updates.append("metrics_json = ?")
+            params.append(json.dumps(metrics_payload, ensure_ascii=False))
+
+        if not updates:
+            return
+
+        params.append(node_id)
+        with self.connect() as conn:
+            conn.execute(
+                f"UPDATE research_journal_nodes SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+            conn.commit()
+
     def add_llm_call_event(
         self,
         *,

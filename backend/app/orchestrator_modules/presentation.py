@@ -216,7 +216,7 @@ class OrchestratorPresentationMixin:
         blocks: list[UIBlock] = []
         job = self.db.get_research_job(job_id) if job_id else None
         if job is not None:
-            blocks.append(self._build_timeline_block(job))
+            blocks.extend(self._build_research_progress_blocks(job, task_memory=task_memory))
 
         blocks.append(
             UIBlock(

@@ -259,13 +259,13 @@ class AgentManagerTreeMixin:
 
     def _operator_label(self, operator: str) -> str:
         labels = {
-            "tighten_match": "tighten_match",
-            "relax_for_coverage": "relax_for_coverage",
-            "source_diversify": "source_diversify",
-            "detail_first": "detail_first",
-            "schema_first": "schema_first",
-            "exploit_best": "exploit_best",
-            "explore_adjacent": "explore_adjacent",
+            "tighten_match": "条件厳格化",
+            "relax_for_coverage": "候補拡張",
+            "source_diversify": "情報源分散",
+            "detail_first": "詳細優先",
+            "schema_first": "項目充足優先",
+            "exploit_best": "有望条件の深掘り",
+            "explore_adjacent": "近傍条件の探索",
         }
         return labels.get(operator, operator)
 
@@ -280,6 +280,16 @@ class AgentManagerTreeMixin:
             "explore_adjacent": "周辺条件に寄せて近傍探索する探索",
         }
         return descriptions.get(operator, "探索ノード")
+
+    def _candidate_node_input_payload(self, plan: SearchNodePlan) -> dict[str, Any]:
+        return {
+            "node_key": plan.node_key,
+            "label": plan.label,
+            "description": plan.description,
+            "queries": plan.queries,
+            "strategy_tags": plan.strategy_tags,
+            "depth": plan.depth,
+        }
 
     def _estimate_frontier_score(
         self,
@@ -482,6 +492,31 @@ class AgentManagerTreeMixin:
             query_hash=query_hash,
             frontier_score=frontier_score,
         )
+        queued_node = self._record_node(
+            stage="tree_search",
+            node_type="search_candidate",
+            status="queued",
+            input_payload=self._candidate_node_input_payload(plan),
+            output_payload={
+                "summary": f"{plan.label} を depth {plan.depth} の候補として待機しています。",
+                "frontier_score": frontier_score,
+            },
+            reasoning="優先度順に評価するため、探索フロンティアへ候補ノードを登録する。",
+            parent_node_id=plan.parent_node_id,
+            branch_id=plan.node_key,
+            metrics={
+                "branch_id": plan.node_key,
+                "label": plan.label,
+                "description": plan.description,
+                "depth": plan.depth,
+                "strategy_tags": plan.strategy_tags,
+                "query_count": len(plan.queries),
+                "queries": plan.queries,
+                "frontier_score": frontier_score,
+                "status": "queued",
+            },
+        )
+        state.node_artifacts[plan.node_key].journal_node_id = queued_node.id
         state.frontier.append(plan.node_key)
 
     def _select_frontier_nodes(self, state: ResearchExecutionState) -> list[str]:
@@ -610,6 +645,28 @@ class AgentManagerTreeMixin:
             if plan.parent_key and plan.parent_key in state.node_artifacts
             else None
         )
+        artifacts.status = "running"
+        self._update_recorded_node(
+            artifacts.journal_node_id,
+            status="running",
+            input_payload=self._candidate_node_input_payload(plan),
+            output_payload={
+                "summary": f"{plan.label} を depth {plan.depth} で検証しています。",
+                "frontier_score": artifacts.frontier_score,
+            },
+            reasoning="探索フロンティアから次ノードを取り出し、収集と評価を順番に実行する。",
+            metrics={
+                "branch_id": plan.node_key,
+                "label": plan.label,
+                "description": plan.description,
+                "depth": plan.depth,
+                "strategy_tags": plan.strategy_tags,
+                "query_count": len(plan.queries),
+                "queries": plan.queries,
+                "frontier_score": artifacts.frontier_score,
+                "status": "running",
+            },
+        )
         started = time.perf_counter()
         try:
             retrieve_result = self.toolbox.run("retrieve", self.context, branch=plan)
@@ -679,16 +736,10 @@ class AgentManagerTreeMixin:
             artifacts.frontier_score = float(summary.get("frontier_score") or artifacts.frontier_score)
             artifacts.status = "completed"
             duration_ms = int((time.perf_counter() - started) * 1000)
-            node = self._record_node(
-                stage="tree_search",
-                node_type="search_candidate",
+            self._update_recorded_node(
+                artifacts.journal_node_id,
                 status="completed",
-                input_payload={
-                    "node_key": plan.node_key,
-                    "queries": plan.queries,
-                    "strategy_tags": plan.strategy_tags,
-                    "depth": plan.depth,
-                },
+                input_payload=self._candidate_node_input_payload(plan),
                 output_payload={
                     "retrieve_summary": retrieve_result.get("summary", {}),
                     "enrich_summary": enrich_result.get("summary", {}),
@@ -702,13 +753,12 @@ class AgentManagerTreeMixin:
                 branch_id=plan.node_key,
                 metrics=summary,
             )
-            artifacts.journal_node_id = node.id
             state.branch_summaries.append(summary)
             if summary["prune_reasons"]:
                 self._record_pruned_node(
                     state,
                     plan=plan,
-                    parent_node_id=node.id,
+                    parent_node_id=artifacts.journal_node_id,
                     prune_reasons=summary["prune_reasons"],
                     evaluation=summary,
                 )
@@ -726,24 +776,20 @@ class AgentManagerTreeMixin:
             artifacts.status = "failed"
             state.branch_failures[plan.node_key] = failure_summary
             state.branch_summaries.append(failure_summary)
-            node = self._record_node(
-                stage="tree_search",
-                node_type="search_candidate",
+            self._update_recorded_node(
+                artifacts.journal_node_id,
                 status="failed",
-                input_payload={
-                    "node_key": plan.node_key,
-                    "queries": plan.queries,
-                    "strategy_tags": plan.strategy_tags,
-                    "depth": plan.depth,
+                input_payload=self._candidate_node_input_payload(plan),
+                output_payload={
+                    "error": str(exc),
+                    "summary": failure_summary.get("summary", ""),
                 },
-                output_payload={"error": str(exc)},
                 reasoning="探索ノード単位の失敗を全体失敗に直結させず、別ノード探索を継続する。",
                 duration_ms=duration_ms,
                 parent_node_id=plan.parent_node_id,
                 branch_id=plan.node_key,
                 metrics=failure_summary,
             )
-            artifacts.journal_node_id = node.id
             return failure_summary
 
     def _expand_candidates_from_summary(

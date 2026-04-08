@@ -69,6 +69,7 @@ class UIBlock(BaseModel):
         "actions",
         "plan",
         "timeline",
+        "tree",
         "sources",
     ]
     title: str = ""

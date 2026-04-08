@@ -127,6 +127,17 @@ const TONES: Record<UIBlock["type"], BlockTone> = {
     badgeBg: "bg-slate-100",
     badgeText: "text-slate-800",
   },
+  tree: {
+    label: "探索",
+    iconBg: "bg-teal-100",
+    iconColor: "text-teal-700",
+    accentTitle: "text-teal-800",
+    accentLabel: "text-teal-600",
+    border: "border-teal-200",
+    surface: "bg-[linear-gradient(180deg,rgba(240,253,250,0.96)_0%,rgba(255,255,255,0.96)_100%)]",
+    badgeBg: "bg-teal-100",
+    badgeText: "text-teal-800",
+  },
   sources: {
     label: "根拠",
     iconBg: "bg-teal-100",
@@ -271,6 +282,24 @@ function TimelineIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+function TreeIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M10 4.5V15.5M10 7.2H5.2M10 10H14.8M10 13H6.8"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <circle cx="10" cy="4.5" r="1.45" fill="currentColor" />
+      <circle cx="5.2" cy="7.2" r="1.35" fill="currentColor" />
+      <circle cx="14.8" cy="10" r="1.35" fill="currentColor" />
+      <circle cx="6.8" cy="13" r="1.35" fill="currentColor" />
+      <circle cx="10" cy="15.5" r="1.45" fill="currentColor" />
+    </svg>
+  );
+}
+
 function SourceIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -362,10 +391,65 @@ const TYPE_ICONS: Record<UIBlock["type"], ComponentType<IconProps & SVGProps<SVG
   actions: ActionIcon,
   plan: PlanIcon,
   timeline: TimelineIcon,
+  tree: TreeIcon,
   sources: SourceIcon,
 };
 
 /* ---------- Helpers ---------- */
+
+type TreeNodeItem = {
+  id: number;
+  parent_id: number | null;
+  branch_id: string;
+  kind: string;
+  status: string;
+  node_type: string;
+  label: string;
+  description: string;
+  summary: string;
+  depth: number;
+  query_count: number;
+  queries: string[];
+  strategy_tags: string[];
+  branch_score: number | null;
+  frontier_score: number | null;
+  detail_coverage: number | null;
+  structured_ratio: number | null;
+  selected: boolean;
+  prune_reasons: string[];
+  created_at: string;
+  parent_label?: string;
+  is_selected?: boolean;
+  is_on_selected_path?: boolean;
+};
+
+type TreeStats = {
+  executed_node_count: number;
+  failed_node_count: number;
+  pruned_node_count: number;
+  frontier_remaining: number;
+  running_node_count: number;
+  max_depth_reached: number;
+  termination_reason: string;
+  termination_label: string;
+  node_count: number;
+};
+
+type TreeLayoutNode = TreeNodeItem & {
+  x: number;
+  y: number;
+  radius: number;
+};
+
+type TreeLayoutEdge = {
+  key: string;
+  path: string;
+  highlighted: boolean;
+  running: boolean;
+  queued: boolean;
+  failed: boolean;
+  pruned: boolean;
+};
 
 function toDisplayText(value: unknown): string {
   if (value === null || value === undefined) {
@@ -377,6 +461,30 @@ function toDisplayText(value: unknown): string {
 function toDisplayNumber(value: unknown): number | null {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function toRecordArray(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? (value as Array<Record<string, unknown>>) : [];
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => toDisplayText(item)).filter(Boolean)
+    : [];
+}
+
+function toPercentLabel(value: number | null, digits: number = 0): string {
+  if (value === null) {
+    return "";
+  }
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+function average(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 /* ---------- Section header ---------- */
@@ -624,6 +732,526 @@ function PropertyCard({
   );
 }
 
+function treeStatusMeta(status: string) {
+  if (status === "completed") {
+    return {
+      label: "完了",
+      fill: "#10b981",
+      stroke: "#047857",
+      edge: "#6ee7b7",
+      halo: "#a7f3d0",
+    };
+  }
+  if (status === "running") {
+    return {
+      label: "実行中",
+      fill: "#38bdf8",
+      stroke: "#0369a1",
+      edge: "#7dd3fc",
+      halo: "#bae6fd",
+    };
+  }
+  if (status === "failed") {
+    return {
+      label: "失敗",
+      fill: "#fda4af",
+      stroke: "#be123c",
+      edge: "#fda4af",
+      halo: "#ffe4e6",
+    };
+  }
+  if (status === "pruned") {
+    return {
+      label: "剪定",
+      fill: "#fdba74",
+      stroke: "#c2410c",
+      edge: "#fdba74",
+      halo: "#ffedd5",
+    };
+  }
+  if (status === "queued") {
+    return {
+      label: "待機",
+      fill: "#ffffff",
+      stroke: "#94a3b8",
+      edge: "#cbd5e1",
+      halo: "#e2e8f0",
+    };
+  }
+  return {
+    label: status || "pending",
+    fill: "#ffffff",
+    stroke: "#94a3b8",
+    edge: "#cbd5e1",
+    halo: "#e2e8f0",
+  };
+}
+
+function treeNodeRadius(node: TreeNodeItem): number {
+  if (node.kind === "root") {
+    return 30;
+  }
+  if (node.kind === "pruned") {
+    return 18;
+  }
+  let radius = 20;
+  if (node.status === "running") {
+    radius += 3;
+  }
+  if (node.is_selected) {
+    radius += 5;
+  } else if (node.is_on_selected_path) {
+    radius += 2;
+  }
+  const score = node.branch_score ?? node.frontier_score ?? 0;
+  if (score > 0) {
+    radius += Math.max(0, Math.min(6, Math.round((score - 45) / 12)));
+  }
+  return radius;
+}
+
+function buildTreeDiagramLayout(nodes: TreeNodeItem[]): {
+  nodes: TreeLayoutNode[];
+  edges: TreeLayoutEdge[];
+  width: number;
+  height: number;
+  depths: number[];
+} {
+  if (nodes.length === 0) {
+    return { nodes: [], edges: [], width: 760, height: 360, depths: [] };
+  }
+
+  const sortedNodes = [...nodes].sort((a, b) => a.depth - b.depth || a.id - b.id);
+  const nodeIds = new Set(sortedNodes.map((node) => node.id));
+  const childrenByParent = new Map<number | null, TreeNodeItem[]>();
+  for (const node of sortedNodes) {
+    const parentKey =
+      node.parent_id !== null && nodeIds.has(node.parent_id) ? node.parent_id : null;
+    const bucket = childrenByParent.get(parentKey) ?? [];
+    bucket.push(node);
+    childrenByParent.set(parentKey, bucket);
+  }
+  for (const bucket of childrenByParent.values()) {
+    bucket.sort((a, b) => a.id - b.id);
+  }
+
+  const roots = childrenByParent.get(null) ?? [sortedNodes[0]];
+  const maxDepth = Math.max(...sortedNodes.map((node) => node.depth));
+  const yStep = nodes.length >= 10 ? 78 : nodes.length >= 6 ? 90 : 108;
+  const xStep = 210;
+  const marginX = 96;
+  const marginY = 88;
+  let leafIndex = 0;
+  const positioned = new Map<number, TreeLayoutNode>();
+
+  const placeNode = (node: TreeNodeItem): number => {
+    const children = childrenByParent.get(node.id) ?? [];
+    let y = marginY + leafIndex * yStep;
+    if (children.length === 0) {
+      leafIndex += 1;
+    } else {
+      const childYs = children.map((child) => placeNode(child));
+      y = average(childYs);
+    }
+    const radius = treeNodeRadius(node);
+    positioned.set(node.id, {
+      ...node,
+      x: marginX + node.depth * xStep,
+      y,
+      radius,
+    });
+    return y;
+  };
+
+  roots.forEach((root, index) => {
+    if (index > 0) {
+      leafIndex += 1;
+    }
+    placeNode(root);
+  });
+
+  for (const node of sortedNodes) {
+    if (!positioned.has(node.id)) {
+      placeNode(node);
+    }
+  }
+
+  const layoutNodes = sortedNodes
+    .map((node) => positioned.get(node.id))
+    .filter((node): node is TreeLayoutNode => Boolean(node));
+  const byId = new Map(layoutNodes.map((node) => [node.id, node]));
+  const edges: TreeLayoutEdge[] = [];
+
+  for (const node of layoutNodes) {
+    if (node.parent_id === null) {
+      continue;
+    }
+    const parent = byId.get(node.parent_id);
+    if (!parent) {
+      continue;
+    }
+    const startX = parent.x + parent.radius + 8;
+    const endX = node.x - node.radius - 8;
+    const dx = Math.max(60, endX - startX);
+    const bend = Math.max(34, dx * 0.42);
+    const highlighted =
+      Boolean(node.is_on_selected_path || node.is_selected) &&
+      (parent.kind === "root" || Boolean(parent.is_on_selected_path || parent.is_selected));
+    edges.push({
+      key: `${parent.id}-${node.id}`,
+      path: `M ${startX} ${parent.y} C ${startX + bend} ${parent.y}, ${endX - bend} ${node.y}, ${endX} ${node.y}`,
+      highlighted,
+      running: node.status === "running",
+      queued: node.status === "queued",
+      failed: node.status === "failed",
+      pruned: node.kind === "pruned",
+    });
+  }
+
+  const heights = layoutNodes.map((node) => node.y + node.radius);
+  const width = marginX * 2 + maxDepth * xStep + 160;
+  const height = Math.max(360, Math.max(...heights) + marginY);
+  const depths = Array.from(new Set(layoutNodes.map((node) => node.depth))).sort((a, b) => a - b);
+
+  return { nodes: layoutNodes, edges, width, height, depths };
+}
+
+function buildTreeNodeTooltip(node: TreeNodeItem): string {
+  const status = treeStatusMeta(node.status).label;
+  const parts = [node.label || node.branch_id || "探索ノード", `${status} / depth ${node.depth}`];
+  if (node.summary) {
+    parts.push(node.summary);
+  }
+  if (node.prune_reasons.length > 0) {
+    parts.push(`剪定理由: ${node.prune_reasons.join(" / ")}`);
+  }
+  if (node.queries[0]) {
+    parts.push(`query: ${node.queries[0]}`);
+  }
+  return parts.join("\n");
+}
+
+function TreeLegendItem({
+  color,
+  accent,
+  label,
+  count,
+  doubleRing = false,
+  dashed = false,
+}: {
+  color: string;
+  accent: string;
+  label: string;
+  count: number;
+  doubleRing?: boolean;
+  dashed?: boolean;
+}) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/88 px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm">
+      <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4">
+        {doubleRing && (
+          <circle cx="10" cy="10" r="8.2" fill="none" stroke={accent} strokeWidth="2.2" opacity="0.45" />
+        )}
+        <circle
+          cx="10"
+          cy="10"
+          r="5.3"
+          fill={color}
+          stroke={accent}
+          strokeWidth="1.8"
+          strokeDasharray={dashed ? "2.6 2.6" : undefined}
+        />
+      </svg>
+      <span>{label}</span>
+      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+        {count}
+      </span>
+    </div>
+  );
+}
+
+function TreeDiagram({
+  nodes,
+  stats,
+  currentStage,
+  isLive,
+}: {
+  nodes: TreeNodeItem[];
+  stats: TreeStats;
+  currentStage: string;
+  isLive: boolean;
+}) {
+  const layout = buildTreeDiagramLayout(nodes);
+  const selectedCount = nodes.filter((node) => node.is_selected).length;
+  const pathCount = nodes.filter((node) => node.is_on_selected_path).length;
+
+  if (nodes.length === 0) {
+    return (
+      <div className="rounded-[28px] border border-dashed border-teal-200 bg-white/85 p-8 text-center shadow-card">
+        <div className="mx-auto flex w-fit items-center gap-2 rounded-full bg-teal-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-teal-700">
+          <span className="h-2 w-2 rounded-full bg-teal-500" />
+          frontier standby
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {currentStage && (
+            <span className="rounded-full border border-teal-100 bg-teal-50/80 px-3 py-1.5 text-[11px] font-semibold text-teal-700 shadow-sm">
+              {currentStage}
+            </span>
+          )}
+          {isLive && (
+            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-100 bg-cyan-50/90 px-3 py-1.5 text-[11px] font-semibold text-cyan-800 shadow-sm">
+              <span className="h-2 w-2 rounded-full bg-cyan-500 animate-pulseSoft" />
+              live
+            </span>
+          )}
+          <span className="rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm">
+            {stats.termination_label || "進行中"}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <TreeLegendItem color="#ffffff" accent="#0f766e" label="採用" count={selectedCount} doubleRing />
+          <TreeLegendItem color="#ffffff" accent="#0891b2" label="採用パス" count={pathCount} />
+          <TreeLegendItem color="#38bdf8" accent="#0369a1" label="実行中" count={stats.running_node_count} />
+          <TreeLegendItem color="#10b981" accent="#047857" label="完了" count={stats.executed_node_count} />
+          <TreeLegendItem color="#ffffff" accent="#94a3b8" label="待機" count={stats.frontier_remaining} />
+          <TreeLegendItem color="#fdba74" accent="#c2410c" label="剪定" count={stats.pruned_node_count} dashed />
+          <TreeLegendItem color="#fda4af" accent="#be123c" label="失敗" count={stats.failed_node_count} />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-[30px] border border-teal-200/80 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.18),rgba(255,255,255,0.96)_52%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(236,253,245,0.88))] p-3 shadow-soft">
+        <div style={{ minWidth: `${layout.width}px` }}>
+          <svg
+            viewBox={`0 0 ${layout.width} ${layout.height}`}
+            role="img"
+            aria-label="探索ツリーのダイアグラム"
+            className="w-full"
+            style={{ height: `${layout.height}px` }}
+          >
+            <rect x="0" y="0" width={layout.width} height={layout.height} rx="26" fill="rgba(255,255,255,0.26)" />
+
+            {layout.depths.map((depth, index) => {
+              const columnNodes = layout.nodes.filter((node) => node.depth === depth);
+              if (columnNodes.length === 0) {
+                return null;
+              }
+              const x = average(columnNodes.map((node) => node.x));
+              return (
+                <g key={`band-${depth}`}>
+                  <rect
+                    x={x - 72}
+                    y={24}
+                    width={144}
+                    height={layout.height - 48}
+                    rx={30}
+                    fill={index % 2 === 0 ? "rgba(255,255,255,0.46)" : "rgba(236,253,245,0.42)"}
+                  />
+                  <line
+                    x1={x}
+                    y1={28}
+                    x2={x}
+                    y2={layout.height - 28}
+                    stroke="rgba(15,118,110,0.08)"
+                    strokeWidth="1"
+                  />
+                </g>
+              );
+            })}
+
+            {layout.edges.map((edge) => {
+              const highlightStroke = edge.running
+                ? "#0ea5e9"
+                : edge.failed
+                  ? "#fb7185"
+                  : edge.pruned
+                    ? "#f59e0b"
+                    : edge.highlighted
+                      ? "#0f766e"
+                      : edge.queued
+                        ? "#94a3b8"
+                        : "#cbd5e1";
+              return (
+                <g key={edge.key}>
+                  <path
+                    d={edge.path}
+                    fill="none"
+                    stroke={edge.highlighted || edge.running ? "rgba(45,212,191,0.16)" : "rgba(148,163,184,0.12)"}
+                    strokeWidth={edge.highlighted || edge.running ? 12 : 8}
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d={edge.path}
+                    fill="none"
+                    stroke={highlightStroke}
+                    strokeWidth={edge.highlighted || edge.running ? 3.5 : 2.4}
+                    strokeLinecap="round"
+                    strokeDasharray={edge.queued ? "5 7" : edge.pruned ? "6 6" : undefined}
+                    opacity={edge.failed ? 0.72 : 0.92}
+                  />
+                </g>
+              );
+            })}
+
+            {layout.nodes.map((node) => {
+              const status = treeStatusMeta(node.status);
+              const isSelected = Boolean(node.is_selected);
+              const isPath = Boolean(node.is_on_selected_path);
+              const tooltip = buildTreeNodeTooltip(node);
+              return (
+                <g
+                  key={node.id}
+                  transform={`translate(${node.x} ${node.y})`}
+                  className={node.status === "running" ? "animate-pulseSoft" : undefined}
+                >
+                  <title>{tooltip}</title>
+
+                  {isPath && (
+                    <circle
+                      cx="0"
+                      cy="0"
+                      r={node.radius + (isSelected ? 12 : 8)}
+                      fill="none"
+                      stroke={isSelected ? "rgba(15,118,110,0.44)" : "rgba(8,145,178,0.28)"}
+                      strokeWidth={isSelected ? 7 : 5}
+                    />
+                  )}
+
+                  {node.kind === "root" && (
+                    <>
+                      <circle cx="0" cy="0" r={node.radius + 12} fill="rgba(15,118,110,0.10)" />
+                      <circle cx="0" cy="0" r={node.radius} fill="#ffffff" stroke="#0f766e" strokeWidth="3" />
+                      <circle cx="0" cy="0" r={10} fill="#0f766e" opacity="0.92" />
+                      <circle cx="-16" cy="-12" r={3} fill="#14b8a6" opacity="0.95" />
+                      <circle cx="16" cy="-12" r={3} fill="#0ea5e9" opacity="0.95" />
+                      <circle cx="0" cy="18" r={3} fill="#34d399" opacity="0.95" />
+                    </>
+                  )}
+
+                  {node.kind !== "root" && node.kind !== "pruned" && (
+                    <>
+                      {node.status === "running" && (
+                        <circle
+                          cx="0"
+                          cy="0"
+                          r={node.radius + 10}
+                          fill="none"
+                          stroke="rgba(56,189,248,0.28)"
+                          strokeWidth="5"
+                        />
+                      )}
+                      <circle
+                        cx="0"
+                        cy="0"
+                        r={node.radius}
+                        fill={status.fill}
+                        stroke={status.stroke}
+                        strokeWidth={node.status === "queued" ? 2.6 : 3}
+                      />
+                      {node.status === "queued" && (
+                        <circle cx="0" cy="0" r={6.5} fill="#cbd5e1" />
+                      )}
+                      {node.status === "completed" && (
+                        <>
+                          <circle cx="0" cy="0" r={7.2} fill="#ffffff" opacity="0.98" />
+                          <circle cx="0" cy="0" r={2.8} fill={status.stroke} />
+                        </>
+                      )}
+                      {node.status === "running" && (
+                        <>
+                          <circle cx="0" cy="0" r={6.4} fill="#ffffff" opacity="0.96" />
+                          <circle cx="0" cy="0" r={3} fill="#0369a1" />
+                          <circle
+                            cx="0"
+                            cy="0"
+                            r={node.radius + 4}
+                            fill="none"
+                            stroke="#0369a1"
+                            strokeWidth="1.5"
+                            strokeDasharray="3 5"
+                            opacity="0.6"
+                          />
+                        </>
+                      )}
+                      {node.status === "failed" && (
+                        <>
+                          <line x1={-8} y1={-8} x2={8} y2={8} stroke="#881337" strokeWidth="3" strokeLinecap="round" />
+                          <line x1={8} y1={-8} x2={-8} y2={8} stroke="#881337" strokeWidth="3" strokeLinecap="round" />
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {node.kind === "pruned" && (
+                    <>
+                      <polygon
+                        points={`0,-${node.radius} ${node.radius},0 0,${node.radius} -${node.radius},0`}
+                        fill="#fff7ed"
+                        stroke="#c2410c"
+                        strokeWidth="2.8"
+                        strokeDasharray="4 3"
+                      />
+                      <line
+                        x1={-node.radius * 0.55}
+                        y1={node.radius * 0.55}
+                        x2={node.radius * 0.55}
+                        y2={-node.radius * 0.55}
+                        stroke="#fb923c"
+                        strokeWidth="2.6"
+                        strokeLinecap="round"
+                      />
+                      <line
+                        x1={-node.radius * 0.22}
+                        y1={node.radius * 0.78}
+                        x2={node.radius * 0.78}
+                        y2={-node.radius * 0.22}
+                        stroke="#fdba74"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                    </>
+                  )}
+
+                  {isSelected && node.kind !== "root" && (
+                    <circle
+                      cx="0"
+                      cy="0"
+                      r={node.radius + 11}
+                      fill="none"
+                      stroke="#0f766e"
+                      strokeWidth="3"
+                      strokeDasharray="1 0"
+                      opacity="0.9"
+                    />
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500">
+        <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">
+          nodes {stats.node_count}
+        </span>
+        <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">
+          depth {stats.max_depth_reached}
+        </span>
+        <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">
+          hover for details
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Block dispatcher ---------- */
 
 export default function StructuredBlock({
@@ -831,6 +1459,64 @@ export default function StructuredBlock({
               })}
             </div>
           )}
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === "tree") {
+    const tone = TONES.tree;
+    const currentStage = toDisplayText(block.content.current_stage);
+    const isLive = Boolean(block.content.is_live);
+    const statsRecord =
+      typeof block.content.stats === "object" && block.content.stats !== null
+        ? (block.content.stats as Record<string, unknown>)
+        : {};
+    const stats: TreeStats = {
+      executed_node_count: toDisplayNumber(statsRecord.executed_node_count) ?? 0,
+      failed_node_count: toDisplayNumber(statsRecord.failed_node_count) ?? 0,
+      pruned_node_count: toDisplayNumber(statsRecord.pruned_node_count) ?? 0,
+      frontier_remaining: toDisplayNumber(statsRecord.frontier_remaining) ?? 0,
+      running_node_count: toDisplayNumber(statsRecord.running_node_count) ?? 0,
+      max_depth_reached: toDisplayNumber(statsRecord.max_depth_reached) ?? 0,
+      termination_reason: toDisplayText(statsRecord.termination_reason),
+      termination_label: toDisplayText(statsRecord.termination_label),
+      node_count: toDisplayNumber(statsRecord.node_count) ?? 0,
+    };
+    const nodes = toRecordArray(block.content.nodes)
+      .map<TreeNodeItem>((item) => ({
+        id: toDisplayNumber(item.id) ?? 0,
+        parent_id: toDisplayNumber(item.parent_id),
+        branch_id: toDisplayText(item.branch_id),
+        kind: toDisplayText(item.kind),
+        status: toDisplayText(item.status),
+        node_type: toDisplayText(item.node_type),
+        label: toDisplayText(item.label),
+        description: toDisplayText(item.description),
+        summary: toDisplayText(item.summary),
+        depth: toDisplayNumber(item.depth) ?? 0,
+        query_count: toDisplayNumber(item.query_count) ?? 0,
+        queries: toStringArray(item.queries),
+        strategy_tags: toStringArray(item.strategy_tags),
+        branch_score: toDisplayNumber(item.branch_score),
+        frontier_score: toDisplayNumber(item.frontier_score),
+        detail_coverage: toDisplayNumber(item.detail_coverage),
+        structured_ratio: toDisplayNumber(item.structured_ratio),
+        selected: Boolean(item.selected),
+        prune_reasons: toStringArray(item.prune_reasons),
+        created_at: toDisplayText(item.created_at),
+        parent_label: toDisplayText(item.parent_label),
+        is_selected: Boolean(item.is_selected),
+        is_on_selected_path: Boolean(item.is_on_selected_path),
+      }))
+      .filter((item) => item.id > 0)
+      .sort((a, b) => a.depth - b.depth || a.id - b.id);
+
+    return (
+      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+        <SectionHeader block={block} count={nodes.length} />
+        <div className="px-4 py-3.5">
+          <TreeDiagram nodes={nodes} stats={stats} currentStage={currentStage} isLive={isLive} />
         </div>
       </section>
     );

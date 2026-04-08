@@ -446,8 +446,11 @@ class OrchestratorResearchMixin:
                 assistant_message="調査中にエラーが発生しました。条件は保持しているので再実行できます。",
                 missing_slots=[],
                 next_action="retry_research_job",
-                blocks=[
-                    self._build_timeline_block(failed_job),
+                blocks=self._build_research_progress_blocks(
+                    failed_job,
+                    task_memory=task_memory,
+                )
+                + [
                     UIBlock(
                         type="warning",
                         title="調査エラー",
