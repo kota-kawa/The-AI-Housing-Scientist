@@ -249,6 +249,15 @@ class HousingOrchestrator:
             self.db.update_memories(session_id, user_memory, task_memory)
         return user_memory, task_memory, normalized
 
+    def _get_profile_memory_for_session(self, session_id: str) -> dict[str, Any]:
+        session = self.db.get_session(session_id)
+        if session is None or not session.get("profile_id"):
+            return {}
+        profile = self.db.get_profile(session["profile_id"])
+        if profile is None:
+            return {}
+        return profile.get("profile_memory", {}) or {}
+
     def _active_job_for_session(self, task_memory: dict[str, Any]) -> dict[str, Any] | None:
         active_job_id = str(task_memory.get("active_research_job_id") or "").strip()
         return self.db.get_research_job(active_job_id) if active_job_id else None
@@ -415,7 +424,7 @@ class HousingOrchestrator:
             interaction_type=interaction_type,
         )
 
-    def _build_search_query(self, user_memory: dict[str, Any], fallback_message: str) -> str:
+    def _build_search_queries(self, user_memory: dict[str, Any], fallback_message: str) -> list[str]:
         parts = []
         if user_memory.get("target_area"):
             parts.append(str(user_memory["target_area"]))
@@ -436,8 +445,19 @@ class HousingOrchestrator:
             if text:
                 parts.append(text)
 
-        query = " ".join(parts).strip()
-        return query if query and query != "賃貸" else fallback_message
+        keyword_query = " ".join(parts).strip()
+        queries = [keyword_query, fallback_message]
+        if user_memory.get("target_area") and user_memory.get("budget_max"):
+            queries.append(
+                f"{user_memory['target_area']}で家賃{int(int(user_memory['budget_max']) / 10000)}万円以内の賃貸"
+            )
+
+        deduped: list[str] = []
+        for item in queries:
+            text = " ".join(str(item).split()).strip()
+            if text and text != "賃貸" and text not in deduped:
+                deduped.append(text)
+        return deduped[:5] or [fallback_message]
 
     def _build_question_block(
         self,
@@ -467,43 +487,42 @@ class HousingOrchestrator:
                 return label
         return stage_name
 
-    def _build_plan_conditions(self, user_memory: dict[str, Any]) -> list[dict[str, str]]:
+    def _build_plan_conditions(
+        self,
+        user_memory: dict[str, Any],
+        condition_reasons: dict[str, str] | None = None,
+    ) -> list[dict[str, str]]:
+        condition_reasons = condition_reasons or {}
         conditions: list[dict[str, str]] = []
+
+        def add_condition(key: str, label: str, value: str) -> None:
+            item = {"label": label, "value": value}
+            reason = str(condition_reasons.get(key) or "").strip()
+            if reason:
+                item["reason"] = reason
+            conditions.append(item)
+
         if user_memory.get("target_area"):
-            conditions.append({"label": "希望エリア", "value": str(user_memory["target_area"])})
+            add_condition("target_area", "希望エリア", str(user_memory["target_area"]))
         if user_memory.get("budget_max"):
-            conditions.append(
-                {
-                    "label": "家賃上限",
-                    "value": self._format_money(user_memory["budget_max"]),
-                }
-            )
+            add_condition("budget_max", "家賃上限", self._format_money(user_memory["budget_max"]))
         if user_memory.get("layout_preference"):
-            conditions.append(
-                {"label": "間取り", "value": str(user_memory["layout_preference"])}
-            )
+            add_condition("layout_preference", "間取り", str(user_memory["layout_preference"]))
         if user_memory.get("station_walk_max"):
-            conditions.append(
-                {
-                    "label": "駅徒歩",
-                    "value": self._format_walk(user_memory["station_walk_max"]),
-                }
-            )
+            add_condition("station_walk_max", "駅徒歩", self._format_walk(user_memory["station_walk_max"]))
         if user_memory.get("move_in_date"):
-            conditions.append({"label": "入居時期", "value": str(user_memory["move_in_date"])})
+            add_condition("move_in_date", "入居時期", str(user_memory["move_in_date"]))
         if user_memory.get("must_conditions"):
-            conditions.append(
-                {
-                    "label": "必須条件",
-                    "value": " / ".join(str(item) for item in user_memory["must_conditions"]),
-                }
+            add_condition(
+                "must_conditions",
+                "必須条件",
+                " / ".join(str(item) for item in user_memory["must_conditions"]),
             )
         if user_memory.get("nice_to_have"):
-            conditions.append(
-                {
-                    "label": "あると良い条件",
-                    "value": " / ".join(str(item) for item in user_memory["nice_to_have"]),
-                }
+            add_condition(
+                "nice_to_have",
+                "あると良い条件",
+                " / ".join(str(item) for item in user_memory["nice_to_have"]),
             )
         return conditions
 
@@ -516,23 +535,41 @@ class HousingOrchestrator:
         llm_config: dict[str, Any],
     ) -> dict[str, Any]:
         follow_up_questions = planner_result.get("follow_up_questions", [])
-        base_query = self._build_search_query(user_memory, message)
+        condition_reasons = planner_result.get("condition_reasons", {}) or {}
+        conditions = self._build_plan_conditions(user_memory, condition_reasons)
+        planner_plan = planner_result.get("research_plan", {}) or {}
+        seed_queries = [
+            " ".join(str(item).split()).strip()
+            for item in planner_result.get("seed_queries", []) or []
+            if " ".join(str(item).split()).strip()
+        ]
+        if not seed_queries:
+            seed_queries = self._build_search_queries(user_memory, message)
         open_questions = [str(item.get("question") or "") for item in follow_up_questions if str(item.get("question") or "").strip()]
         strategy = [
-            "希望条件を軸に複数クエリへ展開して候補を広めに収集します。",
-            "詳細ページを優先して読み、表記ゆれと重複掲載を整理します。",
-            "条件一致度と不足情報を比較し、問い合わせ向きの候補を上位化します。",
+            str(item).strip()
+            for item in planner_plan.get("strategy", []) or []
+            if str(item).strip()
         ]
-        summary_tokens = [item["value"] for item in self._build_plan_conditions(user_memory)[:4]]
+        if not strategy:
+            strategy = [
+                "希望条件を軸に複数クエリへ展開して候補を広めに収集します。",
+                "詳細ページを優先して読み、表記ゆれと重複掲載を整理します。",
+                "条件一致度と不足情報を比較し、問い合わせ向きの候補を上位化します。",
+            ]
+        summary_tokens = [item["value"] for item in conditions[:4]]
         summary = " / ".join(summary_tokens) if summary_tokens else "条件整理から調査を開始"
 
         return {
-            "summary": summary,
-            "goal": "条件に近い候補を比較し、問い合わせに進める物件を絞り込む",
-            "conditions": self._build_plan_conditions(user_memory),
+            "summary": str(planner_plan.get("summary") or "").strip() or summary,
+            "goal": str(planner_plan.get("goal") or "").strip()
+            or "条件に近い候補を比較し、問い合わせに進める物件を絞り込む",
+            "rationale": str(planner_plan.get("rationale") or "").strip(),
+            "conditions": conditions,
             "strategy": strategy,
             "open_questions": open_questions,
-            "search_query": base_query,
+            "seed_queries": seed_queries,
+            "search_query": seed_queries[0] if seed_queries else "",
             "llm_config_snapshot": llm_config,
             "created_from_message": message,
             "user_memory_snapshot": user_memory,
@@ -545,9 +582,11 @@ class HousingOrchestrator:
             content={
                 "summary": plan.get("summary", ""),
                 "goal": plan.get("goal", ""),
+                "rationale": plan.get("rationale", ""),
                 "conditions": plan.get("conditions", []),
                 "strategy": plan.get("strategy", []),
                 "open_questions": plan.get("open_questions", []),
+                "seed_queries": plan.get("seed_queries", []),
                 "search_query": plan.get("search_query", ""),
             },
         )
@@ -1110,7 +1149,7 @@ class HousingOrchestrator:
 
         return blocks
 
-    def _build_research_queries(self, user_memory: dict[str, Any], seed_query: str) -> list[str]:
+    def _build_research_queries(self, user_memory: dict[str, Any], seed_queries: list[str]) -> list[str]:
         area = str(user_memory.get("target_area") or "").strip()
         layout = str(user_memory.get("layout_preference") or "").strip()
         budget = int(user_memory.get("budget_max") or 0)
@@ -1126,7 +1165,11 @@ class HousingOrchestrator:
             if str(item).strip()
         ]
 
-        candidates = [seed_query]
+        candidates = [
+            " ".join(str(item).split()).strip()
+            for item in seed_queries
+            if " ".join(str(item).split()).strip()
+        ]
         if area:
             tokens = [area, "賃貸"]
             if layout:
@@ -1514,14 +1557,27 @@ class HousingOrchestrator:
         message: str,
         adapter: Any,
         llm_config: dict[str, Any],
+        planner_result: dict[str, Any] | None = None,
+        user_memory: dict[str, Any] | None = None,
+        task_memory: dict[str, Any] | None = None,
     ) -> ChatMessageResponse:
-        user_memory, task_memory, llm_config = self._ensure_session_llm_config(session_id)
-
-        planner_result = run_planner(message=message, user_memory=user_memory, adapter=adapter)
+        if user_memory is None or task_memory is None:
+            user_memory, task_memory, llm_config = self._ensure_session_llm_config(session_id)
+        if planner_result is None:
+            planner_result = run_planner(
+                message=message,
+                user_memory=user_memory,
+                adapter=adapter,
+                profile_memory=self._get_profile_memory_for_session(session_id),
+            )
         self.db.add_audit_event(
             session_id,
             "planner",
-            {"message": message, "user_memory": user_memory},
+            {
+                "message": message,
+                "user_memory": user_memory,
+                "profile_memory": self._get_profile_memory_for_session(session_id),
+            },
             planner_result,
             "抽出済み条件と不足スロットを生成",
         )
@@ -1933,24 +1989,37 @@ class HousingOrchestrator:
         message: str,
         provider: ProviderName | None,
     ) -> ChatMessageResponse:
-        _, task_memory, llm_config = self._ensure_session_llm_config(session_id)
-
-        search_signal = detect_search_signal(message)
+        user_memory, task_memory, llm_config = self._ensure_session_llm_config(session_id)
         contract_like = looks_like_contract_text(message)
         active_job_id = str(task_memory.get("active_research_job_id") or "").strip()
         active_job = self.db.get_research_job(active_job_id) if active_job_id else None
-
-        if task_memory.get("awaiting_contract_text") and not search_signal:
-            return self._process_contract_text(session_id=session_id, source_text=message)
-
-        if contract_like and not search_signal:
-            return self._process_contract_text(session_id=session_id, source_text=message)
 
         if active_job and active_job["status"] in {"queued", "running"}:
             response = self._build_research_running_response(active_job)
             self.db.add_message(session_id, "assistant", response.model_dump())
             self.db.set_session_status(session_id, response.status)
             return response
+
+        adapter = self._get_adapter_for_route(
+            llm_config=llm_config,
+            route_key="planner",
+            session_id=session_id,
+            job_id=active_job_id or None,
+            interaction_type="planner",
+        )
+        planner_result = run_planner(
+            message=message,
+            user_memory=user_memory,
+            adapter=adapter,
+            profile_memory=self._get_profile_memory_for_session(session_id),
+        )
+        search_signal = detect_search_signal(message, planner_result=planner_result)
+
+        if task_memory.get("awaiting_contract_text") and not search_signal:
+            return self._process_contract_text(session_id=session_id, source_text=message)
+
+        if contract_like and not search_signal:
+            return self._process_contract_text(session_id=session_id, source_text=message)
 
         if not search_signal:
             return self._annotate_response_labels(
@@ -1961,19 +2030,15 @@ class HousingOrchestrator:
                 )
             )
 
-        adapter = self._get_adapter_for_route(
-            llm_config=llm_config,
-            route_key="planner",
-            session_id=session_id,
-            job_id=active_job_id or None,
-            interaction_type="planner",
-        )
         return self._annotate_response_labels(
             self._process_search_message(
                 session_id=session_id,
                 message=message,
                 adapter=adapter,
                 llm_config=llm_config,
+                planner_result=planner_result,
+                user_memory=user_memory,
+                task_memory=task_memory,
             )
         )
 

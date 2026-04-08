@@ -42,6 +42,7 @@ class BranchExecutionArtifacts:
 class ResearchExecutionState:
     plan_result: dict[str, Any] = field(default_factory=dict)
     query: str = ""
+    seed_queries: list[str] = field(default_factory=list)
     query_stage_node: ResearchNode | None = None
     branch_plans: list[ResearchBranchPlan] = field(default_factory=list)
     branch_roots: dict[str, ResearchNode] = field(default_factory=dict)
@@ -85,7 +86,7 @@ class HousingResearchAgentManager:
         task_memory: dict[str, Any],
         provider: str,
         research_adapter: LLMAdapter | None,
-        build_research_queries: Callable[[dict[str, Any], str], list[str]],
+        build_research_queries: Callable[[dict[str, Any], list[str]], list[str]],
         collect_search_results: Callable[..., tuple[list[dict[str, Any]], dict[str, Any]]],
         fetch_detail_html: Callable[[str], str | None],
         collect_source_items: Callable[..., list[dict[str, Any]]],
@@ -400,8 +401,9 @@ class HousingResearchAgentManager:
                             "properties": {
                                 "summary": {"type": "string"},
                                 "search_query": {"type": "string"},
+                                "seed_queries": {"type": "array", "items": {"type": "string"}},
                             },
-                            "required": ["summary", "search_query"],
+                            "required": ["summary", "search_query", "seed_queries"],
                             "additionalProperties": True,
                         },
                     ),
@@ -413,8 +415,13 @@ class HousingResearchAgentManager:
                         description="Generate safe branch plans by varying query sets and ranking profiles.",
                         input_schema={
                             "type": "object",
-                            "properties": {"seed_query": {"type": "string"}},
-                            "required": ["seed_query"],
+                            "properties": {
+                                "seed_queries": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                }
+                            },
+                            "required": ["seed_queries"],
                             "additionalProperties": False,
                         },
                         output_schema={
@@ -637,14 +644,31 @@ class HousingResearchAgentManager:
         return node, output
 
     def _tool_plan_finalize(self, *, context: ToolContext) -> dict[str, Any]:
+        seed_queries = [
+            " ".join(str(item).split()).strip()
+            for item in context.approved_plan.get("seed_queries", []) or []
+            if " ".join(str(item).split()).strip()
+        ]
+        search_query = str(context.approved_plan.get("search_query") or "").strip()
+        if not seed_queries and search_query:
+            seed_queries = [search_query]
         return {
-            "summary": f"条件 {len(context.approved_plan.get('conditions', []))} 件で調査開始",
-            "search_query": str(context.approved_plan.get("search_query") or ""),
+            "summary": (
+                f"条件 {len(context.approved_plan.get('conditions', []))} 件で調査開始"
+                f"（seed {len(seed_queries)}本）"
+            ),
+            "search_query": search_query or (seed_queries[0] if seed_queries else ""),
+            "seed_queries": seed_queries,
         }
 
-    def _make_branch_plans(self, seed_query: str) -> list[ResearchBranchPlan]:
+    def _make_branch_plans(self, seed_queries: list[str]) -> list[ResearchBranchPlan]:
         user_memory = self.approved_plan.get("user_memory_snapshot", self.user_memory)
-        balanced_queries = self.build_research_queries(user_memory, seed_query)
+        normalized_seed_queries = [
+            " ".join(str(item).split()).strip()
+            for item in seed_queries
+            if " ".join(str(item).split()).strip()
+        ]
+        balanced_queries = self.build_research_queries(user_memory, normalized_seed_queries)
 
         area = str(user_memory.get("target_area") or "").strip()
         layout = str(user_memory.get("layout_preference") or "").strip()
@@ -660,7 +684,7 @@ class HousingResearchAgentManager:
             if str(item).strip()
         ]
 
-        strict_queries = [seed_query]
+        strict_queries = list(normalized_seed_queries)
         strict_tokens = [token for token in [area, layout, " ".join(must_conditions[:2]), "賃貸"] if token]
         if strict_tokens:
             strict_queries.append(" ".join(strict_tokens))
@@ -669,7 +693,7 @@ class HousingResearchAgentManager:
             if budget_tokens:
                 strict_queries.append(" ".join(budget_tokens))
 
-        broad_queries = [seed_query]
+        broad_queries = list(normalized_seed_queries)
         broad_tokens = [token for token in [area, "賃貸"] if token]
         if broad_tokens:
             broad_queries.append(" ".join(broad_tokens))
@@ -724,8 +748,13 @@ class HousingResearchAgentManager:
             ),
         ]
 
-    def _tool_query_expand(self, *, context: ToolContext, seed_query: str) -> dict[str, Any]:
-        branches = self._make_branch_plans(seed_query)
+    def _tool_query_expand(self, *, context: ToolContext, seed_queries: list[str]) -> dict[str, Any]:
+        normalized_seed_queries = [
+            " ".join(str(item).split()).strip()
+            for item in seed_queries
+            if " ".join(str(item).split()).strip()
+        ]
+        branches = self._make_branch_plans(normalized_seed_queries)
         llm_summary = ""
         if self.research_adapter is not None:
             schema = {
@@ -765,7 +794,7 @@ class HousingResearchAgentManager:
                     user=(
                         "承認済み計画:\n"
                         f"{self.approved_plan}\n\n"
-                        f"seed_query: {seed_query}"
+                        f"seed_queries: {normalized_seed_queries}"
                     ),
                     schema=schema,
                     temperature=0.2,
@@ -1060,7 +1089,14 @@ class HousingResearchAgentManager:
             reasoning="ユーザー承認済みの計画を固定し、以降の調査に使う条件を確定する。",
             runner=lambda: self.toolbox.run("plan_finalize", self.context),
         )
+        state.seed_queries = [
+            " ".join(str(item).split()).strip()
+            for item in state.plan_result.get("seed_queries", []) or []
+            if " ".join(str(item).split()).strip()
+        ]
         state.query = str(state.plan_result.get("search_query") or "")
+        if not state.query and state.seed_queries:
+            state.query = state.seed_queries[0]
         return None
 
     def _handle_query_expand(self, state: ResearchExecutionState) -> str | None:
@@ -1068,9 +1104,13 @@ class HousingResearchAgentManager:
             stage_name="query_expand",
             progress_percent=18,
             latest_summary="branch search のための検索分岐を作成しています。",
-            input_payload={"search_query": state.query},
+            input_payload={"search_query": state.query, "seed_queries": state.seed_queries},
             reasoning="単発検索ではなく、安全な複数分岐を比較して最良の探索計画を選ぶ。",
-            runner=lambda: self.toolbox.run("query_expand", self.context, seed_query=state.query),
+            runner=lambda: self.toolbox.run(
+                "query_expand",
+                self.context,
+                seed_queries=state.seed_queries or ([state.query] if state.query else []),
+            ),
         )
         state.branch_plans = [
             ResearchBranchPlan(
@@ -1087,7 +1127,7 @@ class HousingResearchAgentManager:
                 stage="query_expand",
                 node_type="branch_root",
                 status="completed",
-                input_payload={"search_query": state.query},
+                input_payload={"search_query": state.query, "seed_queries": state.seed_queries},
                 output_payload={
                     "label": branch.label,
                     "description": branch.description,

@@ -668,7 +668,11 @@ export default function StructuredBlock({
     const tone = TONES.plan;
     const summary = toDisplayText(block.content.summary);
     const goal = toDisplayText(block.content.goal);
+    const rationale = toDisplayText(block.content.rationale);
     const searchQuery = toDisplayText(block.content.search_query);
+    const seedQueries = Array.isArray(block.content.seed_queries)
+      ? block.content.seed_queries.map((item) => toDisplayText(item)).filter(Boolean)
+      : [];
     const conditions = Array.isArray(block.content.conditions)
       ? (block.content.conditions as Array<Record<string, unknown>>)
       : [];
@@ -683,10 +687,11 @@ export default function StructuredBlock({
       <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
         <SectionHeader block={block} />
         <div className="space-y-4 px-4 py-3.5">
-          {(summary || goal) && (
+          {(summary || goal || rationale) && (
             <div className="rounded-2xl border border-indigo-100 bg-white/85 p-4">
               {summary && <p className="text-sm font-semibold text-indigo-900">{summary}</p>}
               {goal && <p className="mt-2 text-[13px] leading-6 text-inkMuted">{goal}</p>}
+              {rationale && <p className="mt-2 text-[13px] leading-6 text-indigo-800/80">{rationale}</p>}
             </div>
           )}
 
@@ -700,6 +705,11 @@ export default function StructuredBlock({
                   <div key={`${toDisplayText(condition.label)}-${idx}`} className="rounded-xl bg-indigo-50/70 px-3 py-2">
                     <dt className="text-[11px] font-semibold text-indigo-700">{toDisplayText(condition.label)}</dt>
                     <dd className="mt-1 text-sm text-ink">{toDisplayText(condition.value)}</dd>
+                    {toDisplayText(condition.reason) && (
+                      <dd className="mt-1 text-[12px] leading-5 text-inkMuted">
+                        {toDisplayText(condition.reason)}
+                      </dd>
+                    )}
                   </div>
                 ))}
               </dl>
@@ -722,14 +732,22 @@ export default function StructuredBlock({
             </div>
           )}
 
-          {(searchQuery || openQuestions.length > 0) && (
+          {(searchQuery || seedQueries.length > 0 || openQuestions.length > 0) && (
             <div className="grid gap-3 sm:grid-cols-2">
-              {searchQuery && (
+              {(seedQueries.length > 0 || searchQuery) && (
                 <div className="rounded-2xl border border-indigo-100 bg-white/85 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600">
                     初期クエリ
                   </p>
-                  <p className="mt-2 text-sm leading-6 text-ink">{searchQuery}</p>
+                  {seedQueries.length > 0 ? (
+                    <ul className="mt-2 space-y-2 text-sm leading-6 text-ink">
+                      {seedQueries.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-sm leading-6 text-ink">{searchQuery}</p>
+                  )}
                 </div>
               )}
               {openQuestions.length > 0 && (

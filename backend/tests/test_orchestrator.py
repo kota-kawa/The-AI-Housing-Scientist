@@ -79,6 +79,27 @@ class FakeResearchSummaryAdapter(LLMAdapter):
         return ["fake-research-model"]
 
 
+class FakePlannerRouteAdapter(LLMAdapter):
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
+        raise AssertionError("generate_text should not be called in planner route tests")
+
+    def generate_structured(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: dict,
+        temperature: float = 0.2,
+    ) -> dict:
+        return self.payload
+
+    def list_models(self) -> list[str]:
+        return ["fake-planner-model"]
+
+
 def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
@@ -158,6 +179,78 @@ def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
     _, updated_task_memory = db.get_memories(session_id)
     assert updated_task_memory["awaiting_contract_text"] is False
     assert updated_task_memory["risk_items"]
+
+
+def test_orchestrator_uses_llm_generated_plan_content(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+    planner_adapter = FakePlannerRouteAdapter(
+        {
+            "intent": "search",
+            "extracted_slots": {
+                "target_area": "江東区",
+                "budget_max": 120000,
+                "station_walk_max": 7,
+                "layout_preference": "1LDK",
+                "move_in_date": None,
+                "must_conditions": ["ペット可"],
+                "nice_to_have": ["在宅ワーク向け"],
+            },
+            "follow_up_questions": [
+                {
+                    "slot": "move_in_date",
+                    "question": "ペットと一緒に住む前提で、いつ頃から入居したいですか？",
+                    "examples": ["できるだけ早く", "来月中", "6月ごろ"],
+                }
+            ],
+            "seed_queries": [
+                "江東区 賃貸 12万円 1LDK ペット可",
+                "江東区で家賃12万円以下、ペット可で在宅ワークしやすい賃貸",
+                "江東区 ペット可 1LDK 在宅ワーク 賃貸",
+            ],
+            "research_plan": {
+                "summary": "江東区でペット可かつ在宅ワークしやすい1LDKを優先して調べます。",
+                "goal": "早めに問い合わせできる候補を3件前後まで絞り込む",
+                "strategy": [
+                    "ペット可物件は希少なので江東区内で候補を広めに集めます。",
+                    "在宅ワーク向け設備や回線条件は詳細ページで重点確認します。",
+                    "家賃と駅距離の両立度を見て問い合わせ候補を上位化します。",
+                ],
+                "rationale": "希少条件があるため、母集団を先に確保してから絞り込む進め方を取ります。",
+            },
+            "condition_reasons": {
+                "target_area": "生活圏を固定したい条件なので検索の起点にします。",
+                "budget_max": "毎月の予算上限なので厳格に見ます。",
+                "station_walk_max": "通勤や移動負担に直結するためです。",
+                "move_in_date": "",
+                "layout_preference": "仕事スペースを確保できるかの判断軸にします。",
+                "must_conditions": "ペット可は候補数が少ないため優先度が高い条件です。",
+                "nice_to_have": "在宅ワーク条件は比較の差が出やすいので加点軸にします。",
+            },
+        }
+    )
+    orchestrator._get_adapter_for_route = (
+        lambda **kwargs: planner_adapter if kwargs.get("route_key") == "planner" else None
+    )
+
+    session_id, _ = db.create_session()
+    response = orchestrator.process_user_message(
+        session_id=session_id,
+        message="江東区で家賃12万円以下、ペット可、在宅ワークしやすい1LDKを探したい",
+        provider="openai",
+    )
+
+    assert response.status == "awaiting_plan_confirmation"
+    plan_block = next(block for block in response.blocks if block.type == "plan")
+    assert plan_block.content["summary"] == "江東区でペット可かつ在宅ワークしやすい1LDKを優先して調べます。"
+    assert plan_block.content["rationale"] == "希少条件があるため、母集団を先に確保してから絞り込む進め方を取ります。"
+    assert plan_block.content["seed_queries"][1] == "江東区で家賃12万円以下、ペット可で在宅ワークしやすい賃貸"
+    must_condition = next(
+        item for item in plan_block.content["conditions"] if item["label"] == "必須条件"
+    )
+    assert must_condition["reason"] == "ペット可は候補数が少ないため優先度が高い条件です。"
 
 
 def test_profile_memory_is_available_across_sessions(tmp_path: Path):
