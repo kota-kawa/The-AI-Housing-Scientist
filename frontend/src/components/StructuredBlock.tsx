@@ -435,6 +435,22 @@ type TreeStats = {
   node_count: number;
 };
 
+type TreeFocusBranch = {
+  branch_id: string;
+  label: string;
+  depth: number;
+  branch_score: number | null;
+  detail_coverage: number | null;
+  frontier_score: number | null;
+  summary: string;
+};
+
+type TreePruneSummary = {
+  count: number;
+  labels: string[];
+  reasons: string[];
+};
+
 type TreeLayoutNode = TreeNodeItem & {
   x: number;
   y: number;
@@ -448,7 +464,6 @@ type TreeLayoutEdge = {
   running: boolean;
   queued: boolean;
   failed: boolean;
-  pruned: boolean;
 };
 
 function toDisplayText(value: unknown): string {
@@ -485,6 +500,28 @@ function average(values: number[]): number {
     return 0;
   }
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function buildTreePruneSummary(nodes: TreeNodeItem[]): Map<number, TreePruneSummary> {
+  const summaryByParent = new Map<number, TreePruneSummary>();
+  for (const node of nodes) {
+    if (node.kind !== "pruned" || node.parent_id === null) {
+      continue;
+    }
+    const summary = summaryByParent.get(node.parent_id) ?? { count: 0, labels: [], reasons: [] };
+    summary.count += 1;
+    const label = node.label || node.branch_id;
+    if (label && !summary.labels.includes(label)) {
+      summary.labels.push(label);
+    }
+    for (const reason of node.prune_reasons) {
+      if (reason && !summary.reasons.includes(reason)) {
+        summary.reasons.push(reason);
+      }
+    }
+    summaryByParent.set(node.parent_id, summary);
+  }
+  return summaryByParent;
 }
 
 /* ---------- Section header ---------- */
@@ -904,7 +941,6 @@ function buildTreeDiagramLayout(nodes: TreeNodeItem[]): {
       running: node.status === "running",
       queued: node.status === "queued",
       failed: node.status === "failed",
-      pruned: node.kind === "pruned",
     });
   }
 
@@ -916,7 +952,7 @@ function buildTreeDiagramLayout(nodes: TreeNodeItem[]): {
   return { nodes: layoutNodes, edges, width, height, depths };
 }
 
-function buildTreeNodeTooltip(node: TreeNodeItem): string {
+function buildTreeNodeTooltip(node: TreeNodeItem, pruneSummary?: TreePruneSummary): string {
   const status = treeStatusMeta(node.status).label;
   const parts = [node.label || node.branch_id || "探索ノード", `${status} / depth ${node.depth}`];
   if (node.summary) {
@@ -928,6 +964,16 @@ function buildTreeNodeTooltip(node: TreeNodeItem): string {
   if (node.queries[0]) {
     parts.push(`query: ${node.queries[0]}`);
   }
+  if (pruneSummary && pruneSummary.count > 0) {
+    parts.push(`剪定: ${pruneSummary.count}件`);
+    if (pruneSummary.reasons.length > 0) {
+      parts.push(`剪定理由: ${pruneSummary.reasons.slice(0, 3).join(" / ")}`);
+    } else if (pruneSummary.labels.length > 0) {
+      const labels = pruneSummary.labels.slice(0, 3);
+      const suffix = pruneSummary.labels.length > labels.length ? " / ..." : "";
+      parts.push(`中止した候補: ${labels.join(" / ")}${suffix}`);
+    }
+  }
   return parts.join("\n");
 }
 
@@ -938,6 +984,7 @@ function TreeLegendItem({
   count,
   doubleRing = false,
   dashed = false,
+  cut = false,
 }: {
   color: string;
   accent: string;
@@ -945,6 +992,7 @@ function TreeLegendItem({
   count: number;
   doubleRing?: boolean;
   dashed?: boolean;
+  cut?: boolean;
 }) {
   return (
     <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/88 px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm">
@@ -961,11 +1009,56 @@ function TreeLegendItem({
           strokeWidth="1.8"
           strokeDasharray={dashed ? "2.6 2.6" : undefined}
         />
+        {cut && (
+          <>
+            <path
+              d="M 6.7 11.9 L 11.9 6.7"
+              fill="none"
+              stroke={accent}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+            <path
+              d="M 9.4 13.4 L 13.4 9.4"
+              fill="none"
+              stroke={accent}
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              opacity="0.55"
+            />
+          </>
+        )}
       </svg>
       <span>{label}</span>
       <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
         {count}
       </span>
+    </div>
+  );
+}
+
+function TreeEdgeLegendItem({
+  color,
+  label,
+  dashed,
+}: {
+  color: string;
+  label: string;
+  dashed: string;
+}) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/82 px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm">
+      <svg viewBox="0 0 24 12" aria-hidden="true" className="h-3 w-6">
+        <path
+          d="M 2 6 C 7 6, 8 3, 12 3 S 17 9, 22 9"
+          fill="none"
+          stroke={color}
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeDasharray={dashed}
+        />
+      </svg>
+      <span>{label}</span>
     </div>
   );
 }
@@ -985,13 +1078,15 @@ function TreeDiagram({
   isLive: boolean;
   summary: string;
   focusKind: string;
-  focusBranch: Record<string, unknown> | null;
+  focusBranch: TreeFocusBranch | null;
 }) {
-  const layout = buildTreeDiagramLayout(nodes);
-  const selectedCount = nodes.filter((node) => node.is_selected).length;
-  const pathCount = nodes.filter((node) => node.is_on_selected_path).length;
+  const visibleNodes = nodes.filter((node) => node.kind !== "pruned");
+  const pruneSummaryByParent = buildTreePruneSummary(nodes);
+  const layout = buildTreeDiagramLayout(visibleNodes);
+  const selectedCount = visibleNodes.filter((node) => node.is_selected).length;
+  const pathCount = visibleNodes.filter((node) => node.is_on_selected_path).length;
 
-  if (nodes.length === 0) {
+  if (visibleNodes.length === 0) {
     return (
       <div className="rounded-[28px] border border-dashed border-teal-200 bg-white/85 p-8 text-center shadow-card">
         <div className="mx-auto flex w-fit items-center gap-2 rounded-full bg-teal-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-teal-700">
@@ -1027,9 +1122,20 @@ function TreeDiagram({
           <TreeLegendItem color="#38bdf8" accent="#0369a1" label="実行中" count={stats.running_node_count} />
           <TreeLegendItem color="#10b981" accent="#047857" label="完了" count={stats.executed_node_count} />
           <TreeLegendItem color="#ffffff" accent="#94a3b8" label="待機" count={stats.frontier_remaining} />
-          <TreeLegendItem color="#fdba74" accent="#c2410c" label="剪定" count={stats.pruned_node_count} dashed />
+          <TreeLegendItem
+            color="#fff7ed"
+            accent="#c2410c"
+            label="剪定"
+            count={stats.pruned_node_count}
+            dashed
+            cut
+          />
           <TreeLegendItem color="#fda4af" accent="#be123c" label="失敗" count={stats.failed_node_count} />
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500">
+        <TreeEdgeLegendItem color="#94a3b8" label="灰色の点線: これから試す枝" dashed="4 5" />
       </div>
 
       <div className="overflow-x-auto rounded-[30px] border border-teal-200/80 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.18),rgba(255,255,255,0.96)_52%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(236,253,245,0.88))] p-3 shadow-soft">
@@ -1076,9 +1182,7 @@ function TreeDiagram({
                 ? "#0ea5e9"
                 : edge.failed
                   ? "#fb7185"
-                  : edge.pruned
-                    ? "#f59e0b"
-                    : edge.highlighted
+                  : edge.highlighted
                       ? "#0f766e"
                       : edge.queued
                         ? "#94a3b8"
@@ -1098,7 +1202,7 @@ function TreeDiagram({
                     stroke={highlightStroke}
                     strokeWidth={edge.highlighted || edge.running ? 3.5 : 2.4}
                     strokeLinecap="round"
-                    strokeDasharray={edge.queued ? "5 7" : edge.pruned ? "6 6" : undefined}
+                    strokeDasharray={edge.queued ? "4 5" : undefined}
                     opacity={edge.failed ? 0.72 : 0.92}
                   />
                 </g>
@@ -1109,7 +1213,8 @@ function TreeDiagram({
               const status = treeStatusMeta(node.status);
               const isSelected = Boolean(node.is_selected);
               const isPath = Boolean(node.is_on_selected_path);
-              const tooltip = buildTreeNodeTooltip(node);
+              const pruneSummary = pruneSummaryByParent.get(node.id);
+              const tooltip = buildTreeNodeTooltip(node, pruneSummary);
               return (
                 <g
                   key={node.id}
@@ -1194,36 +1299,6 @@ function TreeDiagram({
                     </>
                   )}
 
-                  {node.kind === "pruned" && (
-                    <>
-                      <polygon
-                        points={`0,-${node.radius} ${node.radius},0 0,${node.radius} -${node.radius},0`}
-                        fill="#fff7ed"
-                        stroke="#c2410c"
-                        strokeWidth="2.8"
-                        strokeDasharray="4 3"
-                      />
-                      <line
-                        x1={-node.radius * 0.55}
-                        y1={node.radius * 0.55}
-                        x2={node.radius * 0.55}
-                        y2={-node.radius * 0.55}
-                        stroke="#fb923c"
-                        strokeWidth="2.6"
-                        strokeLinecap="round"
-                      />
-                      <line
-                        x1={-node.radius * 0.22}
-                        y1={node.radius * 0.78}
-                        x2={node.radius * 0.78}
-                        y2={-node.radius * 0.22}
-                        stroke="#fdba74"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                      />
-                    </>
-                  )}
-
                   {isSelected && node.kind !== "root" && (
                     <circle
                       cx="0"
@@ -1236,6 +1311,36 @@ function TreeDiagram({
                       opacity="0.9"
                     />
                   )}
+
+                  {pruneSummary && pruneSummary.count > 0 && (
+                    <g transform={`translate(${node.radius * 0.88} ${-node.radius * 0.84})`}>
+                      <title>
+                        {`剪定 ${pruneSummary.count}件${
+                          pruneSummary.reasons.length > 0 ? `\n${pruneSummary.reasons.slice(0, 3).join("\n")}` : ""
+                        }`}
+                      </title>
+                      <rect
+                        x={pruneSummary.count >= 10 ? -13 : -11}
+                        y="-8.5"
+                        width={pruneSummary.count >= 10 ? 26 : 22}
+                        height="17"
+                        rx="8.5"
+                        fill="#fff7ed"
+                        stroke="#f59e0b"
+                        strokeWidth="1.7"
+                      />
+                      <text
+                        x="0"
+                        y="3.7"
+                        textAnchor="middle"
+                        fontSize="7.2"
+                        fontWeight="700"
+                        fill="#c2410c"
+                      >
+                        {`×${pruneSummary.count > 99 ? "99+" : pruneSummary.count}`}
+                      </text>
+                    </g>
+                  )}
                 </g>
               );
             })}
@@ -1245,7 +1350,7 @@ function TreeDiagram({
 
       <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500">
         <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">
-          nodes {stats.node_count}
+          nodes {layout.nodes.length}
         </span>
         <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">
           depth {stats.max_depth_reached}
@@ -1805,14 +1910,25 @@ export default function StructuredBlock({
       .sort((a, b) => a.depth - b.depth || a.id - b.id);
     const treeSummary = toDisplayText(block.content.summary);
     const focusKind = toDisplayText(block.content.focus_kind);
-    const focusBranch =
+    const focusBranchRecord =
       typeof block.content.focus_branch === "object" && block.content.focus_branch !== null
         ? (block.content.focus_branch as Record<string, unknown>)
         : null;
+    const focusBranch: TreeFocusBranch | null = focusBranchRecord
+      ? {
+          branch_id: toDisplayText(focusBranchRecord.branch_id),
+          label: toDisplayText(focusBranchRecord.label),
+          depth: toDisplayNumber(focusBranchRecord.depth) ?? 0,
+          branch_score: toDisplayNumber(focusBranchRecord.branch_score),
+          detail_coverage: toDisplayNumber(focusBranchRecord.detail_coverage),
+          frontier_score: toDisplayNumber(focusBranchRecord.frontier_score),
+          summary: toDisplayText(focusBranchRecord.summary),
+        }
+      : null;
 
     return (
       <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
-        <SectionHeader block={block} count={nodes.length} />
+        <SectionHeader block={block} count={nodes.filter((node) => node.kind !== "pruned").length} />
         <div className="px-4 py-3.5">
           <TreeDiagram
             nodes={nodes}
