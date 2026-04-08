@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.db import Database
+from app.llm.base import LLMAdapter
 from app.orchestrator import HousingOrchestrator
 
 
@@ -26,6 +27,61 @@ def build_settings(database_path: str, *, with_keys: bool = False) -> Settings:
         groq_model_secondary="qwen/qwen3-32b",
         claude_model="claude-sonnet-4-6",
     )
+
+
+class FakePlannerRouteAdapter(LLMAdapter):
+    def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
+        raise AssertionError("generate_text should not be called in planner route tests")
+
+    def generate_structured(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: dict,
+        temperature: float = 0.2,
+    ) -> dict:
+        return {
+            "intent": "search",
+            "user_memory": {
+                "target_area": "江東区",
+                "budget_max": 120000,
+                "station_walk_max": 7,
+                "layout_preference": "1LDK",
+                "move_in_date": None,
+                "must_conditions": [],
+                "nice_to_have": [],
+            },
+            "missing_slots": [],
+            "follow_up_questions": [],
+            "next_action": "search_and_compare",
+            "seed_queries": [
+                "江東区 賃貸 12万円 1LDK",
+                "江東区で家賃12万円以下の1LDK賃貸",
+            ],
+            "research_plan": {
+                "summary": "条件に近い候補を比較します。",
+                "goal": "問い合わせ候補を数件まで絞り込みます。",
+                "strategy": [
+                    "条件に合う候補を広めに集めます。",
+                    "詳細ページで不足情報を確認します。",
+                    "一致度の高い候補から並べます。",
+                ],
+                "rationale": "最初に母集団を作ってから絞る方が条件差分を見やすいためです。",
+            },
+            "condition_reasons": {
+                "budget_max": "",
+                "target_area": "",
+                "station_walk_max": "",
+                "move_in_date": "",
+                "layout_preference": "",
+                "must_conditions": "",
+                "nice_to_have": "",
+            },
+        }
+
+    def list_models(self) -> list[str]:
+        return ["fake-planner-model"]
 
 
 def test_session_llm_config_defaults_and_custom_update(tmp_path: Path, monkeypatch):
@@ -86,6 +142,10 @@ def test_research_job_uses_llm_config_snapshot_per_execution(tmp_path: Path):
     db = Database(database_path)
     db.init()
     orchestrator = HousingOrchestrator(settings=build_settings(database_path, with_keys=False), db=db)
+    planner_adapter = FakePlannerRouteAdapter()
+    orchestrator._get_adapter_for_route = (
+        lambda **kwargs: planner_adapter if kwargs.get("route_key") == "planner" else None
+    )
     session_id, _ = db.create_session()
 
     orchestrator.update_session_llm_config(

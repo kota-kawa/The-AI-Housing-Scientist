@@ -80,8 +80,9 @@ class FakeResearchSummaryAdapter(LLMAdapter):
 
 
 class FakePlannerRouteAdapter(LLMAdapter):
-    def __init__(self, payload: dict):
+    def __init__(self, payload: dict, presentation_payload: dict | None = None):
         self.payload = payload
+        self.presentation_payload = presentation_payload or {}
 
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
         raise AssertionError("generate_text should not be called in planner route tests")
@@ -94,10 +95,138 @@ class FakePlannerRouteAdapter(LLMAdapter):
         schema: dict,
         temperature: float = 0.2,
     ) -> dict:
+        properties = schema.get("properties", {})
+        if "assistant_message" in properties:
+            return self.presentation_payload
         return self.payload
 
     def list_models(self) -> list[str]:
         return ["fake-planner-model"]
+
+
+def make_planner_payload(
+    *,
+    target_area: str | None = "江東区",
+    budget_max: int | None = 120000,
+    station_walk_max: int | None = 7,
+    layout_preference: str | None = "1LDK",
+    move_in_date: str | None = None,
+    must_conditions: list[str] | None = None,
+    nice_to_have: list[str] | None = None,
+    missing_slots: list[str] | None = None,
+    follow_up_questions: list[dict] | None = None,
+    next_action: str = "search_and_compare",
+    seed_queries: list[str] | None = None,
+    research_plan: dict | None = None,
+    condition_reasons: dict[str, str] | None = None,
+) -> dict:
+    must_conditions = must_conditions or []
+    nice_to_have = nice_to_have or []
+    missing_slots = missing_slots or []
+    follow_up_questions = follow_up_questions or []
+    if seed_queries is None:
+        seed_queries = (
+            [
+                "江東区 賃貸 12万円 1LDK",
+                "江東区で家賃12万円以下の1LDK賃貸",
+                "江東区 1LDK 賃貸",
+            ]
+            if next_action == "search_and_compare"
+            else []
+        )
+    if research_plan is None:
+        research_plan = {
+            "summary": "条件に近い候補を比較します。",
+            "goal": "問い合わせ候補を数件まで絞り込みます。",
+            "strategy": [
+                "条件に合う候補を広めに集めます。",
+                "詳細ページで不足情報を確認します。",
+                "一致度の高い候補から並べます。",
+            ],
+            "rationale": "最初に母集団を作ってから絞る方が条件差分を見やすいためです。",
+        }
+    reasons = {
+        "target_area": "",
+        "budget_max": "",
+        "station_walk_max": "",
+        "move_in_date": "",
+        "layout_preference": "",
+        "must_conditions": "",
+        "nice_to_have": "",
+    }
+    if condition_reasons is not None:
+        reasons.update(condition_reasons)
+    return {
+        "intent": "search",
+        "user_memory": {
+            "target_area": target_area,
+            "budget_max": budget_max,
+            "station_walk_max": station_walk_max,
+            "layout_preference": layout_preference,
+            "move_in_date": move_in_date,
+            "must_conditions": must_conditions,
+            "nice_to_have": nice_to_have,
+        },
+        "missing_slots": missing_slots,
+        "follow_up_questions": follow_up_questions,
+        "next_action": next_action,
+        "seed_queries": seed_queries,
+        "research_plan": research_plan,
+        "condition_reasons": reasons,
+    }
+
+
+def make_risk_planner_payload() -> dict:
+    return {
+        "intent": "risk_check",
+        "user_memory": {
+            "target_area": None,
+            "budget_max": None,
+            "station_walk_max": None,
+            "layout_preference": None,
+            "move_in_date": None,
+            "must_conditions": [],
+            "nice_to_have": [],
+        },
+        "missing_slots": [],
+        "follow_up_questions": [],
+        "next_action": "risk_check",
+        "seed_queries": [],
+        "research_plan": {
+            "summary": "",
+            "goal": "",
+            "strategy": [],
+            "rationale": "",
+        },
+        "condition_reasons": {
+            "target_area": "",
+            "budget_max": "",
+            "station_walk_max": "",
+            "move_in_date": "",
+            "layout_preference": "",
+            "must_conditions": "",
+            "nice_to_have": "",
+        },
+    }
+
+
+def install_fake_route_adapters(
+    orchestrator: HousingOrchestrator,
+    *,
+    planner_adapter: LLMAdapter | None = None,
+    research_default_adapter: LLMAdapter | None = None,
+) -> None:
+    planner_adapter = planner_adapter or FakePlannerRouteAdapter(make_planner_payload())
+
+    def _get_adapter_for_route(**kwargs):
+        route_key = kwargs.get("route_key")
+        if route_key == "planner":
+            return planner_adapter
+        if route_key == "research_default":
+            return research_default_adapter
+        return None
+
+    orchestrator._get_adapter_for_route = _get_adapter_for_route
 
 
 def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
@@ -105,6 +234,7 @@ def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
     db = Database(database_path)
     db.init()
     orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+    install_fake_route_adapters(orchestrator)
 
     session_id, _ = db.create_session()
 
@@ -168,6 +298,11 @@ def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
     assert contract_prompt.status == "awaiting_contract_text"
     assert contract_prompt.next_action == "paste_contract_text"
 
+    install_fake_route_adapters(
+        orchestrator,
+        planner_adapter=FakePlannerRouteAdapter(make_risk_planner_payload()),
+    )
+
     risk_response = orchestrator.process_user_message(
         session_id=session_id,
         message="更新料1ヶ月。短期解約違約金あり。解約予告2か月前。保証会社加入必須。",
@@ -187,30 +322,27 @@ def test_orchestrator_uses_llm_generated_plan_content(tmp_path: Path):
     db.init()
     orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
     planner_adapter = FakePlannerRouteAdapter(
-        {
-            "intent": "search",
-            "extracted_slots": {
-                "target_area": "江東区",
-                "budget_max": 120000,
-                "station_walk_max": 7,
-                "layout_preference": "1LDK",
-                "move_in_date": None,
-                "must_conditions": ["ペット可"],
-                "nice_to_have": ["在宅ワーク向け"],
-            },
-            "follow_up_questions": [
+        make_planner_payload(
+            target_area="江東区",
+            budget_max=120000,
+            station_walk_max=7,
+            layout_preference="1LDK",
+            must_conditions=["ペット可"],
+            nice_to_have=["在宅ワーク向け"],
+            follow_up_questions=[
                 {
                     "slot": "move_in_date",
+                    "label": "入居時期",
                     "question": "ペットと一緒に住む前提で、いつ頃から入居したいですか？",
                     "examples": ["できるだけ早く", "来月中", "6月ごろ"],
                 }
             ],
-            "seed_queries": [
+            seed_queries=[
                 "江東区 賃貸 12万円 1LDK ペット可",
                 "江東区で家賃12万円以下、ペット可で在宅ワークしやすい賃貸",
                 "江東区 ペット可 1LDK 在宅ワーク 賃貸",
             ],
-            "research_plan": {
+            research_plan={
                 "summary": "江東区でペット可かつ在宅ワークしやすい1LDKを優先して調べます。",
                 "goal": "早めに問い合わせできる候補を3件前後まで絞り込む",
                 "strategy": [
@@ -220,7 +352,7 @@ def test_orchestrator_uses_llm_generated_plan_content(tmp_path: Path):
                 ],
                 "rationale": "希少条件があるため、母集団を先に確保してから絞り込む進め方を取ります。",
             },
-            "condition_reasons": {
+            condition_reasons={
                 "target_area": "生活圏を固定したい条件なので検索の起点にします。",
                 "budget_max": "毎月の予算上限なので厳格に見ます。",
                 "station_walk_max": "通勤や移動負担に直結するためです。",
@@ -229,11 +361,9 @@ def test_orchestrator_uses_llm_generated_plan_content(tmp_path: Path):
                 "must_conditions": "ペット可は候補数が少ないため優先度が高い条件です。",
                 "nice_to_have": "在宅ワーク条件は比較の差が出やすいので加点軸にします。",
             },
-        }
+        )
     )
-    orchestrator._get_adapter_for_route = (
-        lambda **kwargs: planner_adapter if kwargs.get("route_key") == "planner" else None
-    )
+    install_fake_route_adapters(orchestrator, planner_adapter=planner_adapter)
 
     session_id, _ = db.create_session()
     response = orchestrator.process_user_message(
@@ -258,6 +388,7 @@ def test_profile_memory_is_available_across_sessions(tmp_path: Path):
     db = Database(database_path)
     db.init()
     orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+    install_fake_route_adapters(orchestrator)
 
     profile_id, _ = db.get_or_create_profile("local-profile-1")
     first_session_id, _ = db.create_session(profile_id=profile_id)
@@ -293,6 +424,74 @@ def test_profile_memory_is_available_across_sessions(tmp_path: Path):
     assert any("江東区" in str(block.content.get("body", "")) for block in initial_response.blocks)
 
 
+def test_orchestrator_uses_llm_plan_presentation_for_plan_copy(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+    planner_adapter = FakePlannerRouteAdapter(
+        payload=make_planner_payload(
+            target_area="町田",
+            budget_max=100000,
+            station_walk_max=None,
+            layout_preference=None,
+            must_conditions=["RC造"],
+            follow_up_questions=[
+                {
+                    "slot": "station_walk_max",
+                    "label": "駅徒歩",
+                    "question": "駅からの距離はどこまで許容できますか？",
+                    "examples": ["徒歩7分以内", "徒歩10分まで", "少し遠くても可"],
+                }
+            ],
+            seed_queries=[
+                "町田 賃貸 10万円 RC造",
+                "町田で家賃10万円以下、RC造を優先した賃貸",
+            ],
+            research_plan={"summary": "", "goal": "", "strategy": [], "rationale": ""},
+            condition_reasons={
+                "target_area": "町田で探したい意思が明確なので検索の起点にします。",
+                "budget_max": "予算超過の候補を早めに除外するためです。",
+                "station_walk_max": "",
+                "move_in_date": "",
+                "layout_preference": "",
+                "must_conditions": "RC造は建物構造の優先条件として確認します。",
+                "nice_to_have": "",
+            },
+        ),
+        presentation_payload={
+            "assistant_message": (
+                "町田で家賃10万円以下、RC造を優先する前提で調査計画をまとめました。"
+                "駅距離が分かればさらに絞り込みやすいので、分かる範囲で追加できます。"
+            ),
+            "summary": "町田で予算内に収まるRC造の賃貸を先に広めに集め、条件が揃う順に比較します。",
+            "goal": "内見や問い合わせに進める候補を、構造条件と予算の両面から数件まで絞り込みます。",
+            "rationale": "RC造は候補数が限られやすいため、まず母集団を確保してから駅距離などで整理する方が取りこぼしを防げます。",
+            "strategy": [
+                "町田エリアで家賃10万円以下かつRC造の募集を横断的に集めます。",
+                "構造表記が曖昧な掲載は詳細ページでRC造かどうかを優先確認します。",
+                "駅距離や管理費込みの実支払額を見て、問い合わせ候補を上位化します。",
+            ],
+            "open_questions": ["駅から徒歩何分くらいまで許容できるか"],
+        },
+    )
+    install_fake_route_adapters(orchestrator, planner_adapter=planner_adapter)
+
+    session_id, _ = db.create_session()
+    response = orchestrator.process_user_message(
+        session_id=session_id,
+        message="町田に10万円以下でRCの物件に住みたい",
+        provider="openai",
+    )
+
+    assert response.status == "awaiting_plan_confirmation"
+    assert response.assistant_message.startswith("町田で家賃10万円以下、RC造を優先する前提")
+    plan_block = next(block for block in response.blocks if block.type == "plan")
+    assert plan_block.content["summary"] == "町田で予算内に収まるRC造の賃貸を先に広めに集め、条件が揃う順に比較します。"
+    assert plan_block.content["strategy"][0] == "町田エリアで家賃10万円以下かつRC造の募集を横断的に集めます。"
+    assert plan_block.content["open_questions"] == ["駅から徒歩何分くらいまで許容できるか"]
+
+
 def test_research_completed_response_prefers_llm_summary(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
@@ -303,9 +502,7 @@ def test_research_completed_response_prefers_llm_summary(tmp_path: Path):
         "最上位候補は駅徒歩4分で条件に最も近く、まずは問い合わせに進める候補です。"
     )
     adapter = FakeResearchSummaryAdapter(summary)
-    orchestrator._get_adapter_for_route = (
-        lambda **kwargs: adapter if kwargs.get("route_key") == "research_default" else None
-    )
+    install_fake_route_adapters(orchestrator, research_default_adapter=adapter)
 
     session_id, _ = db.create_session()
     orchestrator.process_user_message(
@@ -345,9 +542,7 @@ def test_research_summary_prompt_includes_branch_tradeoffs_and_followups(tmp_pat
         "懸念: 一部の条件は再確認が必要です。\n"
         "次の確認事項: 初期費用と契約条件を確認してください。"
     )
-    orchestrator._get_adapter_for_route = (
-        lambda **kwargs: adapter if kwargs.get("route_key") == "research_default" else None
-    )
+    install_fake_route_adapters(orchestrator, research_default_adapter=adapter)
 
     session_id, _ = db.create_session()
     orchestrator.process_user_message(
@@ -375,6 +570,18 @@ def test_fresh_start_session_skips_profile_resume_prompt(tmp_path: Path):
     db = Database(database_path)
     db.init()
     orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+    install_fake_route_adapters(
+        orchestrator,
+        planner_adapter=FakePlannerRouteAdapter(
+            make_planner_payload(
+                target_area="吉祥寺",
+                budget_max=120000,
+                station_walk_max=7,
+                layout_preference=None,
+                nice_to_have=["在宅ワーク向け"],
+            )
+        ),
+    )
 
     profile_id, _ = db.get_or_create_profile("local-profile-2")
     first_session_id, _ = db.create_session(profile_id=profile_id)
@@ -406,6 +613,7 @@ def test_retry_and_reaction_feed_strategy_memory(tmp_path: Path):
     db = Database(database_path)
     db.init()
     orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+    install_fake_route_adapters(orchestrator)
 
     profile_id, _ = db.get_or_create_profile("strategy-profile-1")
     session_id, _ = db.create_session(profile_id=profile_id)

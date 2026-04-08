@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from app.llm.base import LLMAdapter
@@ -23,94 +22,27 @@ SEARCH_SIGNAL_KEYS = (
     "must_conditions",
     "nice_to_have",
 )
-SEARCH_INTENT_KEYWORDS = ("賃貸", "物件", "部屋", "比較", "探", "住まい", "引っ越", "一人暮らし")
-RISK_INTENT_KEYWORDS = (
-    "契約",
-    "更新料",
-    "違約金",
-    "短期解約",
-    "解約予告",
-    "保証会社",
-    "敷金",
-    "礼金",
-    "退去",
-    "原状回復",
-)
-GENERIC_SEARCH_PATTERNS = (
-    re.compile(r"^(おすすめ|相談|比較|教えて|探したい|探して|お願いします)$"),
-    re.compile(
-        r"^(おすすめの)?(賃貸|物件|部屋|家)(を)?"
-        r"(探したい|探して|教えて|比較して)(ください|お願いします)?$"
-    ),
-)
-DEFAULT_FOLLOW_UP_QUESTIONS: dict[str, dict[str, Any]] = {
-    "target_area": {
-        "slot": "target_area",
-        "label": "希望エリア",
-        "question": "どのエリアで探しますか？",
-        "examples": ["江東区", "吉祥寺", "横浜駅周辺"],
-    },
-    "budget_max": {
-        "slot": "budget_max",
-        "label": "家賃上限",
-        "question": "家賃の上限はいくらですか？",
-        "examples": ["家賃12万円以内", "家賃15万円まで", "管理費込みで18万円以下"],
-    },
-    "station_walk_max": {
-        "slot": "station_walk_max",
-        "label": "駅徒歩",
-        "question": "駅から徒歩何分以内を希望しますか？",
-        "examples": ["駅徒歩10分以内", "徒歩7分まで", "駅近だとうれしい"],
-    },
-    "layout_preference": {
-        "slot": "layout_preference",
-        "label": "間取り",
-        "question": "希望の間取りはありますか？",
-        "examples": ["1LDK", "2DK以上", "二人暮らししやすい間取り"],
-    },
-    "move_in_date": {
-        "slot": "move_in_date",
-        "label": "入居時期",
-        "question": "いつ頃から住み始めたいですか？",
-        "examples": ["来月中", "できるだけ早く", "2026-05ごろ"],
-    },
-    "must_conditions": {
-        "slot": "must_conditions",
-        "label": "必須条件",
-        "question": "絶対に外せない条件があれば教えてください。",
-        "examples": ["ペット可は必須", "独立洗面台は外せない", "二人入居可が必要"],
-    },
-    "nice_to_have": {
-        "slot": "nice_to_have",
-        "label": "あると良い条件",
-        "question": "できれば欲しい条件はありますか？",
-        "examples": ["在宅ワークしやすいと嬉しい", "浴室乾燥機があると助かる", "南向きだと理想"],
-    },
-}
-CONDITION_KEYWORDS: dict[str, str] = {
-    "ペット": "ペット可",
-    "犬": "ペット可",
-    "猫": "ペット可",
-    "楽器": "楽器可",
-    "ピアノ": "楽器可",
-    "在宅ワーク": "在宅ワーク向け",
-    "テレワーク": "在宅ワーク向け",
-    "SOHO": "SOHO相談可",
-    "保証人不要": "保証人不要",
-    "南向き": "南向き",
-    "角部屋": "角部屋",
-}
+ALL_SLOT_KEYS = list(FOLLOW_UP_SLOT_ORDER) + list(FOLLOW_UP_OPTIONAL_SLOTS)
 INTENT_VALUES = ("search", "risk_check", "general_question")
+NEXT_ACTION_VALUES = (
+    "missing_slots_question",
+    "search_and_compare",
+    "risk_check",
+    "guidance",
+)
+TEXT_SLOT_KEYS = {"target_area", "move_in_date", "layout_preference"}
+INTEGER_SLOT_KEYS = {"budget_max", "station_walk_max"}
+LIST_SLOT_KEYS = {"must_conditions", "nice_to_have"}
 
 
-def _is_empty(value: Any) -> bool:
-    return value in (None, "", [], {})
+def _normalize_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
 
 
 def _dedupe_texts(values: list[Any], *, limit: int | None = None) -> list[str]:
     deduped: list[str] = []
     for value in values:
-        text = " ".join(str(value).split()).strip()
+        text = _normalize_text(value)
         if text and text not in deduped:
             deduped.append(text)
         if limit is not None and len(deduped) >= limit:
@@ -118,122 +50,123 @@ def _dedupe_texts(values: list[Any], *, limit: int | None = None) -> list[str]:
     return deduped
 
 
-def _coerce_int(value: Any) -> int | None:
-    if value in (None, ""):
-        return None
-    try:
-        return int(float(str(value)))
-    except (TypeError, ValueError):
-        return None
+def _blank_slot_memory() -> dict[str, Any]:
+    return {
+        "budget_max": None,
+        "target_area": None,
+        "station_walk_max": None,
+        "move_in_date": None,
+        "layout_preference": None,
+        "must_conditions": [],
+        "nice_to_have": [],
+    }
 
 
-def _extract_budget_yen(text: str) -> int | None:
-    man_match = re.search(r"(\d+(?:\.\d+)?)\s*万", text)
-    if man_match:
-        return int(float(man_match.group(1)) * 10000)
-    yen_match = re.search(r"(\d{2,3})(?:,|，)?(\d{3})\s*円", text)
-    if yen_match:
-        return int(f"{yen_match.group(1)}{yen_match.group(2)}")
-    return None
+def _blank_research_plan() -> dict[str, Any]:
+    return {"summary": "", "goal": "", "strategy": [], "rationale": ""}
 
 
-def _extract_station_walk(text: str) -> int | None:
-    match = re.search(r"徒歩\s*(\d{1,2})\s*分", text)
-    if match:
-        return int(match.group(1))
-    return None
+def _blank_condition_reasons() -> dict[str, str]:
+    return {key: "" for key in SEARCH_SIGNAL_KEYS}
 
 
-def _extract_target_area(text: str) -> str | None:
-    patterns = [
-        r"((?:東京都|大阪府|神奈川県|埼玉県|千葉県|愛知県|京都府|兵庫県|福岡県|北海道)"
-        r"[^\s、。]{1,12}(?:区|市|町|村))",
-        r"([^\s、。]{1,12}(?:区|市|町|村))",
-        r"([^\s、。]{1,12}駅(?:周辺|近辺)?)",
-        r"(渋谷|新宿|池袋|品川|目黒|中野|吉祥寺|横浜|梅田|難波|天神|札幌|名古屋)",
+def _sanitize_slot_memory(raw_memory: Any) -> dict[str, Any]:
+    memory = _blank_slot_memory()
+    if not isinstance(raw_memory, dict):
+        return memory
+
+    for key in TEXT_SLOT_KEYS:
+        text = _normalize_text(raw_memory.get(key))
+        memory[key] = text or None
+
+    for key in INTEGER_SLOT_KEYS:
+        value = raw_memory.get(key)
+        memory[key] = value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    for key in LIST_SLOT_KEYS:
+        value = raw_memory.get(key)
+        memory[key] = _dedupe_texts(list(value), limit=6) if isinstance(value, list) else []
+
+    return memory
+
+
+def _sanitize_missing_slots(raw_missing_slots: Any) -> list[str]:
+    return [
+        slot
+        for slot in _dedupe_texts(list(raw_missing_slots or []), limit=3)
+        if slot in ALL_SLOT_KEYS
     ]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
-    return None
 
 
-def _extract_move_in_date(text: str) -> str | None:
-    match = re.search(r"(\d{4})[/-](\d{1,2})", text)
-    if match:
-        return f"{match.group(1)}-{int(match.group(2)):02d}"
-    if "すぐ" in text or "即" in text:
-        return "asap"
-    return None
+def _sanitize_follow_up_questions(raw_questions: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_questions, list):
+        return []
 
-
-def _rule_based_slots(message: str) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    budget = _extract_budget_yen(message)
-    if budget is not None:
-        result["budget_max"] = budget
-
-    station_walk = _extract_station_walk(message)
-    if station_walk is not None:
-        result["station_walk_max"] = station_walk
-
-    area = _extract_target_area(message)
-    if area:
-        result["target_area"] = area
-
-    move_in = _extract_move_in_date(message)
-    if move_in:
-        result["move_in_date"] = move_in
-
-    if "2LDK" in message:
-        result["layout_preference"] = "2LDK"
-    elif "1LDK" in message:
-        result["layout_preference"] = "1LDK"
-    elif "1K" in message:
-        result["layout_preference"] = "1K"
-
-    condition_tokens = [label for keyword, label in CONDITION_KEYWORDS.items() if keyword in message]
-    if condition_tokens:
-        result["must_conditions"] = sorted(set(condition_tokens))
-
-    return result
-
-
-def _normalize_slots(updates: dict[str, Any]) -> dict[str, Any]:
-    normalized: dict[str, Any] = {}
-    for key in SEARCH_SIGNAL_KEYS:
-        value = updates.get(key)
-        if key in {"must_conditions", "nice_to_have"}:
-            normalized[key] = _dedupe_texts(list(value or []), limit=6) if isinstance(value, list) else []
+    normalized: list[dict[str, Any]] = []
+    seen_slots: set[str] = set()
+    for item in raw_questions:
+        if not isinstance(item, dict):
             continue
-        if key in {"budget_max", "station_walk_max"}:
-            coerced = _coerce_int(value)
-            if coerced is not None:
-                normalized[key] = coerced
+        slot = _normalize_text(item.get("slot"))
+        if slot not in ALL_SLOT_KEYS or slot in seen_slots:
             continue
-        text = str(value).strip() if value is not None else ""
-        if text:
-            normalized[key] = text
+        question = _normalize_text(item.get("question"))
+        if not question:
+            continue
+        normalized.append(
+            {
+                "slot": slot,
+                "label": _normalize_text(item.get("label")),
+                "question": question,
+                "examples": _dedupe_texts(list(item.get("examples") or []), limit=3),
+            }
+        )
+        seen_slots.add(slot)
     return normalized
 
 
-def _merge_memory(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in _normalize_slots(updates).items():
-        if key in {"must_conditions", "nice_to_have"}:
-            existing = [str(item).strip() for item in merged.get(key, []) or [] if str(item).strip()]
-            incoming = [str(item).strip() for item in value or [] if str(item).strip()]
-            deduped: list[str] = []
-            for item in existing + incoming:
-                if item and item not in deduped:
-                    deduped.append(item)
-            if deduped:
-                merged[key] = deduped
-            continue
-        if not _is_empty(value):
-            merged[key] = value
-    return merged
+def _sanitize_research_plan(raw_plan: Any) -> dict[str, Any]:
+    raw_plan = raw_plan if isinstance(raw_plan, dict) else {}
+    return {
+        "summary": _normalize_text(raw_plan.get("summary")),
+        "goal": _normalize_text(raw_plan.get("goal")),
+        "strategy": _dedupe_texts(list(raw_plan.get("strategy") or []), limit=5),
+        "rationale": _normalize_text(raw_plan.get("rationale")),
+    }
+
+
+def _sanitize_condition_reasons(raw_reasons: Any) -> dict[str, str]:
+    reasons = _blank_condition_reasons()
+    if not isinstance(raw_reasons, dict):
+        return reasons
+    for key in SEARCH_SIGNAL_KEYS:
+        reasons[key] = _normalize_text(raw_reasons.get(key))
+    return reasons
+
+
+def _empty_planner_result(user_memory: dict[str, Any]) -> dict[str, Any]:
+    merged_memory = _sanitize_slot_memory(user_memory)
+    return {
+        "intent": "general_question",
+        "plan": {
+            "budget_max": merged_memory.get("budget_max"),
+            "target_area": merged_memory.get("target_area"),
+            "station_walk_max": merged_memory.get("station_walk_max"),
+            "move_in_date": merged_memory.get("move_in_date"),
+            "layout_preference": merged_memory.get("layout_preference"),
+        },
+        "missing_slots": [],
+        "follow_up_questions": [],
+        "next_action": "guidance",
+        "user_memory": merged_memory,
+        "seed_queries": [],
+        "research_plan": _blank_research_plan(),
+        "condition_reasons": _blank_condition_reasons(),
+    }
+
+
+def _safe_int(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def _summarize_profile_history(profile_memory: dict[str, Any] | None) -> dict[str, Any]:
@@ -243,10 +176,10 @@ def _summarize_profile_history(profile_memory: dict[str, Any] | None) -> dict[st
     for entry in search_history:
         user_memory = entry.get("user_memory", {}) or {}
         tokens: list[str] = []
-        area = str(user_memory.get("target_area") or "").strip()
-        layout = str(user_memory.get("layout_preference") or "").strip()
-        budget = _coerce_int(user_memory.get("budget_max")) or 0
-        walk = _coerce_int(user_memory.get("station_walk_max")) or 0
+        area = _normalize_text(user_memory.get("target_area"))
+        layout = _normalize_text(user_memory.get("layout_preference"))
+        budget = _safe_int(user_memory.get("budget_max"))
+        walk = _safe_int(user_memory.get("station_walk_max"))
         if area:
             tokens.append(area)
         if budget > 0:
@@ -257,17 +190,17 @@ def _summarize_profile_history(profile_memory: dict[str, Any] | None) -> dict[st
             tokens.append(f"徒歩{walk}分以内")
         recent_searches.append(
             {
-                "query": str(entry.get("query") or "").strip(),
+                "query": _normalize_text(entry.get("query")),
                 "summary": " / ".join(tokens),
             }
         )
     reaction_history = list(profile_memory.get("reaction_history", []) or [])[-3:]
     recent_reactions = [
         {
-            "reaction": str(entry.get("reaction") or "").strip(),
-            "building_name": str(entry.get("building_name") or "").strip(),
-            "area_name": str(entry.get("area_name") or "").strip(),
-            "layout": str(entry.get("layout") or "").strip(),
+            "reaction": _normalize_text(entry.get("reaction")),
+            "building_name": _normalize_text(entry.get("building_name")),
+            "area_name": _normalize_text(entry.get("area_name")),
+            "layout": _normalize_text(entry.get("layout")),
         }
         for entry in reaction_history
     ]
@@ -289,25 +222,31 @@ def _planner_schema() -> dict[str, Any]:
             "must_conditions": {"type": "array", "items": {"type": "string"}},
             "nice_to_have": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["must_conditions", "nice_to_have"],
+        "required": [
+            "budget_max",
+            "target_area",
+            "station_walk_max",
+            "move_in_date",
+            "layout_preference",
+            "must_conditions",
+            "nice_to_have",
+        ],
         "additionalProperties": False,
     }
     follow_up_schema = {
         "type": "object",
         "properties": {
-            "slot": {"type": "string", "enum": FOLLOW_UP_SLOT_ORDER + FOLLOW_UP_OPTIONAL_SLOTS},
+            "slot": {"type": "string", "enum": ALL_SLOT_KEYS},
+            "label": {"type": "string"},
             "question": {"type": "string"},
             "examples": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["slot", "question", "examples"],
+        "required": ["slot", "label", "question", "examples"],
         "additionalProperties": False,
     }
     condition_reason_schema = {
         "type": "object",
-        "properties": {
-            key: {"type": "string"}
-            for key in list(SEARCH_SIGNAL_KEYS)
-        },
+        "properties": {key: {"type": "string"} for key in SEARCH_SIGNAL_KEYS},
         "required": list(SEARCH_SIGNAL_KEYS),
         "additionalProperties": False,
     }
@@ -315,8 +254,13 @@ def _planner_schema() -> dict[str, Any]:
         "type": "object",
         "properties": {
             "intent": {"type": "string", "enum": list(INTENT_VALUES)},
-            "extracted_slots": slot_schema,
+            "user_memory": slot_schema,
+            "missing_slots": {
+                "type": "array",
+                "items": {"type": "string", "enum": ALL_SLOT_KEYS},
+            },
             "follow_up_questions": {"type": "array", "items": follow_up_schema},
+            "next_action": {"type": "string", "enum": list(NEXT_ACTION_VALUES)},
             "seed_queries": {"type": "array", "items": {"type": "string"}},
             "research_plan": {
                 "type": "object",
@@ -333,8 +277,10 @@ def _planner_schema() -> dict[str, Any]:
         },
         "required": [
             "intent",
-            "extracted_slots",
+            "user_memory",
+            "missing_slots",
             "follow_up_questions",
+            "next_action",
             "seed_queries",
             "research_plan",
             "condition_reasons",
@@ -355,35 +301,70 @@ def _llm_parse(
         "learned_preferences": user_memory.get("learned_preferences", {}) or {},
         "profile_history_summary": _summarize_profile_history(profile_memory),
         "slot_reference": {
-            "target_area": "探したいエリアや駅",
-            "budget_max": "家賃上限（円）",
-            "station_walk_max": "駅徒歩の上限（分）",
-            "layout_preference": "希望間取り",
-            "move_in_date": "入居時期。すぐなら asap",
-            "must_conditions": "必須条件",
-            "nice_to_have": "あると良い条件",
+            "target_area": {"label": "希望エリア", "meaning": "探したいエリアや駅"},
+            "budget_max": {"label": "家賃上限", "meaning": "家賃上限（円）"},
+            "station_walk_max": {"label": "駅徒歩", "meaning": "駅徒歩の上限（分）"},
+            "layout_preference": {"label": "間取り", "meaning": "希望間取り"},
+            "move_in_date": {"label": "入居時期", "meaning": "すぐなら asap"},
+            "must_conditions": {"label": "必須条件", "meaning": "外せない条件"},
+            "nice_to_have": {"label": "あると良い条件", "meaning": "できれば欲しい条件"},
         },
-        "output_rules": [
+        "decision_rules": [
+            "最新メッセージと current_user_memory を統合した user_memory を返す",
+            "既存条件は、ユーザーが明確に上書き・否定した場合だけ消す",
             "intent は search / risk_check / general_question のいずれかにする",
-            "search: 部屋探し、比較、引っ越し先探し、住み替え相談",
-            "risk_check: 契約条件、更新料、違約金、保証会社、退去費用などの確認",
-            "general_question: 上記以外の相談や雑談",
+            "search では、実際に候補収集を始めるべきなら next_action を search_and_compare にする",
+            "search だが曖昧すぎて候補収集の前に確認が必要なら next_action を missing_slots_question にする",
+            "missing_slots は 0〜3 件で、次に聞く価値が高い順に並べる",
+            "follow_up_questions は missing_slots と同じ順序・同じ slot だけを返す",
+            "follow_up_questions の label は slot_reference の日本語ラベルに合わせる",
+            "next_action が search_and_compare のときは seed_queries を 3〜5 件返す",
+            "next_action が missing_slots_question のときは seed_queries を空にしてよい",
+            "research_plan はユーザー条件に即して summary / goal / strategy / rationale を返す",
+            "condition_reasons は各条件が今回の検索で重要な理由を 1 文ずつ返し、該当しない key は空文字にする",
             "『絶対』『必須』『譲れない』『〜じゃないとダメ』は must_conditions",
             "『できれば』『あったらいい』『理想』『〜だとうれしい』は nice_to_have",
-            "どちらか不明な条件は nice_to_have に寄せ、既存 user_memory があれば整合させる",
-            "follow_up_questions は不足・曖昧な条件だけを自然な日本語で 0〜5 件返す",
-            "follow_up_questions はユーザーの語彙や状況を少し反映し、examples も文脈に合わせる",
-            "seed_queries は 3〜5 件。短い検索語と自然文を混ぜ、明示条件と既存メモリからのみ作る",
-            "research_plan はユーザー条件に即して summary / goal / strategy(3〜5項目) / rationale を返す",
-            "condition_reasons は各条件が今回の検索で重要な理由を 1 文ずつ返し、該当しない key は空文字にする",
+            "地名や駅名は『町田』『三軒茶屋』『武蔵小杉』のように接尾辞がなくても target_area に入れる",
+            "RC / SRC / 鉄筋コンクリート / 鉄骨 / 木造 など建物構造も条件として扱う",
+            "与えられたメッセージや memory にない制約・設備・地域・予算は発明しない",
+        ],
+        "examples": [
+            {
+                "user_message": "おすすめの賃貸を探したい",
+                "expected_shape": {
+                    "intent": "search",
+                    "next_action": "missing_slots_question",
+                    "missing_slots": ["target_area", "budget_max", "station_walk_max"],
+                },
+            },
+            {
+                "user_message": "家賃15万円以内、駅徒歩10分以内の1LDKを比較したい",
+                "expected_shape": {
+                    "intent": "search",
+                    "next_action": "search_and_compare",
+                    "missing_slots": [],
+                },
+            },
+            {
+                "user_message": "町田に10万円以下でRCの物件に住みたい",
+                "expected_shape": {
+                    "intent": "search",
+                    "user_memory": {
+                        "target_area": "町田",
+                        "budget_max": 100000,
+                        "must_conditions": ["RC造"],
+                    },
+                    "next_action": "search_and_compare",
+                },
+            },
         ],
     }
     return adapter.generate_structured(
         system=(
-            "You are a Japanese rental planner that prepares a personalized search plan. "
-            "Understand the user's housing intent from the latest message plus saved memory. "
-            "Return only structured data grounded in the provided context. "
-            "Do not invent constraints, areas, budgets, or preferences not supported by the message or memory."
+            "You are a Japanese rental planner responsible for the entire planning decision. "
+            "Infer intent, merge memory, choose the next action, decide which conditions are missing, "
+            "write follow-up questions, generate seed queries, and draft the research plan. "
+            "Return only structured data grounded in the provided message and memory."
         ),
         user=json.dumps(prompt_payload, ensure_ascii=False, indent=2),
         schema=_planner_schema(),
@@ -391,268 +372,64 @@ def _llm_parse(
     )
 
 
-def _normalize_llm_output(payload: dict[str, Any]) -> dict[str, Any]:
-    intent = str(payload.get("intent") or "").strip()
+def _parse_planner_output(payload: dict[str, Any], *, default_user_memory: dict[str, Any]) -> dict[str, Any]:
+    intent = _normalize_text(payload.get("intent"))
     if intent not in INTENT_VALUES:
-        intent = ""
+        intent = "general_question"
 
-    extracted_slots = payload.get("extracted_slots", {})
-    if not isinstance(extracted_slots, dict):
-        extracted_slots = {}
+    merged_memory = _sanitize_slot_memory(payload.get("user_memory"))
+    if not any(
+        [
+            merged_memory.get("budget_max") is not None,
+            merged_memory.get("target_area"),
+            merged_memory.get("station_walk_max") is not None,
+            merged_memory.get("move_in_date"),
+            merged_memory.get("layout_preference"),
+            merged_memory.get("must_conditions"),
+            merged_memory.get("nice_to_have"),
+        ]
+    ):
+        merged_memory = _sanitize_slot_memory(default_user_memory)
 
-    normalized_follow_ups: list[dict[str, Any]] = []
-    raw_follow_ups = payload.get("follow_up_questions", [])
-    if isinstance(raw_follow_ups, list):
-        for item in raw_follow_ups:
-            if not isinstance(item, dict):
-                continue
-            slot = str(item.get("slot") or "").strip()
-            if slot not in DEFAULT_FOLLOW_UP_QUESTIONS:
-                continue
-            question = " ".join(str(item.get("question") or "").split()).strip()
-            examples = _dedupe_texts(list(item.get("examples") or []), limit=3)
-            if question:
-                normalized_follow_ups.append(
-                    {
-                        "slot": slot,
-                        "question": question,
-                        "examples": examples,
-                    }
-                )
+    missing_slots = _sanitize_missing_slots(payload.get("missing_slots"))
+    follow_up_questions = _sanitize_follow_up_questions(payload.get("follow_up_questions"))
+    if missing_slots:
+        allowed_slots = set(missing_slots)
+        follow_up_questions = [
+            item for item in follow_up_questions if item["slot"] in allowed_slots
+        ]
 
-    normalized_research_plan = payload.get("research_plan", {})
-    if not isinstance(normalized_research_plan, dict):
-        normalized_research_plan = {}
+    next_action = _normalize_text(payload.get("next_action"))
+    if next_action not in NEXT_ACTION_VALUES:
+        next_action = "guidance"
 
-    condition_reasons = payload.get("condition_reasons", {})
-    if not isinstance(condition_reasons, dict):
-        condition_reasons = {}
+    seed_queries = _dedupe_texts(list(payload.get("seed_queries") or []), limit=5)
+    research_plan = _sanitize_research_plan(payload.get("research_plan"))
+    condition_reasons = _sanitize_condition_reasons(payload.get("condition_reasons"))
 
     return {
         "intent": intent,
-        "extracted_slots": _normalize_slots(extracted_slots),
-        "follow_up_questions": normalized_follow_ups,
-        "seed_queries": _dedupe_texts(list(payload.get("seed_queries") or []), limit=5),
-        "research_plan": {
-            "summary": " ".join(str(normalized_research_plan.get("summary") or "").split()).strip(),
-            "goal": " ".join(str(normalized_research_plan.get("goal") or "").split()).strip(),
-            "strategy": _dedupe_texts(list(normalized_research_plan.get("strategy") or []), limit=5),
-            "rationale": " ".join(str(normalized_research_plan.get("rationale") or "").split()).strip(),
+        "plan": {
+            "budget_max": merged_memory.get("budget_max"),
+            "target_area": merged_memory.get("target_area"),
+            "station_walk_max": merged_memory.get("station_walk_max"),
+            "move_in_date": merged_memory.get("move_in_date"),
+            "layout_preference": merged_memory.get("layout_preference"),
         },
-        "condition_reasons": {
-            key: " ".join(str(condition_reasons.get(key) or "").split()).strip()
-            for key in SEARCH_SIGNAL_KEYS
-        },
+        "missing_slots": missing_slots,
+        "follow_up_questions": follow_up_questions,
+        "next_action": next_action,
+        "user_memory": merged_memory,
+        "seed_queries": seed_queries,
+        "research_plan": research_plan,
+        "condition_reasons": condition_reasons,
     }
-
-
-def _has_structured_search_signal(merged: dict[str, Any]) -> bool:
-    return any(not _is_empty(merged.get(key)) for key in SEARCH_SIGNAL_KEYS)
-
-
-def _has_search_readiness(merged: dict[str, Any]) -> bool:
-    readiness_keys = (
-        "target_area",
-        "budget_max",
-        "station_walk_max",
-        "layout_preference",
-        "must_conditions",
-        "nice_to_have",
-    )
-    return any(not _is_empty(merged.get(key)) for key in readiness_keys)
-
-
-def _is_generic_search_request(message: str) -> bool:
-    normalized = re.sub(r"[\s　、。,.!！?？・]+", "", message)
-    return any(pattern.fullmatch(normalized) for pattern in GENERIC_SEARCH_PATTERNS)
-
-
-def _fallback_intent(
-    message: str,
-    message_slots: dict[str, Any] | None = None,
-    user_memory: dict[str, Any] | None = None,
-) -> str:
-    message_slots = message_slots or _rule_based_slots(message)
-    user_memory = user_memory or {}
-    same_as_previous = any(token in message for token in ("前回と同じ", "前と同じ", "同じ条件"))
-    if any(keyword in message for keyword in RISK_INTENT_KEYWORDS) and not _has_structured_search_signal(message_slots):
-        return "risk_check"
-    if _has_structured_search_signal(message_slots):
-        return "search"
-    if _is_generic_search_request(message):
-        return "search"
-    if same_as_previous and _has_structured_search_signal(user_memory):
-        return "search"
-    if any(keyword in message for keyword in SEARCH_INTENT_KEYWORDS):
-        return "search"
-    if any(keyword in message for keyword in RISK_INTENT_KEYWORDS):
-        return "risk_check"
-    return "general_question"
 
 
 def detect_search_signal(message: str, planner_result: dict[str, Any] | None = None) -> bool:
-    if planner_result is not None:
-        return str(planner_result.get("intent") or "") == "search"
-    return _fallback_intent(message) == "search"
-
-
-def _build_default_follow_up(slot: str) -> dict[str, Any]:
-    template = DEFAULT_FOLLOW_UP_QUESTIONS[slot]
-    return {
-        "slot": template["slot"],
-        "label": template["label"],
-        "question": template["question"],
-        "examples": list(template["examples"]),
-    }
-
-
-def _build_follow_up_questions(
-    merged: dict[str, Any],
-    *,
-    llm_questions: list[dict[str, Any]] | None = None,
-    limit: int | None = None,
-    allow_default_fill: bool = True,
-) -> list[dict[str, Any]]:
-    llm_questions = llm_questions or []
-    items: list[dict[str, Any]] = []
-    seen_slots: set[str] = set()
-
-    def should_include(slot: str) -> bool:
-        return _is_empty(merged.get(slot))
-
-    for item in llm_questions:
-        slot = str(item.get("slot") or "").strip()
-        if slot in seen_slots or slot not in DEFAULT_FOLLOW_UP_QUESTIONS or not should_include(slot):
-            continue
-        block = _build_default_follow_up(slot)
-        question = " ".join(str(item.get("question") or "").split()).strip()
-        if question:
-            block["question"] = question
-        examples = _dedupe_texts(list(item.get("examples") or []), limit=3)
-        if examples:
-            block["examples"] = examples
-        items.append(block)
-        seen_slots.add(slot)
-        if limit is not None and len(items) >= limit:
-            return items
-
-    if allow_default_fill:
-        for slot in FOLLOW_UP_SLOT_ORDER + FOLLOW_UP_OPTIONAL_SLOTS:
-            if slot in seen_slots or not should_include(slot):
-                continue
-            items.append(_build_default_follow_up(slot))
-            if limit is not None and len(items) >= limit:
-                break
-    return items
-
-
-def _build_seed_queries(merged: dict[str, Any], fallback_message: str) -> list[str]:
-    area = str(merged.get("target_area") or "").strip()
-    layout = str(merged.get("layout_preference") or "").strip()
-    budget = _coerce_int(merged.get("budget_max")) or 0
-    walk = _coerce_int(merged.get("station_walk_max")) or 0
-    move_in = str(merged.get("move_in_date") or "").strip()
-    must_conditions = [str(item).strip() for item in merged.get("must_conditions", []) or [] if str(item).strip()]
-    nice_to_have = [str(item).strip() for item in merged.get("nice_to_have", []) or [] if str(item).strip()]
-
-    keyword_tokens = [area, "賃貸"]
-    if budget > 0:
-        keyword_tokens.append(f"{int(budget / 10000)}万円")
-    if layout:
-        keyword_tokens.append(layout)
-    if walk > 0:
-        keyword_tokens.append(f"徒歩{walk}分")
-    if must_conditions:
-        keyword_tokens.extend(must_conditions[:2])
-
-    natural_tokens = [token for token in [area, layout] if token]
-    natural_phrase = ""
-    if natural_tokens:
-        natural_phrase = "".join(natural_tokens)
-        if budget > 0:
-            natural_phrase += f"で家賃{int(budget / 10000)}万円以内"
-        if walk > 0:
-            natural_phrase += f"、駅徒歩{walk}分以内"
-        if must_conditions:
-            natural_phrase += f"、{'・'.join(must_conditions[:2])}"
-        natural_phrase += "の賃貸"
-
-    candidates = [
-        " ".join(token for token in keyword_tokens if token).strip(),
-        natural_phrase,
-    ]
-    if area and must_conditions:
-        candidates.append(f"{area} {' '.join(must_conditions[:2])} 賃貸")
-    if area and nice_to_have:
-        candidates.append(f"{area} {' '.join(nice_to_have[:2])} 賃貸")
-    if area and move_in == "asap":
-        candidates.append(f"{area} すぐ入居できる 賃貸")
-    elif area and move_in:
-        candidates.append(f"{area} {move_in} 入居 賃貸")
-    candidates.append(fallback_message)
-    return _dedupe_texts(candidates, limit=5)
-
-
-def _build_plan_summary(merged: dict[str, Any]) -> str:
-    summary_tokens: list[str] = []
-    if merged.get("target_area"):
-        summary_tokens.append(str(merged["target_area"]))
-    if merged.get("budget_max"):
-        summary_tokens.append(f"家賃{int(int(merged['budget_max']) / 10000)}万円以下")
-    if merged.get("layout_preference"):
-        summary_tokens.append(str(merged["layout_preference"]))
-    if merged.get("station_walk_max"):
-        summary_tokens.append(f"徒歩{merged['station_walk_max']}分以内")
-    if merged.get("must_conditions"):
-        summary_tokens.append(" / ".join(str(item) for item in merged["must_conditions"][:2]))
-    return " / ".join(summary_tokens[:4]) if summary_tokens else "条件整理から調査を開始"
-
-
-def _build_fallback_research_plan(
-    merged: dict[str, Any],
-    *,
-    follow_up_questions: list[dict[str, Any]],
-    fallback_message: str,
-) -> dict[str, Any]:
-    strategy = [
-        "希望条件を軸に複数クエリへ展開して候補を広めに収集します。",
-        "詳細ページを優先して読み、表記ゆれと重複掲載を整理します。",
-        "条件一致度と不足情報を比較し、問い合わせ向きの候補を上位化します。",
-    ]
-    return {
-        "summary": _build_plan_summary(merged),
-        "goal": "条件に近い候補を比較し、問い合わせに進める物件を絞り込む",
-        "strategy": strategy,
-        "rationale": (
-            "先に候補集合を作ってから詳細情報と不足情報を見比べると、"
-            "問い合わせ前に条件差分を整理しやすいためです。"
-        ),
-        "seed_queries": _build_seed_queries(merged, fallback_message),
-        "open_questions": [
-            str(item.get("question") or "").strip()
-            for item in follow_up_questions
-            if str(item.get("question") or "").strip()
-        ],
-    }
-
-
-def _build_default_condition_reasons(merged: dict[str, Any]) -> dict[str, str]:
-    reasons = {key: "" for key in SEARCH_SIGNAL_KEYS}
-    if merged.get("target_area"):
-        reasons["target_area"] = "エリアが候補母集団を大きく左右するため、検索の軸として優先します。"
-    if merged.get("budget_max"):
-        reasons["budget_max"] = "毎月の支払上限なので、候補比較でも厳格に確認します。"
-    if merged.get("station_walk_max"):
-        reasons["station_walk_max"] = "通勤や生活動線に直結するため、移動負担の上限として見ます。"
-    if merged.get("layout_preference"):
-        reasons["layout_preference"] = "暮らし方に合う居室数かを見極めるため、間取りを優先条件に置きます。"
-    if merged.get("move_in_date"):
-        reasons["move_in_date"] = "入居可能時期が合わない候補を早めに外すためです。"
-    if merged.get("must_conditions"):
-        reasons["must_conditions"] = "外せない条件なので、候補数より一致度を優先して確認します。"
-    if merged.get("nice_to_have"):
-        reasons["nice_to_have"] = "候補を並べたあとに差が出やすい加点条件として扱います。"
-    return reasons
+    if planner_result is None:
+        return False
+    return _normalize_text(planner_result.get("intent")) == "search"
 
 
 def run_planner(
@@ -662,90 +439,15 @@ def run_planner(
     adapter: LLMAdapter | None,
     profile_memory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    llm_output = {
-        "intent": "",
-        "extracted_slots": {},
-        "follow_up_questions": [],
-        "seed_queries": [],
-        "research_plan": {"summary": "", "goal": "", "strategy": [], "rationale": ""},
-        "condition_reasons": {key: "" for key in SEARCH_SIGNAL_KEYS},
-    }
-    merged = dict(user_memory)
-    message_slots = _rule_based_slots(message)
-    used_llm_output = False
+    if adapter is None:
+        return _empty_planner_result(user_memory)
 
-    if adapter is not None:
-        try:
-            llm_output = _normalize_llm_output(
-                _llm_parse(message, user_memory, profile_memory, adapter)
-            )
-            used_llm_output = True
-            merged = _merge_memory(user_memory, llm_output["extracted_slots"])
-            for key, value in message_slots.items():
-                if _is_empty(merged.get(key)):
-                    merged = _merge_memory(merged, {key: value})
-        except Exception:
-            merged = _merge_memory(user_memory, message_slots)
-    else:
-        merged = _merge_memory(user_memory, message_slots)
+    try:
+        payload = _llm_parse(message, user_memory, profile_memory, adapter)
+    except Exception:
+        return _empty_planner_result(user_memory)
 
-    intent = llm_output["intent"] or _fallback_intent(message, message_slots, user_memory)
-    readiness = _has_search_readiness(merged)
-    follow_up_questions = _build_follow_up_questions(
-        merged,
-        llm_questions=llm_output["follow_up_questions"],
-        limit=3 if intent == "search" and not readiness else None,
-        allow_default_fill=not used_llm_output,
-    )
+    if not isinstance(payload, dict):
+        return _empty_planner_result(user_memory)
 
-    if intent == "search" and not readiness:
-        missing_slots = [item["slot"] for item in follow_up_questions[:3]]
-        next_action = "missing_slots_question"
-    elif intent == "search":
-        missing_slots = []
-        next_action = "search_and_compare"
-    elif intent == "risk_check":
-        missing_slots = []
-        next_action = "risk_check"
-    else:
-        missing_slots = []
-        next_action = "guidance"
-
-    plan_summary = {
-        "budget_max": merged.get("budget_max"),
-        "target_area": merged.get("target_area"),
-        "station_walk_max": merged.get("station_walk_max"),
-        "move_in_date": merged.get("move_in_date"),
-        "layout_preference": merged.get("layout_preference"),
-    }
-
-    fallback_plan = _build_fallback_research_plan(
-        merged,
-        follow_up_questions=follow_up_questions,
-        fallback_message=message,
-    )
-    research_plan = {
-        "summary": llm_output["research_plan"]["summary"] or fallback_plan["summary"],
-        "goal": llm_output["research_plan"]["goal"] or fallback_plan["goal"],
-        "strategy": llm_output["research_plan"]["strategy"] or fallback_plan["strategy"],
-        "rationale": llm_output["research_plan"]["rationale"] or fallback_plan["rationale"],
-        "open_questions": fallback_plan["open_questions"],
-    }
-    seed_queries = llm_output["seed_queries"] or fallback_plan["seed_queries"]
-    condition_reasons = (
-        dict(llm_output["condition_reasons"])
-        if used_llm_output
-        else _build_default_condition_reasons(merged)
-    )
-
-    return {
-        "intent": intent,
-        "plan": plan_summary,
-        "missing_slots": missing_slots,
-        "follow_up_questions": follow_up_questions,
-        "next_action": next_action,
-        "user_memory": merged,
-        "seed_queries": seed_queries,
-        "research_plan": research_plan,
-        "condition_reasons": condition_reasons,
-    }
+    return _parse_planner_output(payload, default_user_memory=user_memory)

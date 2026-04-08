@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.config import ProviderName, Settings, get_provider_api_key, get_provider_model
@@ -64,6 +65,116 @@ def _generate_llm_resume_body(
         "この情報をもとに、ユーザーへの自然な「お帰りなさい」メッセージを生成してください。"
     )
     return adapter.generate_text(system=system, user=user_prompt, temperature=0.4).strip()
+
+
+def _normalize_display_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _normalize_display_texts(values: list[Any], *, limit: int | None = None) -> list[str]:
+    items: list[str] = []
+    for value in values:
+        text = _normalize_display_text(value)
+        if text and text not in items:
+            items.append(text)
+        if limit is not None and len(items) >= limit:
+            break
+    return items
+
+
+def _generate_llm_plan_presentation(
+    *,
+    user_message: str,
+    conditions: list[dict[str, str]],
+    follow_up_questions: list[dict[str, Any]],
+    seed_queries: list[str],
+    planner_plan: dict[str, Any],
+    adapter: LLMAdapter | None,
+) -> dict[str, Any] | None:
+    if adapter is None:
+        return None
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "assistant_message": {"type": "string"},
+            "summary": {"type": "string"},
+            "goal": {"type": "string"},
+            "rationale": {"type": "string"},
+            "strategy": {"type": "array", "items": {"type": "string"}},
+            "open_questions": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [
+            "assistant_message",
+            "summary",
+            "goal",
+            "rationale",
+            "strategy",
+            "open_questions",
+        ],
+        "additionalProperties": False,
+    }
+    prompt_payload = {
+        "user_message": user_message,
+        "conditions": conditions,
+        "follow_up_questions": [
+            _normalize_display_text(item.get("question"))
+            for item in follow_up_questions
+            if _normalize_display_text(item.get("question"))
+        ],
+        "seed_queries": seed_queries,
+        "planner_draft": {
+            "summary": _normalize_display_text(planner_plan.get("summary")),
+            "goal": _normalize_display_text(planner_plan.get("goal")),
+            "strategy": _normalize_display_texts(list(planner_plan.get("strategy") or []), limit=5),
+            "rationale": _normalize_display_text(planner_plan.get("rationale")),
+        },
+        "output_rules": [
+            "assistant_message は 1〜2 文の自然な日本語で、計画を作成したことと承認後に調査を始めることを伝える",
+            "follow_up_questions がある場合は、分かる条件があれば追加できると軽く触れる",
+            "summary はユーザー条件を踏まえた検索方針を 1 文で要約する",
+            "goal は比較・絞り込みの到達点を 1 文で書く",
+            "rationale はこの進め方が合う理由を 1 文で書く",
+            "strategy は 3〜5 項目。条件に即した具体性を優先し、抽象的な定型文を避ける",
+            "open_questions は follow_up_questions を短く言い換えるだけにし、新しい条件を発明しない",
+            "与えられた条件・質問・下書きにない制約や設備は足さない",
+        ],
+    }
+    try:
+        result = adapter.generate_structured(
+            system=(
+                "You are a Japanese rental planning assistant rewriting a pre-search plan for UI display. "
+                "Ground every sentence in the provided user message, extracted conditions, and draft plan. "
+                "Do not invent unsupported constraints, areas, budgets, or amenities. "
+                "Return only the requested JSON."
+            ),
+            user=json.dumps(prompt_payload, ensure_ascii=False, indent=2),
+            schema=schema,
+            temperature=0.3,
+        )
+    except Exception:
+        return None
+
+    presentation = {
+        "assistant_message": _normalize_display_text(result.get("assistant_message")),
+        "summary": _normalize_display_text(result.get("summary")),
+        "goal": _normalize_display_text(result.get("goal")),
+        "rationale": _normalize_display_text(result.get("rationale")),
+        "strategy": _normalize_display_texts(list(result.get("strategy") or []), limit=5),
+        "open_questions": _normalize_display_texts(list(result.get("open_questions") or []), limit=3),
+    }
+    if not any(
+        [
+            presentation["assistant_message"],
+            presentation["summary"],
+            presentation["goal"],
+            presentation["rationale"],
+            presentation["strategy"],
+            presentation["open_questions"],
+        ]
+    ):
+        return None
+    return presentation
 
 
 def _generate_response_labels(
@@ -420,41 +531,6 @@ class HousingOrchestrator:
             interaction_type=interaction_type,
         )
 
-    def _build_search_queries(self, user_memory: dict[str, Any], fallback_message: str) -> list[str]:
-        parts = []
-        if user_memory.get("target_area"):
-            parts.append(str(user_memory["target_area"]))
-        parts.append("賃貸")
-
-        budget_max = user_memory.get("budget_max")
-        if budget_max:
-            parts.append(f"{int(budget_max / 10000)}万円")
-
-        if user_memory.get("layout_preference"):
-            parts.append(str(user_memory["layout_preference"]))
-
-        if user_memory.get("station_walk_max"):
-            parts.append(f"徒歩{user_memory['station_walk_max']}分")
-
-        for token in user_memory.get("must_conditions", []) or []:
-            text = str(token).strip()
-            if text:
-                parts.append(text)
-
-        keyword_query = " ".join(parts).strip()
-        queries = [keyword_query, fallback_message]
-        if user_memory.get("target_area") and user_memory.get("budget_max"):
-            queries.append(
-                f"{user_memory['target_area']}で家賃{int(int(user_memory['budget_max']) / 10000)}万円以内の賃貸"
-            )
-
-        deduped: list[str] = []
-        for item in queries:
-            text = " ".join(str(item).split()).strip()
-            if text and text != "賃貸" and text not in deduped:
-                deduped.append(text)
-        return deduped[:5] or [fallback_message]
-
     def _build_question_block(
         self,
         *,
@@ -528,6 +604,7 @@ class HousingOrchestrator:
         user_memory: dict[str, Any],
         planner_result: dict[str, Any],
         message: str,
+        adapter: LLMAdapter | None,
         llm_config: dict[str, Any],
     ) -> dict[str, Any]:
         follow_up_questions = planner_result.get("follow_up_questions", [])
@@ -539,9 +616,11 @@ class HousingOrchestrator:
             for item in planner_result.get("seed_queries", []) or []
             if " ".join(str(item).split()).strip()
         ]
-        if not seed_queries:
-            seed_queries = self._build_search_queries(user_memory, message)
-        open_questions = [str(item.get("question") or "") for item in follow_up_questions if str(item.get("question") or "").strip()]
+        open_questions = [
+            str(item.get("question") or "")
+            for item in follow_up_questions
+            if str(item.get("question") or "").strip()
+        ]
         strategy = [
             str(item).strip()
             for item in planner_plan.get("strategy", []) or []
@@ -555,15 +634,28 @@ class HousingOrchestrator:
             ]
         summary_tokens = [item["value"] for item in conditions[:4]]
         summary = " / ".join(summary_tokens) if summary_tokens else "条件整理から調査を開始"
+        llm_plan = _generate_llm_plan_presentation(
+            user_message=message,
+            conditions=conditions,
+            follow_up_questions=follow_up_questions,
+            seed_queries=seed_queries,
+            planner_plan=planner_plan,
+            adapter=adapter,
+        )
 
         return {
-            "summary": str(planner_plan.get("summary") or "").strip() or summary,
-            "goal": str(planner_plan.get("goal") or "").strip()
+            "assistant_message": str((llm_plan or {}).get("assistant_message") or "").strip(),
+            "summary": str((llm_plan or {}).get("summary") or "").strip()
+            or str(planner_plan.get("summary") or "").strip()
+            or summary,
+            "goal": str((llm_plan or {}).get("goal") or "").strip()
+            or str(planner_plan.get("goal") or "").strip()
             or "条件に近い候補を比較し、問い合わせに進める物件を絞り込む",
-            "rationale": str(planner_plan.get("rationale") or "").strip(),
+            "rationale": str((llm_plan or {}).get("rationale") or "").strip()
+            or str(planner_plan.get("rationale") or "").strip(),
             "conditions": conditions,
-            "strategy": strategy,
-            "open_questions": open_questions,
+            "strategy": list((llm_plan or {}).get("strategy") or strategy),
+            "open_questions": list((llm_plan or {}).get("open_questions") or open_questions),
             "seed_queries": seed_queries,
             "search_query": seed_queries[0] if seed_queries else "",
             "llm_config_snapshot": llm_config,
@@ -1659,6 +1751,7 @@ class HousingOrchestrator:
             user_memory=updated_user_memory,
             planner_result=planner_result,
             message=message,
+            adapter=adapter,
             llm_config=llm_config,
         )
 
@@ -1700,8 +1793,10 @@ class HousingOrchestrator:
             )
         )
 
-        assistant_text = "調査計画を作成しました。内容を確認してから、明示承認で調査を開始します。"
-        if follow_up_questions:
+        assistant_text = str(draft_plan.get("assistant_message") or "").strip()
+        if not assistant_text:
+            assistant_text = "調査計画を作成しました。内容を確認してから、明示承認で調査を開始します。"
+        if follow_up_questions and "追加" not in assistant_text:
             assistant_text += "追加で分かる条件があれば、下の候補から反映できます。"
 
         response = ChatMessageResponse(
