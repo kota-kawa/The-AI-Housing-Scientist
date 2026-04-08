@@ -4,6 +4,12 @@ from app.config import Settings
 from app.db import Database
 from app.llm.base import LLMAdapter
 from app.orchestrator import HousingOrchestrator
+from app.research.agent_manager import (
+    HousingResearchAgentManager,
+    ResearchExecutionState,
+    SearchNodeArtifacts,
+    SearchNodePlan,
+)
 
 
 def build_settings(database_path: str) -> Settings:
@@ -166,3 +172,90 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     assert isinstance(tree_nodes, list)
     assert len(tree_nodes) >= len(search_roots) + len(candidate_nodes)
     assert tree_block.content["selected_branch_id"] == selected_node["branch_id"]
+
+
+def test_register_frontier_node_uses_executed_count_for_tree_budget(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {
+        "user_memory_snapshot": {
+            "target_area": "江東区",
+            "budget_max": 120000,
+            "station_walk_max": 7,
+            "layout_preference": "1LDK",
+            "must_conditions": [],
+            "nice_to_have": [],
+            "learned_preferences": {},
+        }
+    }
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+        tree_max_nodes=4,
+    )
+    state = ResearchExecutionState()
+
+    for index in range(4):
+        plan = SearchNodePlan(
+            node_key=f"existing-{index}",
+            label=f"existing-{index}",
+            description="existing plan",
+            queries=[f"query-{index}"],
+            ranking_profile={},
+            strategy_tags=["existing"],
+            depth=1,
+        )
+        state.node_plans[plan.node_key] = plan
+        state.node_artifacts[plan.node_key] = SearchNodeArtifacts(
+            plan=plan,
+            query_hash=manager._hash_queries(plan.queries, plan.ranking_profile),
+            frontier_score=60.0 - index,
+            status="completed" if index < 3 else "queued",
+        )
+
+    state.branch_summaries = [
+        {"branch_id": "existing-0", "status": "completed"},
+        {"branch_id": "existing-1", "status": "completed"},
+        {"branch_id": "existing-2", "status": "completed"},
+    ]
+    state.frontier = ["existing-3"]
+
+    child_plan = SearchNodePlan(
+        node_key="child-1",
+        label="child",
+        description="child plan",
+        queries=["query-child"],
+        ranking_profile={},
+        strategy_tags=["child"],
+        depth=2,
+        parent_key="existing-2",
+    )
+
+    manager._register_frontier_node(
+        state,
+        plan=child_plan,
+        parent_summary={"branch_score": 72.0},
+    )
+
+    assert child_plan.node_key in state.node_plans
+    assert child_plan.node_key in state.node_artifacts
+    assert state.frontier == ["existing-3", child_plan.node_key]

@@ -414,6 +414,14 @@ class AgentManagerTreeMixin:
     def _retry_context(self) -> dict[str, Any]:
         return self.approved_plan.get("retry_context", {}) or {}
 
+    def _executed_tree_node_count(self, state: ResearchExecutionState) -> int:
+        # tree_max_nodes caps executed evaluations; completed plans should not
+        # consume the remaining expansion budget just because they stay indexed.
+        return len(state.branch_summaries)
+
+    def _tree_execution_budget_exhausted(self, state: ResearchExecutionState) -> bool:
+        return self._executed_tree_node_count(state) >= self.tree_max_nodes
+
     def _record_pruned_node(
         self,
         state: ResearchExecutionState,
@@ -460,7 +468,7 @@ class AgentManagerTreeMixin:
         plan: SearchNodePlan,
         parent_summary: dict[str, Any] | None = None,
     ) -> None:
-        if len(state.node_plans) >= self.tree_max_nodes:
+        if self._tree_execution_budget_exhausted(state):
             return
         if plan.depth > self.tree_max_depth:
             self._record_pruned_node(
@@ -978,7 +986,7 @@ class AgentManagerTreeMixin:
             for plan in self._initial_node_plans(state):
                 self._register_frontier_node(state, plan=plan)
 
-            while state.frontier and len(state.branch_summaries) < self.tree_max_nodes:
+            while state.frontier and not self._tree_execution_budget_exhausted(state):
                 selected_keys = self._select_frontier_nodes(state)
                 if not selected_keys:
                     break
@@ -1014,7 +1022,7 @@ class AgentManagerTreeMixin:
                         should_stop = True
                         break
 
-                    if len(state.branch_summaries) >= self.tree_max_nodes:
+                    if self._tree_execution_budget_exhausted(state):
                         state.termination_reason = "node_budget_exhausted"
                         should_stop = True
                         break

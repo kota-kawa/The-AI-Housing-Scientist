@@ -975,11 +975,17 @@ function TreeDiagram({
   stats,
   currentStage,
   isLive,
+  summary,
+  focusKind,
+  focusBranch,
 }: {
   nodes: TreeNodeItem[];
   stats: TreeStats;
   currentStage: string;
   isLive: boolean;
+  summary: string;
+  focusKind: string;
+  focusBranch: Record<string, unknown> | null;
 }) {
   const layout = buildTreeDiagramLayout(nodes);
   const selectedCount = nodes.filter((node) => node.is_selected).length;
@@ -1248,6 +1254,335 @@ function TreeDiagram({
           hover for details
         </span>
       </div>
+
+      {focusBranch && (
+        <div className="rounded-xl border border-teal-100 bg-teal-50/60 px-4 py-3 text-[12px] text-teal-900">
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <span className="font-semibold">
+              {focusKind === "selected" ? "採用分岐" : "最有力分岐"}
+            </span>
+            {focusBranch.label && (
+              <span className="rounded-full bg-teal-100 px-2 py-0.5 font-medium text-teal-800">
+                {String(focusBranch.label)}
+              </span>
+            )}
+            {focusBranch.branch_score != null && (
+              <span className="rounded-full bg-white/80 px-2 py-0.5 text-slate-600">
+                スコア {Number(focusBranch.branch_score).toFixed(1)}
+              </span>
+            )}
+            {focusBranch.detail_coverage != null && (
+              <span className="rounded-full bg-white/80 px-2 py-0.5 text-slate-600">
+                詳細補完 {Number(focusBranch.detail_coverage).toFixed(1)}%
+              </span>
+            )}
+          </div>
+          {focusBranch.summary && (
+            <p className="leading-6 text-teal-800">{String(focusBranch.summary)}</p>
+          )}
+        </div>
+      )}
+
+      {summary && (
+        <p className="text-[12px] leading-6 text-slate-600">{summary}</p>
+      )}
+    </div>
+  );
+}
+
+function timelineStatusMeta(status: string) {
+  if (status === "completed") {
+    return {
+      label: "完了",
+      fill: "#14b8a6",
+      stroke: "#0f766e",
+      edge: "#14b8a6",
+      halo: "rgba(20,184,166,0.18)",
+    };
+  }
+  if (status === "running") {
+    return {
+      label: "実行中",
+      fill: "#38bdf8",
+      stroke: "#0369a1",
+      edge: "#0ea5e9",
+      halo: "rgba(56,189,248,0.18)",
+    };
+  }
+  if (status === "failed") {
+    return {
+      label: "失敗",
+      fill: "#fda4af",
+      stroke: "#be123c",
+      edge: "#fb7185",
+      halo: "rgba(251,113,133,0.16)",
+    };
+  }
+  return {
+    label: "待機",
+    fill: "#ffffff",
+    stroke: "#94a3b8",
+    edge: "#cbd5e1",
+    halo: "rgba(148,163,184,0.10)",
+  };
+}
+
+function timelineStageKind(index: number, label: string): "plan" | "tree" | "synthesize" {
+  if (label.includes("探索")) {
+    return "tree";
+  }
+  if (label.includes("要約") || label.includes("結果")) {
+    return "synthesize";
+  }
+  if (index === 1) {
+    return "tree";
+  }
+  if (index === 2) {
+    return "synthesize";
+  }
+  return "plan";
+}
+
+function TimelineStageGlyph({
+  kind,
+  status,
+  failed = false,
+  running = false,
+}: {
+  kind: "plan" | "tree" | "synthesize";
+  status: ReturnType<typeof timelineStatusMeta>;
+  failed?: boolean;
+  running?: boolean;
+}) {
+  return (
+    <>
+      {running && (
+        <circle
+          cx="0"
+          cy="0"
+          r={39}
+          fill="none"
+          stroke={status.edge}
+          strokeWidth="5"
+          strokeDasharray="5 7"
+          opacity="0.35"
+        />
+      )}
+
+      {kind === "plan" && (
+        <>
+          <path
+            d="M-30 -20 L0 -34 L30 -20 L30 20 L0 34 L-30 20 Z"
+            fill={status.fill}
+            stroke={status.stroke}
+            strokeWidth="3"
+          />
+          <path d="M-14 -10 H12" stroke="#ffffff" strokeWidth="3.4" strokeLinecap="round" opacity="0.96" />
+          <path d="M-14 0 H18" stroke="#ffffff" strokeWidth="3.4" strokeLinecap="round" opacity="0.88" />
+          <path d="M-14 10 H8" stroke="#ffffff" strokeWidth="3.4" strokeLinecap="round" opacity="0.78" />
+        </>
+      )}
+
+      {kind === "tree" && (
+        <>
+          <circle cx="0" cy="0" r="28" fill={status.fill} stroke={status.stroke} strokeWidth="3" />
+          <circle cx="0" cy="0" r="7.5" fill="#ffffff" opacity="0.96" />
+          <circle cx="-16" cy="-12" r="5.5" fill="#ffffff" opacity="0.9" />
+          <circle cx="16" cy="-12" r="5.5" fill="#ffffff" opacity="0.9" />
+          <circle cx="0" cy="18" r="5.5" fill="#ffffff" opacity="0.9" />
+          <path d="M-11 -8 L-4 -3 M11 -8 L4 -3 M0 10 L0 4" stroke={status.stroke} strokeWidth="2.4" strokeLinecap="round" />
+        </>
+      )}
+
+      {kind === "synthesize" && (
+        <>
+          <rect
+            x="-30"
+            y="-26"
+            width="60"
+            height="52"
+            rx="18"
+            fill={status.fill}
+            stroke={status.stroke}
+            strokeWidth="3"
+          />
+          <path d="M-12 -8 H8 M-12 0 H14 M-12 8 H4" stroke="#ffffff" strokeWidth="3.4" strokeLinecap="round" opacity="0.92" />
+          <circle cx="16" cy="0" r="4" fill="#ffffff" opacity="0.96" />
+        </>
+      )}
+
+      {failed && (
+        <>
+          <line x1="-11" y1="-11" x2="11" y2="11" stroke="#7f1d1d" strokeWidth="4" strokeLinecap="round" />
+          <line x1="11" y1="-11" x2="-11" y2="11" stroke="#7f1d1d" strokeWidth="4" strokeLinecap="round" />
+        </>
+      )}
+    </>
+  );
+}
+
+function TimelineDiagram({
+  items,
+  progress,
+  currentStage,
+  summary,
+}: {
+  items: Array<Record<string, unknown>>;
+  progress: number;
+  currentStage: string;
+  summary: string;
+}) {
+  const fallbackItems = [
+    { label: "計画確認", status: currentStage === "計画確認" ? "running" : "pending", detail: "" },
+    { label: "動的探索", status: currentStage === "動的探索" ? "running" : "pending", detail: "" },
+    { label: "結果要約", status: currentStage === "結果要約" ? "running" : "pending", detail: "" },
+  ];
+  const stages = (items.length > 0 ? items : fallbackItems)
+    .slice(0, 3)
+    .map((item, index) => ({
+      label: toDisplayText(item.label) || `step-${index + 1}`,
+      status: toDisplayText(item.status) || "pending",
+      detail: toDisplayText(item.detail),
+      x: 120 + index * 300,
+      y: 116,
+      kind: timelineStageKind(index, toDisplayText(item.label)),
+    }));
+  const width = stages.length > 1 ? stages[stages.length - 1].x + 120 : 840;
+  const height = 250;
+  const connectors = stages.slice(0, -1).map((stage, index) => {
+    const next = stages[index + 1];
+    const startX = stage.x + 46;
+    const endX = next.x - 46;
+    return { startX, endX, y: stage.y };
+  });
+  const normalizedProgress = Math.max(0, Math.min(100, progress));
+  const segmentScale = connectors.length > 0 ? (normalizedProgress / 100) * connectors.length : 0;
+  const completedCount = stages.filter((stage) => stage.status === "completed").length;
+  const runningCount = stages.filter((stage) => stage.status === "running").length;
+  const failedCount = stages.filter((stage) => stage.status === "failed").length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm">
+            {currentStage || "待機中"}
+          </span>
+          <span className="rounded-full border border-teal-100 bg-teal-50/90 px-3 py-1.5 text-[11px] font-semibold text-teal-700 shadow-sm">
+            {normalizedProgress}%
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-600">
+          <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">完了 {completedCount}</span>
+          <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">実行中 {runningCount}</span>
+          <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">失敗 {failedCount}</span>
+        </div>
+      </div>
+
+      <div className="rounded-[30px] border border-slate-200/90 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.16),rgba(255,255,255,0.98)_42%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(248,250,252,0.92))] p-3 shadow-card">
+        <div>
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            role="img"
+            aria-label="調査全体の進行ダイアグラム"
+            className="w-full"
+            style={{ height: `${height}px` }}
+          >
+            <rect x="0" y="0" width={width} height={height} rx="26" fill="rgba(255,255,255,0.22)" />
+
+            {connectors.map((connector, index) => {
+              const segmentProgress = Math.max(0, Math.min(1, segmentScale - index));
+              const activeEndX =
+                connector.startX + (connector.endX - connector.startX) * segmentProgress;
+              return (
+                <g key={`connector-${index}`}>
+                  <line
+                    x1={connector.startX}
+                    y1={connector.y}
+                    x2={connector.endX}
+                    y2={connector.y}
+                    stroke="rgba(148,163,184,0.26)"
+                    strokeWidth="16"
+                    strokeLinecap="round"
+                  />
+                  {segmentProgress > 0 && (
+                    <>
+                      <line
+                        x1={connector.startX}
+                        y1={connector.y}
+                        x2={activeEndX}
+                        y2={connector.y}
+                        stroke="rgba(45,212,191,0.18)"
+                        strokeWidth="18"
+                        strokeLinecap="round"
+                      />
+                      <line
+                        x1={connector.startX}
+                        y1={connector.y}
+                        x2={activeEndX}
+                        y2={connector.y}
+                        stroke="#0f766e"
+                        strokeWidth="5"
+                        strokeLinecap="round"
+                      />
+                    </>
+                  )}
+                </g>
+              );
+            })}
+
+            {stages.map((stage, index) => {
+              const meta = timelineStatusMeta(stage.status);
+              const isRunning = stage.status === "running";
+              const tooltip = [stage.label, meta.label, stage.detail].filter(Boolean).join("\n");
+              return (
+                <g key={stage.label} transform={`translate(${stage.x} ${stage.y})`}>
+                  <title>{tooltip}</title>
+                  <circle cx="0" cy="0" r="48" fill={meta.halo} />
+                  <TimelineStageGlyph
+                    kind={stage.kind}
+                    status={meta}
+                    failed={stage.status === "failed"}
+                    running={isRunning}
+                  />
+                  {isRunning && <circle cx="0" cy="-44" r="4.5" fill="#0ea5e9" />}
+                  <text
+                    x="0"
+                    y="76"
+                    textAnchor="middle"
+                    className="fill-slate-700"
+                    style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "0.02em" }}
+                  >
+                    {stage.label}
+                  </text>
+                  <text
+                    x="0"
+                    y="95"
+                    textAnchor="middle"
+                    className="fill-slate-400"
+                    style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.14em" }}
+                  >
+                    {meta.label}
+                  </text>
+                  {index < stages.length - 1 && (
+                    <path
+                      d={`M 72 0 L 58 -6 L 58 6 Z`}
+                      fill={segmentScale > index ? "#0f766e" : "#cbd5e1"}
+                      opacity={0.9}
+                    />
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      {summary && (
+        <p className="text-[12px] leading-6 text-slate-600">
+          {summary}
+        </p>
+      )}
     </div>
   );
 }
@@ -1409,56 +1744,13 @@ export default function StructuredBlock({
     return (
       <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
         <SectionHeader block={block} />
-        <div className="space-y-4 px-4 py-3.5">
-          <div className="rounded-2xl border border-slate-200 bg-white/90 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Current Stage
-                </p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">{currentStage || "待機中"}</p>
-              </div>
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                {progress}%
-              </span>
-            </div>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full rounded-full bg-[linear-gradient(90deg,#0f766e_0%,#0ea5e9_100%)] transition-all duration-500"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            {summary && <p className="mt-3 text-sm leading-6 text-slate-700">{summary}</p>}
-          </div>
-
-          {items.length > 0 && (
-            <div className="space-y-2">
-              {items.map((item, idx) => {
-                const itemStatus = toDisplayText(item.status);
-                const badgeClass =
-                  itemStatus === "completed"
-                    ? "bg-emerald-100 text-emerald-800"
-                    : itemStatus === "running"
-                      ? "bg-sky-100 text-sky-800"
-                      : itemStatus === "failed"
-                        ? "bg-rose-100 text-rose-800"
-                        : "bg-slate-100 text-slate-700";
-                return (
-                  <div key={`${toDisplayText(item.label)}-${idx}`} className="rounded-2xl border border-slate-200 bg-white/90 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-ink">{toDisplayText(item.label)}</p>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${badgeClass}`}>
-                        {itemStatus || "pending"}
-                      </span>
-                    </div>
-                    {toDisplayText(item.detail) && (
-                      <p className="mt-2 text-[13px] leading-6 text-inkMuted">{toDisplayText(item.detail)}</p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+        <div className="px-4 py-3.5">
+          <TimelineDiagram
+            items={items}
+            progress={progress}
+            currentStage={currentStage}
+            summary={summary}
+          />
         </div>
       </section>
     );
@@ -1511,12 +1803,26 @@ export default function StructuredBlock({
       }))
       .filter((item) => item.id > 0)
       .sort((a, b) => a.depth - b.depth || a.id - b.id);
+    const treeSummary = toDisplayText(block.content.summary);
+    const focusKind = toDisplayText(block.content.focus_kind);
+    const focusBranch =
+      typeof block.content.focus_branch === "object" && block.content.focus_branch !== null
+        ? (block.content.focus_branch as Record<string, unknown>)
+        : null;
 
     return (
       <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
         <SectionHeader block={block} count={nodes.length} />
         <div className="px-4 py-3.5">
-          <TreeDiagram nodes={nodes} stats={stats} currentStage={currentStage} isLive={isLive} />
+          <TreeDiagram
+            nodes={nodes}
+            stats={stats}
+            currentStage={currentStage}
+            isLive={isLive}
+            summary={treeSummary}
+            focusKind={focusKind}
+            focusBranch={focusBranch}
+          />
         </div>
       </section>
     );
