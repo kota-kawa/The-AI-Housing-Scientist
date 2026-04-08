@@ -35,6 +35,12 @@ class Settings:
     groq_model_secondary: str
     claude_model: str
     llm_pricing_overrides_json: str = ""
+    research_tree_max_nodes: int = 12
+    research_tree_max_depth: int = 4
+    research_tree_batch_size: int = 2
+    research_tree_children_per_expansion: int = 2
+    research_tree_prune_score: int = 35
+    research_tree_stability_patience: int = 2
 
 
 def _clean(value: str | None) -> str:
@@ -125,6 +131,12 @@ def load_settings() -> Settings:
         groq_model_secondary=_env("GROQ_MODEL_SECONDARY", "qwen/qwen3-32b"),
         claude_model=_env("CLAUDE_MODEL", "claude-sonnet-4-6"),
         llm_pricing_overrides_json=_env("LLM_PRICING_OVERRIDES_JSON", ""),
+        research_tree_max_nodes=_env_int("RESEARCH_TREE_MAX_NODES", 12),
+        research_tree_max_depth=_env_int("RESEARCH_TREE_MAX_DEPTH", 4),
+        research_tree_batch_size=_env_int("RESEARCH_TREE_BATCH_SIZE", 2),
+        research_tree_children_per_expansion=_env_int("RESEARCH_TREE_CHILDREN_PER_EXPANSION", 2),
+        research_tree_prune_score=_env_int("RESEARCH_TREE_PRUNE_SCORE", 35),
+        research_tree_stability_patience=_env_int("RESEARCH_TREE_STABILITY_PATIENCE", 2),
     )
 
 

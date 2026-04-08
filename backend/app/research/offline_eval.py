@@ -32,6 +32,43 @@ def _score_from_range(value: float, *, min_value: float, max_value: float) -> fl
     return (clamped - min_value) / (max_value - min_value)
 
 
+def _classify_top_issue(issues: list[str]) -> str:
+    joined = " / ".join(issues)
+    if "検索結果" in joined:
+        return "result_empty"
+    if "詳細ページ補完率" in joined:
+        return "detail_low"
+    if "欠損" in joined:
+        return "schema_sparse"
+    if "条件一致度" in joined:
+        return "match_low"
+    if "情報源" in joined:
+        return "source_low"
+    return "healthy"
+
+
+def _expand_recommendations_from_issues(issues: list[str], top_score: float) -> list[str]:
+    recommendations: list[str] = []
+    joined = " / ".join(issues)
+    if "詳細ページ補完率" in joined:
+        recommendations.extend(["detail_first", "source_diversify"])
+    if "欠損" in joined:
+        recommendations.extend(["schema_first", "tighten_match"])
+    if "条件一致度" in joined:
+        recommendations.extend(["tighten_match", "relax_for_coverage"])
+    if "情報源" in joined:
+        recommendations.extend(["source_diversify", "relax_for_coverage"])
+    if not recommendations and top_score >= 60:
+        recommendations.extend(["exploit_best", "explore_adjacent"])
+    elif not recommendations:
+        recommendations.extend(["relax_for_coverage", "source_diversify"])
+    deduped: list[str] = []
+    for item in recommendations:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped[:2]
+
+
 def evaluate_branch(
     *,
     branch_id: str,
@@ -42,6 +79,10 @@ def evaluate_branch(
     ranked_properties: list[dict[str, Any]],
     duplicate_groups: list[dict[str, Any]],
     search_summary: dict[str, Any],
+    parent_summary: dict[str, Any] | None = None,
+    strategy_tags: list[str] | None = None,
+    depth: int = 0,
+    query_hash: str = "",
 ) -> dict[str, Any]:
     normalized_count = len(normalized_properties)
     detail_hit_count = int(search_summary.get("detail_hit_count", 0) or 0)
@@ -99,13 +140,22 @@ def evaluate_branch(
         f"候補{normalized_count}件, 詳細補完率{detail_coverage:.0%}, "
         f"構造化率{structured_ratio:.0%}, 上位平均{avg_top3_score:.1f}"
     )
+    issue_class = _classify_top_issue(issues)
+    parent_score = float((parent_summary or {}).get("branch_score") or 0.0)
+    delta_from_parent = round(score - parent_score, 2) if parent_summary is not None else round(score, 2)
+    frontier_score = round(score, 2)
+    prune_reasons: list[str] = []
 
     return {
         "branch_id": branch_id,
+        "node_key": branch_id,
         "label": label,
         "status": "completed",
+        "depth": depth,
         "query_count": len(queries),
         "queries": queries,
+        "query_hash": query_hash,
+        "strategy_tags": [str(tag).strip() for tag in strategy_tags or [] if str(tag).strip()],
         "raw_result_count": len(raw_results),
         "normalized_count": normalized_count,
         "detail_hit_count": detail_hit_count,
@@ -117,6 +167,11 @@ def evaluate_branch(
         "avg_top3_score": avg_top3_score,
         "source_diversity": source_diversity,
         "branch_score": round(score, 2),
+        "frontier_score": frontier_score,
+        "delta_from_parent": delta_from_parent,
+        "top_issue_class": issue_class,
+        "expand_recommendations": _expand_recommendations_from_issues(issues, top_score),
+        "prune_reasons": prune_reasons,
         "issues": issues,
         "recommendations": recommendations,
         "summary": summary,
@@ -133,6 +188,7 @@ def select_best_branch(branch_summaries: list[dict[str, Any]]) -> dict[str, Any]
         key=lambda item: (
             1 if item.get("status") == "completed" else 0,
             float(item.get("branch_score") or 0.0),
+            float(item.get("frontier_score") or 0.0),
             float(item.get("detail_coverage") or 0.0),
             float(item.get("avg_top3_score") or 0.0),
             int(item.get("normalized_count") or 0),

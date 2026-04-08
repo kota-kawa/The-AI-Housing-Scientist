@@ -399,3 +399,51 @@ def test_fresh_start_session_skips_profile_resume_prompt(tmp_path: Path):
 
     assert response.profile_id == profile_id
     assert response.initial_response is None
+
+
+def test_retry_and_reaction_feed_strategy_memory(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+
+    profile_id, _ = db.get_or_create_profile("strategy-profile-1")
+    session_id, _ = db.create_session(profile_id=profile_id)
+
+    orchestrator.process_user_message(
+        session_id=session_id,
+        message="江東区で家賃12万円以下、駅徒歩7分以内の1LDKを探しています",
+        provider="openai",
+    )
+    orchestrator.execute_action(
+        session_id=session_id,
+        action_type="approve_research_plan",
+        payload={},
+    )
+    assert orchestrator.process_next_research_job() is True
+
+    _, task_memory = db.get_memories(session_id)
+    selected_property_id = task_memory["last_ranked_properties"][0]["property_id_norm"]
+    orchestrator.execute_action(
+        session_id=session_id,
+        action_type="record_property_reaction",
+        payload={"property_id": selected_property_id, "reaction": "favorite"},
+    )
+
+    profile = db.get_profile(profile_id)
+    assert profile is not None
+    strategy_memory = profile["profile_memory"].get("strategy_memory", {})
+    assert strategy_memory["preferred_strategy_tags"]
+
+    retry_response = orchestrator.execute_action(
+        session_id=session_id,
+        action_type="retry_research_job",
+        payload={},
+    )
+    assert retry_response.status == "research_queued"
+
+    latest_job = db.get_latest_research_job(session_id)
+    assert latest_job is not None
+    retry_context = latest_job["approved_plan"].get("retry_context", {})
+    assert retry_context["selected_path"]
+    assert retry_context["top_issues"] == task_memory["failure_summary"]["top_issues"]

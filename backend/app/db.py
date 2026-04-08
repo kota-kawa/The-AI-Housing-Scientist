@@ -276,6 +276,7 @@ class Database:
                             "search_history": [],
                             "reaction_history": [],
                             "learned_preferences": {},
+                            "strategy_memory": {},
                         },
                         ensure_ascii=False,
                     ),

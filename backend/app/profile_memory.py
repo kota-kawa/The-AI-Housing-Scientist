@@ -59,12 +59,14 @@ def build_profile_resume_summary(
     profile_memory: dict[str, Any],
 ) -> dict[str, Any]:
     learned = profile_memory.get("learned_preferences", {}) or {}
+    strategy = profile_memory.get("strategy_memory", {}) or {}
     summary = {
         "last_search_labels": summarize_memory_labels(user_memory),
         "frequent_area": learned.get("frequent_area", ""),
         "stable_preferences": learned.get("stable_preferences", []),
         "liked_features": learned.get("liked_features", []),
         "excluded_features": learned.get("excluded_features", []),
+        "preferred_strategy_tags": strategy.get("preferred_strategy_tags", []),
     }
     return summary
 
@@ -76,6 +78,7 @@ def update_profile_memory_with_search(
     user_memory: dict[str, Any],
     searched_at: str,
     adapter: LLMAdapter | None = None,
+    search_outcome: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     updated = dict(profile_memory)
     search_history = list(updated.get("search_history", []) or [])
@@ -88,6 +91,7 @@ def update_profile_memory_with_search(
                 for key, value in user_memory.items()
                 if key != "learned_preferences"
             },
+            "search_outcome": search_outcome or {},
         }
     )
     updated["search_history"] = search_history[-MAX_SEARCH_HISTORY:]
@@ -96,6 +100,11 @@ def update_profile_memory_with_search(
         updated.get("reaction_history", []) or [],
         adapter=adapter,
     )
+    updated["strategy_memory"] = infer_strategy_memory(
+        updated["search_history"],
+        updated.get("reaction_history", []) or [],
+    )
+    updated["learned_preferences"]["strategy_memory"] = updated["strategy_memory"]
     return updated
 
 
@@ -106,6 +115,7 @@ def update_profile_memory_with_reaction(
     property_snapshot: dict[str, Any],
     recorded_at: str,
     adapter: LLMAdapter | None = None,
+    strategy_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     updated = dict(profile_memory)
     reaction_history = list(updated.get("reaction_history", []) or [])
@@ -118,6 +128,7 @@ def update_profile_memory_with_reaction(
             "area_name": property_snapshot.get("area_name"),
             "layout": property_snapshot.get("layout"),
             "features": property_snapshot.get("features", []),
+            "strategy_context": strategy_context or {},
         }
     )
     updated["reaction_history"] = reaction_history[-MAX_REACTION_HISTORY:]
@@ -126,7 +137,91 @@ def update_profile_memory_with_reaction(
         updated["reaction_history"],
         adapter=adapter,
     )
+    updated["strategy_memory"] = infer_strategy_memory(
+        updated.get("search_history", []) or [],
+        updated["reaction_history"],
+    )
+    updated["learned_preferences"]["strategy_memory"] = updated["strategy_memory"]
     return updated
+
+
+def infer_strategy_memory(
+    search_history: list[dict[str, Any]],
+    reaction_history: list[dict[str, Any]],
+) -> dict[str, Any]:
+    preferred_counter: Counter[str] = Counter()
+    avoided_counter: Counter[str] = Counter()
+    issue_counter: Counter[str] = Counter()
+    episodes: list[dict[str, Any]] = []
+    last_successful_path: list[str] = []
+
+    for entry in search_history:
+        outcome = entry.get("search_outcome", {}) or {}
+        selected_path = list(outcome.get("selected_path", []) or [])
+        path_tags: list[str] = []
+        for node in selected_path:
+            for tag in node.get("strategy_tags", []) or []:
+                text = str(tag).strip()
+                if text and text not in path_tags:
+                    path_tags.append(text)
+
+        readiness = str(outcome.get("readiness") or "")
+        if readiness in {"medium", "high"}:
+            preferred_counter.update(path_tags)
+            if path_tags:
+                last_successful_path = path_tags[:]
+        elif readiness == "low":
+            avoided_counter.update(path_tags)
+
+        for issue in outcome.get("top_issues", []) or []:
+            text = str(issue).strip()
+            if text:
+                issue_counter[text] += 1
+
+        if outcome:
+            episodes.append(
+                {
+                    "searched_at": entry.get("searched_at", ""),
+                    "selected_branch_id": str(outcome.get("selected_branch_id") or ""),
+                    "readiness": readiness,
+                    "strategy_tags": path_tags,
+                    "top_issues": [
+                        str(item).strip()
+                        for item in outcome.get("top_issues", []) or []
+                        if str(item).strip()
+                    ][:3],
+                }
+            )
+
+    for entry in reaction_history:
+        strategy_context = entry.get("strategy_context", {}) or {}
+        path_tags = [
+            str(tag).strip()
+            for tag in strategy_context.get("selected_path_tags", []) or []
+            if str(tag).strip()
+        ]
+        if entry.get("reaction") == "favorite":
+            preferred_counter.update(path_tags)
+        elif entry.get("reaction") == "exclude":
+            avoided_counter.update(path_tags)
+
+    preferred_strategy_tags = [
+        tag for tag, count in preferred_counter.most_common(4) if count >= 1
+    ]
+    avoided_strategy_tags = [
+        tag
+        for tag, count in avoided_counter.most_common(4)
+        if count >= 1 and tag not in preferred_strategy_tags
+    ]
+    return {
+        "episodes": episodes[-8:],
+        "preferred_strategy_tags": preferred_strategy_tags,
+        "avoided_strategy_tags": avoided_strategy_tags,
+        "issue_recurrence": {
+            label: count for label, count in issue_counter.most_common(5)
+        },
+        "last_successful_path": last_successful_path[:6],
+    }
 
 
 def _infer_preferences_with_llm(

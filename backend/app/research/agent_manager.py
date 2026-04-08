@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -21,21 +23,31 @@ from app.stages.search_normalize import run_search_and_normalize
 
 
 @dataclass(frozen=True)
-class ResearchBranchPlan:
-    branch_id: str
+class SearchNodePlan:
+    node_key: str
     label: str
     description: str
     queries: list[str]
     ranking_profile: dict[str, Any]
+    strategy_tags: list[str]
+    depth: int
+    parent_key: str | None = None
+    parent_node_id: int | None = None
 
 
 @dataclass
-class BranchExecutionArtifacts:
-    branch: ResearchBranchPlan
+class SearchNodeArtifacts:
+    plan: SearchNodePlan
+    query_hash: str
+    frontier_score: float
     retrieve: dict[str, Any] = field(default_factory=dict)
     enrich: dict[str, Any] = field(default_factory=dict)
     normalize: dict[str, Any] = field(default_factory=dict)
     rank: dict[str, Any] = field(default_factory=dict)
+    summary: dict[str, Any] = field(default_factory=dict)
+    status: str = "queued"
+    issue_streak: int = 0
+    journal_node_id: int | None = None
 
 
 @dataclass
@@ -43,19 +55,26 @@ class ResearchExecutionState:
     plan_result: dict[str, Any] = field(default_factory=dict)
     query: str = ""
     seed_queries: list[str] = field(default_factory=list)
-    query_stage_node: ResearchNode | None = None
-    branch_plans: list[ResearchBranchPlan] = field(default_factory=list)
-    branch_roots: dict[str, ResearchNode] = field(default_factory=dict)
-    branch_parent_ids: dict[str, int] = field(default_factory=dict)
-    branch_artifacts: dict[str, BranchExecutionArtifacts] = field(default_factory=dict)
-    branch_failures: dict[str, dict[str, Any]] = field(default_factory=dict)
+    retry_context: dict[str, Any] = field(default_factory=dict)
+    root_node: ResearchNode | None = None
+    node_sequence: int = 0
+    node_plans: dict[str, SearchNodePlan] = field(default_factory=dict)
+    node_artifacts: dict[str, SearchNodeArtifacts] = field(default_factory=dict)
+    frontier: list[str] = field(default_factory=list)
     branch_summaries: list[dict[str, Any]] = field(default_factory=list)
+    branch_failures: dict[str, dict[str, Any]] = field(default_factory=dict)
+    pruned_nodes: list[dict[str, Any]] = field(default_factory=list)
     selected_branch_summary: dict[str, Any] = field(default_factory=dict)
+    selected_path: list[dict[str, Any]] = field(default_factory=list)
+    best_node_key: str = ""
+    best_node_stability: int = 0
+    termination_reason: str = ""
     source_items: list[dict[str, Any]] = field(default_factory=list)
     search_summary: dict[str, Any] = field(default_factory=dict)
     offline_evaluation: dict[str, Any] = field(default_factory=dict)
     failure_summary: dict[str, Any] = field(default_factory=dict)
     research_summary: str = ""
+    search_tree_summary: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -72,6 +91,9 @@ class ResearchExecutionResult:
     offline_evaluation: dict[str, Any]
     failure_summary: dict[str, Any]
     research_summary: str
+    selected_path: list[dict[str, Any]]
+    search_tree_summary: dict[str, Any]
+    pruned_nodes: list[dict[str, Any]]
 
 
 class HousingResearchAgentManager:
@@ -90,6 +112,12 @@ class HousingResearchAgentManager:
         collect_search_results: Callable[..., tuple[list[dict[str, Any]], dict[str, Any]]],
         fetch_detail_html: Callable[[str], str | None],
         collect_source_items: Callable[..., list[dict[str, Any]]],
+        tree_max_nodes: int = 12,
+        tree_max_depth: int = 4,
+        tree_batch_size: int = 2,
+        tree_children_per_expansion: int = 2,
+        tree_prune_score: int = 35,
+        tree_stability_patience: int = 2,
     ):
         self.db = db
         self.session_id = session_id
@@ -103,6 +131,12 @@ class HousingResearchAgentManager:
         self.collect_search_results = collect_search_results
         self.fetch_detail_html = fetch_detail_html
         self.collect_source_items = collect_source_items
+        self.tree_max_nodes = max(4, tree_max_nodes)
+        self.tree_max_depth = max(1, tree_max_depth)
+        self.tree_batch_size = max(1, tree_batch_size)
+        self.tree_children_per_expansion = max(1, tree_children_per_expansion)
+        self.tree_prune_score = max(1, tree_prune_score)
+        self.tree_stability_patience = max(1, tree_stability_patience)
         self.journal = ResearchJournal()
         self.context = ToolContext(
             session_id=session_id,
@@ -229,6 +263,8 @@ class HousingResearchAgentManager:
         selected_branch_summary: dict[str, Any] | None = None,
         branch_summaries: list[dict[str, Any]] | None = None,
         failure_summary: dict[str, Any] | None = None,
+        selected_path: list[dict[str, Any]] | None = None,
+        search_tree_summary: dict[str, Any] | None = None,
     ) -> str:
         if self.research_adapter is None:
             return ""
@@ -258,6 +294,8 @@ class HousingResearchAgentManager:
                 "branch_id": str(item.get("branch_id") or ""),
                 "label": str(item.get("label") or ""),
                 "branch_score": float(item.get("branch_score") or 0.0),
+                "frontier_score": float(item.get("frontier_score") or 0.0),
+                "depth": int(item.get("depth") or 0),
                 "detail_coverage": float(item.get("detail_coverage") or 0.0),
                 "structured_ratio": float(item.get("structured_ratio") or 0.0),
                 "normalized_count": int(item.get("normalized_count") or 0),
@@ -275,12 +313,34 @@ class HousingResearchAgentManager:
                 "branch_id": str(selected_branch.get("branch_id") or ""),
                 "label": str(selected_branch.get("label") or ""),
                 "branch_score": float(selected_branch.get("branch_score") or 0.0),
+                "frontier_score": float(selected_branch.get("frontier_score") or 0.0),
+                "depth": int(selected_branch.get("depth") or 0),
                 "detail_coverage": float(selected_branch.get("detail_coverage") or 0.0),
                 "structured_ratio": float(selected_branch.get("structured_ratio") or 0.0),
                 "normalized_count": int(selected_branch.get("normalized_count") or 0),
                 "summary": str(selected_branch.get("summary") or ""),
+                "strategy_tags": [
+                    str(tag).strip()
+                    for tag in selected_branch.get("strategy_tags", []) or []
+                    if str(tag).strip()
+                ][:4],
             },
             "alternative_branches": other_branches,
+            "selected_path": [
+                {
+                    "branch_id": str(item.get("branch_id") or ""),
+                    "label": str(item.get("label") or ""),
+                    "depth": int(item.get("depth") or 0),
+                    "strategy_tags": [
+                        str(tag).strip()
+                        for tag in item.get("strategy_tags", []) or []
+                        if str(tag).strip()
+                    ][:4],
+                    "branch_score": float(item.get("branch_score") or 0.0),
+                }
+                for item in (selected_path or [])[:4]
+            ],
+            "search_tree_summary": search_tree_summary or {},
             "search_summary": {
                 "detail_hit_count": int(search_summary.get("detail_hit_count") or 0),
                 "normalized_count": int(search_summary.get("normalized_count") or 0),
@@ -342,31 +402,11 @@ class HousingResearchAgentManager:
                 ResearchStageDefinition(
                     name="plan_finalize",
                     handler=self._handle_plan_finalize,
-                    default_next_stage="query_expand",
+                    default_next_stage="tree_search",
                 ),
                 ResearchStageDefinition(
-                    name="query_expand",
-                    handler=self._handle_query_expand,
-                    default_next_stage="retrieve",
-                ),
-                ResearchStageDefinition(
-                    name="retrieve",
-                    handler=self._handle_retrieve,
-                    default_next_stage="enrich",
-                ),
-                ResearchStageDefinition(
-                    name="enrich",
-                    handler=self._handle_enrich,
-                    default_next_stage="normalize_dedupe",
-                ),
-                ResearchStageDefinition(
-                    name="normalize_dedupe",
-                    handler=self._handle_normalize,
-                    default_next_stage="rank",
-                ),
-                ResearchStageDefinition(
-                    name="rank",
-                    handler=self._handle_rank,
+                    name="tree_search",
+                    handler=self._handle_tree_search,
                     default_next_stage="synthesize",
                 ),
                 ResearchStageDefinition(
@@ -378,16 +418,27 @@ class HousingResearchAgentManager:
         )
 
     def _build_toolbox(self) -> Toolbox:
-        branch_schema = {
+        node_schema = {
             "type": "object",
             "properties": {
-                "branch_id": {"type": "string"},
+                "node_key": {"type": "string"},
                 "label": {"type": "string"},
                 "description": {"type": "string"},
                 "queries": {"type": "array", "items": {"type": "string"}},
                 "ranking_profile": {"type": "object"},
+                "strategy_tags": {"type": "array", "items": {"type": "string"}},
+                "depth": {"type": "integer"},
+                "parent_key": {"type": ["string", "null"]},
             },
-            "required": ["branch_id", "label", "description", "queries", "ranking_profile"],
+            "required": [
+                "node_key",
+                "label",
+                "description",
+                "queries",
+                "ranking_profile",
+                "strategy_tags",
+                "depth",
+            ],
             "additionalProperties": True,
         }
         return Toolbox(
@@ -395,7 +446,7 @@ class HousingResearchAgentManager:
                 CallableResearchTool(
                     ToolSpec(
                         name="plan_finalize",
-                        description="Fix an approved plan as the immutable starting point for branch search.",
+                        description="Fix an approved plan as the immutable starting point for tree search.",
                         output_schema={
                             "type": "object",
                             "properties": {
@@ -411,38 +462,11 @@ class HousingResearchAgentManager:
                 ),
                 CallableResearchTool(
                     ToolSpec(
-                        name="query_expand",
-                        description="Generate safe branch plans by varying query sets and ranking profiles.",
-                        input_schema={
-                            "type": "object",
-                            "properties": {
-                                "seed_queries": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                }
-                            },
-                            "required": ["seed_queries"],
-                            "additionalProperties": False,
-                        },
-                        output_schema={
-                            "type": "object",
-                            "properties": {
-                                "branches": {"type": "array", "items": branch_schema},
-                                "summary": {"type": "string"},
-                            },
-                            "required": ["branches", "summary"],
-                            "additionalProperties": True,
-                        },
-                    ),
-                    self._tool_query_expand,
-                ),
-                CallableResearchTool(
-                    ToolSpec(
                         name="retrieve",
-                        description="Collect and merge search results for a branch.",
+                        description="Collect and merge search results for a search candidate.",
                         input_schema={
                             "type": "object",
-                            "properties": {"branch": branch_schema},
+                            "properties": {"branch": node_schema},
                             "required": ["branch"],
                             "additionalProperties": False,
                         },
@@ -462,11 +486,11 @@ class HousingResearchAgentManager:
                 CallableResearchTool(
                     ToolSpec(
                         name="enrich",
-                        description="Fetch property detail pages for a branch.",
+                        description="Fetch property detail pages for a search candidate.",
                         input_schema={
                             "type": "object",
                             "properties": {
-                                "branch": branch_schema,
+                                "branch": node_schema,
                                 "raw_results": {"type": "array"},
                             },
                             "required": ["branch", "raw_results"],
@@ -514,7 +538,7 @@ class HousingResearchAgentManager:
                 CallableResearchTool(
                     ToolSpec(
                         name="rank",
-                        description="Rank normalized properties under a branch-specific scoring profile.",
+                        description="Rank normalized properties under a candidate-specific scoring profile.",
                         input_schema={
                             "type": "object",
                             "properties": {
@@ -661,188 +685,7 @@ class HousingResearchAgentManager:
             "seed_queries": seed_queries,
         }
 
-    def _make_branch_plans(self, seed_queries: list[str]) -> list[ResearchBranchPlan]:
-        user_memory = self.approved_plan.get("user_memory_snapshot", self.user_memory)
-        normalized_seed_queries = [
-            " ".join(str(item).split()).strip()
-            for item in seed_queries
-            if " ".join(str(item).split()).strip()
-        ]
-        balanced_queries = self.build_research_queries(user_memory, normalized_seed_queries)
-
-        area = str(user_memory.get("target_area") or "").strip()
-        layout = str(user_memory.get("layout_preference") or "").strip()
-        budget = int(user_memory.get("budget_max") or 0)
-        must_conditions = [
-            str(item).strip()
-            for item in user_memory.get("must_conditions", []) or []
-            if str(item).strip()
-        ]
-        nice_to_have = [
-            str(item).strip()
-            for item in user_memory.get("nice_to_have", []) or []
-            if str(item).strip()
-        ]
-
-        strict_queries = list(normalized_seed_queries)
-        strict_tokens = [token for token in [area, layout, " ".join(must_conditions[:2]), "賃貸"] if token]
-        if strict_tokens:
-            strict_queries.append(" ".join(strict_tokens))
-        if budget:
-            budget_tokens = [token for token in [area, layout, f"{int(budget / 10000)}万円", "賃貸"] if token]
-            if budget_tokens:
-                strict_queries.append(" ".join(budget_tokens))
-
-        broad_queries = list(normalized_seed_queries)
-        broad_tokens = [token for token in [area, "賃貸"] if token]
-        if broad_tokens:
-            broad_queries.append(" ".join(broad_tokens))
-        if area or nice_to_have:
-            broad_queries.append(" ".join(token for token in [area, " ".join(nice_to_have[:2]), "賃貸"] if token))
-        if area:
-            broad_queries.append(" ".join(token for token in [area, "住みやすい", "賃貸"] if token))
-
-        def dedupe(queries: list[str]) -> list[str]:
-            unique: list[str] = []
-            for query in queries:
-                normalized = " ".join(query.split()).strip()
-                if normalized and normalized not in unique:
-                    unique.append(normalized)
-            return unique[:5]
-
-        return [
-            ResearchBranchPlan(
-                branch_id="balanced",
-                label="balanced",
-                description="条件と情報量のバランスを取る標準分岐",
-                queries=dedupe(balanced_queries),
-                ranking_profile={},
-            ),
-            ResearchBranchPlan(
-                branch_id="strict",
-                label="strict",
-                description="must条件と欠損ペナルティを強める厳密分岐",
-                queries=dedupe(strict_queries),
-                ranking_profile={
-                    "budget_match_bonus": 28.0,
-                    "station_match_bonus": 18.0,
-                    "layout_match_bonus": 14.0,
-                    "rent_missing_penalty": 18.0,
-                    "station_missing_penalty": 8.0,
-                    "layout_missing_penalty": 7.0,
-                },
-            ),
-            ResearchBranchPlan(
-                branch_id="broad",
-                label="broad",
-                description="候補数と詳細補完率を優先して広めに拾う分岐",
-                queries=dedupe(broad_queries),
-                ranking_profile={
-                    "budget_near_bonus": 8.0,
-                    "budget_far_penalty": 12.0,
-                    "station_far_penalty": 6.0,
-                    "rent_missing_penalty": 10.0,
-                    "station_missing_penalty": 4.0,
-                    "layout_missing_penalty": 4.0,
-                },
-            ),
-        ]
-
-    def _tool_query_expand(self, *, context: ToolContext, seed_queries: list[str]) -> dict[str, Any]:
-        normalized_seed_queries = [
-            " ".join(str(item).split()).strip()
-            for item in seed_queries
-            if " ".join(str(item).split()).strip()
-        ]
-        branches = self._make_branch_plans(normalized_seed_queries)
-        llm_summary = ""
-        if self.research_adapter is not None:
-            schema = {
-                "type": "object",
-                "properties": {
-                    "branches": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "branch_id": {
-                                    "type": "string",
-                                    "enum": ["balanced", "strict", "broad"],
-                                },
-                                "query_suggestions": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                },
-                                "description_hint": {"type": "string"},
-                            },
-                            "required": ["branch_id", "query_suggestions", "description_hint"],
-                            "additionalProperties": False,
-                        },
-                    },
-                    "summary": {"type": "string"},
-                },
-                "required": ["branches", "summary"],
-                "additionalProperties": False,
-            }
-            try:
-                llm_payload = self.research_adapter.generate_structured(
-                    system=(
-                        "You are designing safe query branches for Japanese rental research. "
-                        "Suggest only query variations grounded in the approved plan. "
-                        "Keep the three branch IDs fixed as balanced, strict, and broad."
-                    ),
-                    user=(
-                        "承認済み計画:\n"
-                        f"{self.approved_plan}\n\n"
-                        f"seed_queries: {normalized_seed_queries}"
-                    ),
-                    schema=schema,
-                    temperature=0.2,
-                )
-                by_branch_id = {
-                    str(item.get("branch_id") or ""): item
-                    for item in llm_payload.get("branches", [])
-                }
-                adjusted_branches: list[ResearchBranchPlan] = []
-                for branch in branches:
-                    suggestion = by_branch_id.get(branch.branch_id, {})
-                    suggested_queries = [
-                        str(item).strip()
-                        for item in suggestion.get("query_suggestions", [])
-                        if str(item).strip()
-                    ]
-                    merged_queries = branch.queries
-                    if suggested_queries:
-                        merged_queries = list(dict.fromkeys(branch.queries + suggested_queries))[:5]
-                    description_hint = str(suggestion.get("description_hint") or "").strip()
-                    adjusted_branches.append(
-                        ResearchBranchPlan(
-                            branch_id=branch.branch_id,
-                            label=branch.label,
-                            description=description_hint or branch.description,
-                            queries=merged_queries,
-                            ranking_profile=dict(branch.ranking_profile),
-                        )
-                    )
-                branches = adjusted_branches
-                llm_summary = str(llm_payload.get("summary") or "").strip()
-            except Exception:
-                llm_summary = ""
-        return {
-            "branches": [
-                {
-                    "branch_id": branch.branch_id,
-                    "label": branch.label,
-                    "description": branch.description,
-                    "queries": branch.queries,
-                    "ranking_profile": branch.ranking_profile,
-                }
-                for branch in branches
-            ],
-            "summary": llm_summary or f"{len(branches)}本の安全な検索分岐を作成",
-        }
-
-    def _tool_retrieve(self, *, context: ToolContext, branch: ResearchBranchPlan) -> dict[str, Any]:
+    def _tool_retrieve(self, *, context: ToolContext, branch: SearchNodePlan) -> dict[str, Any]:
         merged_by_url: dict[str, dict[str, Any]] = {}
         per_query: list[dict[str, Any]] = []
         catalog_total = 0
@@ -851,13 +694,13 @@ class HousingResearchAgentManager:
 
         for index, query in enumerate(branch.queries, start=1):
             self._update_job(
-                stage_name="retrieve",
-                progress_percent=25,
+                stage_name="tree_search",
+                progress_percent=36,
                 latest_summary=f"{branch.label}: {index}/{len(branch.queries)}件目を収集中",
             )
             results, source_summary = self.collect_search_results(
                 query=query,
-                user_memory=self.approved_plan.get("user_memory_snapshot", self.user_memory),
+                user_memory=self._active_user_memory(),
                 adapter=self.research_adapter,
             )
             catalog_total += int(source_summary["catalog_result_count"])
@@ -918,7 +761,7 @@ class HousingResearchAgentManager:
         self,
         *,
         context: ToolContext,
-        branch: ResearchBranchPlan,
+        branch: SearchNodePlan,
         raw_results: list[dict[str, Any]],
     ) -> dict[str, Any]:
         detail_html_map: dict[str, str] = {}
@@ -932,8 +775,8 @@ class HousingResearchAgentManager:
                 detail_html_map[url] = detail_html
             if total and (index == 1 or index == total or index % 3 == 0):
                 self._update_job(
-                    stage_name="enrich",
-                    progress_percent=45,
+                    stage_name="tree_search",
+                    progress_percent=48,
                     latest_summary=f"{branch.label}: 詳細ページを補完中 {index}/{total}",
                 )
         return {
@@ -969,35 +812,559 @@ class HousingResearchAgentManager:
     ) -> dict[str, Any]:
         return run_ranking(
             normalized_properties=normalized_properties,
-            user_memory=self.approved_plan.get("user_memory_snapshot", self.user_memory),
+            user_memory=self._active_user_memory(),
             ranking_profile=ranking_profile,
             adapter=self.research_adapter,
         )
 
-    def _ensure_branch_artifacts(
+    def _active_user_memory(self) -> dict[str, Any]:
+        return self.approved_plan.get("user_memory_snapshot", self.user_memory)
+
+    def _strategy_memory(self) -> dict[str, Any]:
+        learned = self._active_user_memory().get("learned_preferences", {}) or {}
+        strategy = learned.get("strategy_memory", {}) or {}
+        if strategy:
+            return strategy
+        return self.task_memory.get("strategy_memory_snapshot", {}) or {}
+
+    def _compose_query(self, *parts: Any) -> str:
+        return " ".join(str(part).strip() for part in parts if str(part).strip()).strip()
+
+    def _dedupe_queries(self, values: list[str], *, limit: int = 5) -> list[str]:
+        deduped: list[str] = []
+        for value in values:
+            text = " ".join(str(value).split()).strip()
+            if text and text not in deduped:
+                deduped.append(text)
+            if len(deduped) >= limit:
+                break
+        return deduped
+
+    def _hash_queries(self, queries: list[str], ranking_profile: dict[str, Any]) -> str:
+        payload = {
+            "queries": [" ".join(str(item).split()) for item in queries],
+            "ranking_profile": ranking_profile,
+        }
+        return hashlib.sha1(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:12]
+
+    def _next_node_key(self, state: ResearchExecutionState, operator: str, depth: int) -> str:
+        state.node_sequence += 1
+        return f"{operator}-d{depth}-n{state.node_sequence}"
+
+    def _merge_ranking_profile(
         self,
-        state: ResearchExecutionState,
-        branch: ResearchBranchPlan,
-    ) -> BranchExecutionArtifacts:
-        if branch.branch_id not in state.branch_artifacts:
-            state.branch_artifacts[branch.branch_id] = BranchExecutionArtifacts(branch=branch)
-        return state.branch_artifacts[branch.branch_id]
+        base_profile: dict[str, Any],
+        updates: dict[str, float],
+    ) -> dict[str, Any]:
+        merged = dict(base_profile)
+        for key, value in updates.items():
+            merged[key] = float(value)
+        return merged
 
-    def _active_branches(self, state: ResearchExecutionState) -> list[ResearchBranchPlan]:
-        return [
-            branch for branch in state.branch_plans if branch.branch_id not in state.branch_failures
-        ]
-
-    def _selected_artifacts(self, state: ResearchExecutionState) -> BranchExecutionArtifacts | None:
-        return state.branch_artifacts.get(str(state.selected_branch_summary.get("branch_id") or ""))
-
-    def _build_branch_failure_summary(
+    def _llm_query_suggestions(
         self,
         *,
-        branch: ResearchBranchPlan,
+        operator: str,
+        base_queries: list[str],
+        user_memory: dict[str, Any],
+    ) -> list[str]:
+        if self.research_adapter is None:
+            return []
+        schema = {
+            "type": "object",
+            "properties": {
+                "query_suggestions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 2,
+                }
+            },
+            "required": ["query_suggestions"],
+            "additionalProperties": False,
+        }
+        try:
+            result = self.research_adapter.generate_structured(
+                system=(
+                    "You are proposing safe Japanese rental search query refinements. "
+                    "Return at most two concise query suggestions grounded in the provided conditions. "
+                    "Do not include site names or unsafe scraping instructions."
+                ),
+                user=json.dumps(
+                    {
+                        "operator": operator,
+                        "base_queries": base_queries[:4],
+                        "user_memory": {
+                            "target_area": str(user_memory.get("target_area") or ""),
+                            "budget_max": int(user_memory.get("budget_max") or 0),
+                            "station_walk_max": int(user_memory.get("station_walk_max") or 0),
+                            "layout_preference": str(user_memory.get("layout_preference") or ""),
+                            "must_conditions": user_memory.get("must_conditions", []) or [],
+                            "nice_to_have": user_memory.get("nice_to_have", []) or [],
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                schema=schema,
+                temperature=0.2,
+            )
+        except Exception:
+            return []
+        return self._dedupe_queries(
+            [str(item).strip() for item in result.get("query_suggestions", []) if str(item).strip()],
+            limit=2,
+        )
+
+    def _queries_for_operator(
+        self,
+        *,
+        base_queries: list[str],
+        operator: str,
+        user_memory: dict[str, Any],
+    ) -> list[str]:
+        area = str(user_memory.get("target_area") or "").strip()
+        layout = str(user_memory.get("layout_preference") or "").strip()
+        budget = int(user_memory.get("budget_max") or 0)
+        walk = int(user_memory.get("station_walk_max") or 0)
+        must_conditions = [
+            str(item).strip()
+            for item in user_memory.get("must_conditions", []) or []
+            if str(item).strip()
+        ]
+        nice_to_have = [
+            str(item).strip()
+            for item in user_memory.get("nice_to_have", []) or []
+            if str(item).strip()
+        ]
+
+        queries = list(base_queries)
+        if operator == "tighten_match":
+            queries.extend(
+                [
+                    self._compose_query(area, layout, " ".join(must_conditions[:2]), "賃貸"),
+                    self._compose_query(area, layout, f"{int(budget / 10000)}万円" if budget else "", "賃貸"),
+                    self._compose_query(area, layout, f"徒歩{walk}分" if walk else "", "賃貸"),
+                ]
+            )
+        elif operator == "relax_for_coverage":
+            queries.extend(
+                [
+                    self._compose_query(area, "賃貸"),
+                    self._compose_query(area, "住みやすい", "賃貸"),
+                    self._compose_query(area, " ".join(nice_to_have[:2]), "賃貸"),
+                ]
+            )
+        elif operator == "source_diversify":
+            queries.extend(
+                [
+                    self._compose_query(area, layout, "賃貸情報"),
+                    self._compose_query(area, layout, "募集", "賃貸"),
+                    self._compose_query(area, "不動産", "賃貸"),
+                ]
+            )
+        elif operator == "detail_first":
+            queries.extend(
+                [
+                    self._compose_query(area, layout, f"{int(budget / 10000)}万円" if budget else "", "設備", "賃貸"),
+                    self._compose_query(area, layout, "詳細", "賃貸"),
+                    self._compose_query(area, "初期費用", "賃貸"),
+                ]
+            )
+        elif operator == "schema_first":
+            queries.extend(
+                [
+                    self._compose_query(area, layout, "設備", "賃貸"),
+                    self._compose_query(area, layout, "間取り", "賃貸"),
+                    self._compose_query(area, "徒歩", "賃貸"),
+                ]
+            )
+        elif operator == "exploit_best":
+            queries.extend(
+                [
+                    self._compose_query(area, layout, f"{int(budget / 10000)}万円" if budget else "", "駅近", "賃貸"),
+                    self._compose_query(area, layout, "候補", "賃貸"),
+                ]
+            )
+        elif operator == "explore_adjacent":
+            queries.extend(
+                [
+                    self._compose_query(area, " ".join(nice_to_have[:2]), "住みやすい", "賃貸"),
+                    self._compose_query(area, layout, "広め", "賃貸"),
+                ]
+            )
+
+        queries.extend(
+            self._llm_query_suggestions(
+                operator=operator,
+                base_queries=queries[:4],
+                user_memory=user_memory,
+            )
+        )
+        return self._dedupe_queries(queries)
+
+    def _profile_for_operator(
+        self,
+        *,
+        base_profile: dict[str, Any],
+        operator: str,
+    ) -> dict[str, Any]:
+        if operator == "tighten_match":
+            return self._merge_ranking_profile(
+                base_profile,
+                {
+                    "budget_match_bonus": 28.0,
+                    "station_match_bonus": 18.0,
+                    "layout_match_bonus": 14.0,
+                    "rent_missing_penalty": 18.0,
+                    "station_missing_penalty": 8.0,
+                    "layout_missing_penalty": 7.0,
+                },
+            )
+        if operator == "relax_for_coverage":
+            return self._merge_ranking_profile(
+                base_profile,
+                {
+                    "budget_near_bonus": 8.0,
+                    "budget_far_penalty": 12.0,
+                    "station_far_penalty": 6.0,
+                    "rent_missing_penalty": 10.0,
+                    "station_missing_penalty": 4.0,
+                    "layout_missing_penalty": 4.0,
+                },
+            )
+        if operator == "detail_first":
+            return self._merge_ranking_profile(
+                base_profile,
+                {
+                    "rent_missing_penalty": 24.0,
+                    "station_missing_penalty": 12.0,
+                    "layout_missing_penalty": 12.0,
+                },
+            )
+        if operator == "schema_first":
+            return self._merge_ranking_profile(
+                base_profile,
+                {
+                    "rent_missing_penalty": 28.0,
+                    "station_missing_penalty": 16.0,
+                    "layout_missing_penalty": 16.0,
+                },
+            )
+        if operator == "explore_adjacent":
+            return self._merge_ranking_profile(
+                base_profile,
+                {
+                    "budget_far_penalty": 10.0,
+                    "station_far_penalty": 4.0,
+                },
+            )
+        return dict(base_profile)
+
+    def _operator_label(self, operator: str) -> str:
+        labels = {
+            "tighten_match": "tighten_match",
+            "relax_for_coverage": "relax_for_coverage",
+            "source_diversify": "source_diversify",
+            "detail_first": "detail_first",
+            "schema_first": "schema_first",
+            "exploit_best": "exploit_best",
+            "explore_adjacent": "explore_adjacent",
+        }
+        return labels.get(operator, operator)
+
+    def _operator_description(self, operator: str) -> str:
+        descriptions = {
+            "tighten_match": "must 条件と予算一致度を強める探索",
+            "relax_for_coverage": "候補数と詳細補完率を回復する探索",
+            "source_diversify": "異なる検索表現で情報源の多様性を増やす探索",
+            "detail_first": "詳細ページ取得率を優先する探索",
+            "schema_first": "家賃・徒歩・間取りの取得率を優先する探索",
+            "exploit_best": "有望な条件組み合わせを深掘りする探索",
+            "explore_adjacent": "周辺条件に寄せて近傍探索する探索",
+        }
+        return descriptions.get(operator, "探索ノード")
+
+    def _estimate_frontier_score(
+        self,
+        *,
+        operator: str,
+        depth: int,
+        parent_summary: dict[str, Any] | None,
+    ) -> float:
+        base = float((parent_summary or {}).get("branch_score") or 60.0)
+        if parent_summary is None:
+            base = 60.0
+
+        preferred = set(self._strategy_memory().get("preferred_strategy_tags", []) or [])
+        avoided = set(self._strategy_memory().get("avoided_strategy_tags", []) or [])
+        retry_issues = set(self._retry_context().get("top_issues", []) or [])
+
+        tag_bonus = {
+            "tighten_match": 4.0,
+            "relax_for_coverage": 3.0,
+            "source_diversify": 3.0,
+            "detail_first": 4.0,
+            "schema_first": 4.0,
+            "exploit_best": 5.0,
+            "explore_adjacent": 3.0,
+        }.get(operator, 0.0)
+        score = base + tag_bonus
+        if operator in preferred:
+            score += 4.0
+        if operator in avoided:
+            score -= 6.0
+        if operator == "detail_first" and "詳細ページ補完率が低い" in retry_issues:
+            score -= 4.0
+        if operator == "schema_first" and "比較に必要な項目の欠損が多い" in retry_issues:
+            score -= 4.0
+        if depth >= 3:
+            score -= (depth - 2) * 5.0
+        return round(score, 2)
+
+    def _make_node_plan(
+        self,
+        state: ResearchExecutionState,
+        *,
+        operator: str,
+        base_queries: list[str],
+        base_profile: dict[str, Any],
+        parent_key: str | None,
+        parent_node_id: int | None,
+        depth: int,
+        extra_tags: list[str] | None = None,
+        parent_summary: dict[str, Any] | None = None,
+    ) -> SearchNodePlan:
+        strategy_tags = [operator] + [
+            str(tag).strip()
+            for tag in extra_tags or []
+            if str(tag).strip() and str(tag).strip() != operator
+        ]
+        return SearchNodePlan(
+            node_key=self._next_node_key(state, operator, depth),
+            label=self._operator_label(operator),
+            description=self._operator_description(operator),
+            queries=self._queries_for_operator(
+                base_queries=base_queries,
+                operator=operator,
+                user_memory=self._active_user_memory(),
+            ),
+            ranking_profile=self._profile_for_operator(
+                base_profile=base_profile,
+                operator=operator,
+            ),
+            strategy_tags=self._dedupe_queries(strategy_tags, limit=6),
+            depth=depth,
+            parent_key=parent_key,
+            parent_node_id=parent_node_id,
+        )
+
+    def _initial_node_plans(self, state: ResearchExecutionState) -> list[SearchNodePlan]:
+        user_memory = self._active_user_memory()
+        seed_queries = self.seed_queries_for_search(state)
+        base_queries = self.build_research_queries(user_memory, seed_queries)
+        strategy_memory = self._strategy_memory()
+        extra_tags = [
+            str(tag).strip()
+            for tag in strategy_memory.get("last_successful_path", []) or []
+            if str(tag).strip()
+        ]
+        return [
+            self._make_node_plan(
+                state,
+                operator="tighten_match",
+                base_queries=base_queries,
+                base_profile={},
+                parent_key=None,
+                parent_node_id=state.root_node.id if state.root_node else None,
+                depth=1,
+                extra_tags=extra_tags,
+            ),
+            self._make_node_plan(
+                state,
+                operator="relax_for_coverage",
+                base_queries=base_queries,
+                base_profile={},
+                parent_key=None,
+                parent_node_id=state.root_node.id if state.root_node else None,
+                depth=1,
+                extra_tags=extra_tags,
+            ),
+            self._make_node_plan(
+                state,
+                operator="source_diversify",
+                base_queries=base_queries,
+                base_profile={},
+                parent_key=None,
+                parent_node_id=state.root_node.id if state.root_node else None,
+                depth=1,
+                extra_tags=extra_tags,
+            ),
+        ]
+
+    def seed_queries_for_search(self, state: ResearchExecutionState) -> list[str]:
+        return state.seed_queries or ([state.query] if state.query else [])
+
+    def _retry_context(self) -> dict[str, Any]:
+        return self.approved_plan.get("retry_context", {}) or {}
+
+    def _record_pruned_node(
+        self,
+        state: ResearchExecutionState,
+        *,
+        plan: SearchNodePlan,
+        parent_node_id: int | None,
+        prune_reasons: list[str],
+        evaluation: dict[str, Any] | None = None,
+    ) -> None:
+        payload = {
+            "node_key": plan.node_key,
+            "label": plan.label,
+            "depth": plan.depth,
+            "strategy_tags": plan.strategy_tags,
+            "prune_reasons": prune_reasons,
+        }
+        if evaluation:
+            payload["evaluation"] = {
+                "branch_score": float(evaluation.get("branch_score") or 0.0),
+                "detail_coverage": float(evaluation.get("detail_coverage") or 0.0),
+                "top_issue_class": str(evaluation.get("top_issue_class") or ""),
+            }
+        state.pruned_nodes.append(payload)
+        self._record_node(
+            stage="tree_search",
+            node_type="search_pruned",
+            status="completed",
+            input_payload={
+                "node_key": plan.node_key,
+                "queries": plan.queries,
+                "strategy_tags": plan.strategy_tags,
+            },
+            output_payload=payload,
+            reasoning="重複・深さ・低品質・失敗再発の条件により探索を剪定する。",
+            parent_node_id=parent_node_id,
+            branch_id=plan.node_key,
+            metrics=evaluation,
+        )
+
+    def _register_frontier_node(
+        self,
+        state: ResearchExecutionState,
+        *,
+        plan: SearchNodePlan,
+        parent_summary: dict[str, Any] | None = None,
+    ) -> None:
+        if len(state.node_plans) >= self.tree_max_nodes:
+            return
+        if plan.depth > self.tree_max_depth:
+            self._record_pruned_node(
+                state,
+                plan=plan,
+                parent_node_id=plan.parent_node_id,
+                prune_reasons=["depth_limit"],
+            )
+            return
+
+        query_hash = self._hash_queries(plan.queries, plan.ranking_profile)
+        if any(artifact.query_hash == query_hash for artifact in state.node_artifacts.values()):
+            self._record_pruned_node(
+                state,
+                plan=plan,
+                parent_node_id=plan.parent_node_id,
+                prune_reasons=["duplicate_query_hash"],
+            )
+            return
+
+        frontier_score = self._estimate_frontier_score(
+            operator=plan.strategy_tags[0] if plan.strategy_tags else plan.label,
+            depth=plan.depth,
+            parent_summary=parent_summary,
+        )
+        state.node_plans[plan.node_key] = plan
+        state.node_artifacts[plan.node_key] = SearchNodeArtifacts(
+            plan=plan,
+            query_hash=query_hash,
+            frontier_score=frontier_score,
+        )
+        state.frontier.append(plan.node_key)
+
+    def _select_frontier_nodes(self, state: ResearchExecutionState) -> list[str]:
+        queued = [
+            state.node_artifacts[key]
+            for key in state.frontier
+            if key in state.node_artifacts and state.node_artifacts[key].status == "queued"
+        ]
+        queued.sort(
+            key=lambda artifact: (
+                float(artifact.frontier_score),
+                -int(artifact.plan.depth),
+                artifact.plan.node_key,
+            ),
+            reverse=True,
+        )
+        return [artifact.plan.node_key for artifact in queued[: self.tree_batch_size]]
+
+    def _compute_frontier_score(
+        self,
+        *,
+        summary: dict[str, Any],
+        parent_summary: dict[str, Any] | None,
+        strategy_tags: list[str],
+        depth: int,
+    ) -> float:
+        score = float(summary.get("branch_score") or 0.0)
+        if parent_summary is not None:
+            if float(summary.get("detail_coverage") or 0.0) > float(parent_summary.get("detail_coverage") or 0.0):
+                score += 10.0
+            if float(summary.get("structured_ratio") or 0.0) > float(parent_summary.get("structured_ratio") or 0.0):
+                score += 8.0
+            if str(summary.get("top_issue_class") or "") == str(parent_summary.get("top_issue_class") or ""):
+                score -= 8.0
+        parent_tags = set(parent_summary.get("strategy_tags", []) or []) if parent_summary else set()
+        if any(tag not in parent_tags for tag in strategy_tags):
+            score += 5.0
+
+        preferred = set(self._strategy_memory().get("preferred_strategy_tags", []) or [])
+        avoided = set(self._strategy_memory().get("avoided_strategy_tags", []) or [])
+        score += 4.0 * len(preferred.intersection(strategy_tags))
+        score -= 6.0 * len(avoided.intersection(strategy_tags))
+        if depth >= 3:
+            score -= (depth - 2) * 5.0
+        return round(score, 2)
+
+    def _prune_reasons_for_summary(
+        self,
+        state: ResearchExecutionState,
+        *,
+        summary: dict[str, Any],
+        parent_summary: dict[str, Any] | None,
+    ) -> list[str]:
+        reasons: list[str] = []
+        if float(summary.get("branch_score") or 0.0) < self.tree_prune_score:
+            reasons.append("low_branch_score")
+        if int(summary.get("depth") or 0) >= 1 and float(summary.get("detail_coverage") or 0.0) < 0.2:
+            reasons.append("low_detail_coverage")
+        if int(summary.get("depth") or 0) > self.tree_max_depth:
+            reasons.append("depth_limit")
+        if (
+            parent_summary is not None
+            and str(summary.get("top_issue_class") or "")
+            and str(summary.get("top_issue_class") or "") == str(parent_summary.get("top_issue_class") or "")
+        ):
+            artifact = state.node_artifacts.get(str(summary.get("branch_id") or ""))
+            if artifact is not None and artifact.issue_streak >= 2:
+                reasons.append(f"repeated_issue:{summary.get('top_issue_class')}")
+        return reasons
+
+    def _build_failure_summary(
+        self,
+        *,
+        plan: SearchNodePlan,
+        artifacts: SearchNodeArtifacts,
+        error_text: str,
         stage_name: str,
-        exc: Exception,
-        artifacts: BranchExecutionArtifacts,
+        parent_summary: dict[str, Any] | None,
     ) -> dict[str, Any]:
         search_summary = {}
         if artifacts.retrieve:
@@ -1008,60 +1375,226 @@ class HousingResearchAgentManager:
             search_summary |= artifacts.normalize.get("summary", {})
 
         summary = evaluate_branch(
-            branch_id=branch.branch_id,
-            label=branch.label,
-            queries=branch.queries,
+            branch_id=plan.node_key,
+            label=plan.label,
+            queries=plan.queries,
             raw_results=artifacts.retrieve.get("raw_results", []),
             normalized_properties=artifacts.normalize.get("normalized_properties", []),
             ranked_properties=artifacts.rank.get("ranked_properties", []),
             duplicate_groups=artifacts.normalize.get("duplicate_groups", []),
             search_summary=search_summary,
+            parent_summary=parent_summary,
+            strategy_tags=plan.strategy_tags,
+            depth=plan.depth,
+            query_hash=artifacts.query_hash,
         )
         summary["status"] = "failed"
+        summary["frontier_score"] = 0.0
         summary["branch_score"] = 0.0
-        summary["issues"] = list(summary.get("issues", [])) + [f"{stage_name}: {exc}"]
+        summary["issues"] = list(summary.get("issues", [])) + [f"{stage_name}: {error_text}"]
         summary["recommendations"] = list(summary.get("recommendations", [])) + [
-            "失敗した分岐を残しつつ他分岐で再試行する"
+            "失敗した探索ノードを残しつつ別戦略へ切り替える"
         ]
-        summary["summary"] = f"{branch.label}: failed at {stage_name} ({exc})"
+        summary["summary"] = f"{plan.label}: failed at {stage_name} ({error_text})"
+        summary["parent_key"] = plan.parent_key or ""
+        summary["strategy_tags"] = plan.strategy_tags
+        summary["query_hash"] = artifacts.query_hash
+        summary["depth"] = plan.depth
+        summary["prune_reasons"] = []
         return summary
 
-    def _mark_branch_failed(
+    def _execute_candidate(
         self,
         state: ResearchExecutionState,
         *,
-        branch: ResearchBranchPlan,
-        stage_name: str,
-        parent_node_id: int | None,
-        input_payload: dict[str, Any],
-        exc: Exception,
-    ) -> None:
-        artifacts = self._ensure_branch_artifacts(state, branch)
-        failure_summary = self._build_branch_failure_summary(
-            branch=branch,
-            stage_name=stage_name,
-            exc=exc,
-            artifacts=artifacts,
+        plan: SearchNodePlan,
+    ) -> dict[str, Any]:
+        artifacts = state.node_artifacts[plan.node_key]
+        parent_summary = (
+            state.node_artifacts[plan.parent_key].summary
+            if plan.parent_key and plan.parent_key in state.node_artifacts
+            else None
         )
-        state.branch_failures[branch.branch_id] = failure_summary
-        state.branch_summaries.append(failure_summary)
-        self._record_node(
-            stage=stage_name,
-            node_type="branch_stage",
-            status="failed",
-            input_payload=input_payload,
-            output_payload={"error": str(exc)},
-            reasoning="分岐内の失敗を全体ジョブ失敗に直結させず、他分岐へ継続する。",
-            parent_node_id=parent_node_id,
-            branch_id=branch.branch_id,
-            metrics=failure_summary,
-        )
+        started = time.perf_counter()
+        try:
+            retrieve_result = self.toolbox.run("retrieve", self.context, branch=plan)
+            artifacts.retrieve = retrieve_result
+            enrich_result = self.toolbox.run(
+                "enrich",
+                self.context,
+                branch=plan,
+                raw_results=retrieve_result.get("raw_results", []),
+            )
+            artifacts.enrich = enrich_result
+            normalize_result = self.toolbox.run(
+                "normalize_dedupe",
+                self.context,
+                query=state.query,
+                raw_results=retrieve_result.get("raw_results", []),
+                detail_html_map=enrich_result.get("detail_html_map", {}),
+            )
+            artifacts.normalize = normalize_result
+            ranking_result = self.toolbox.run(
+                "rank",
+                self.context,
+                normalized_properties=normalize_result.get("normalized_properties", []),
+                ranking_profile=plan.ranking_profile,
+            )
+            artifacts.rank = ranking_result
+            search_summary = (
+                retrieve_result.get("summary", {})
+                | enrich_result.get("summary", {})
+                | normalize_result.get("summary", {})
+            )
+            summary = evaluate_branch(
+                branch_id=plan.node_key,
+                label=plan.label,
+                queries=plan.queries,
+                raw_results=retrieve_result.get("raw_results", []),
+                normalized_properties=normalize_result.get("normalized_properties", []),
+                ranked_properties=ranking_result.get("ranked_properties", []),
+                duplicate_groups=normalize_result.get("duplicate_groups", []),
+                search_summary=search_summary,
+                parent_summary=parent_summary,
+                strategy_tags=plan.strategy_tags,
+                depth=plan.depth,
+                query_hash=artifacts.query_hash,
+            )
+            summary["parent_key"] = plan.parent_key or ""
+            summary["description"] = plan.description
+            summary["frontier_score"] = self._compute_frontier_score(
+                summary=summary,
+                parent_summary=parent_summary,
+                strategy_tags=plan.strategy_tags,
+                depth=plan.depth,
+            )
+            parent_artifacts = state.node_artifacts.get(plan.parent_key or "")
+            if parent_summary is not None and summary["top_issue_class"] == parent_summary.get("top_issue_class"):
+                artifacts.issue_streak = (parent_artifacts.issue_streak if parent_artifacts else 0) + 1
+            elif summary["top_issue_class"] != "healthy":
+                artifacts.issue_streak = 1
+            else:
+                artifacts.issue_streak = 0
+            summary["prune_reasons"] = self._prune_reasons_for_summary(
+                state,
+                summary=summary,
+                parent_summary=parent_summary,
+            )
+            artifacts.summary = summary
+            artifacts.frontier_score = float(summary.get("frontier_score") or artifacts.frontier_score)
+            artifacts.status = "completed"
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            node = self._record_node(
+                stage="tree_search",
+                node_type="search_candidate",
+                status="completed",
+                input_payload={
+                    "node_key": plan.node_key,
+                    "queries": plan.queries,
+                    "strategy_tags": plan.strategy_tags,
+                    "depth": plan.depth,
+                },
+                output_payload={
+                    "retrieve_summary": retrieve_result.get("summary", {}),
+                    "enrich_summary": enrich_result.get("summary", {}),
+                    "normalize_summary": normalize_result.get("summary", {}),
+                    "ranked_property_count": len(ranking_result.get("ranked_properties", [])),
+                    "summary": summary.get("summary", ""),
+                },
+                reasoning="候補探索ノードを実行し、収集・補完・正規化・順位付けをまとめて評価する。",
+                duration_ms=duration_ms,
+                parent_node_id=plan.parent_node_id,
+                branch_id=plan.node_key,
+                metrics=summary,
+            )
+            artifacts.journal_node_id = node.id
+            state.branch_summaries.append(summary)
+            if summary["prune_reasons"]:
+                self._record_pruned_node(
+                    state,
+                    plan=plan,
+                    parent_node_id=node.id,
+                    prune_reasons=summary["prune_reasons"],
+                    evaluation=summary,
+                )
+            return summary
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            failure_summary = self._build_failure_summary(
+                plan=plan,
+                artifacts=artifacts,
+                error_text=str(exc),
+                stage_name="tree_search",
+                parent_summary=parent_summary,
+            )
+            artifacts.summary = failure_summary
+            artifacts.status = "failed"
+            state.branch_failures[plan.node_key] = failure_summary
+            state.branch_summaries.append(failure_summary)
+            node = self._record_node(
+                stage="tree_search",
+                node_type="search_candidate",
+                status="failed",
+                input_payload={
+                    "node_key": plan.node_key,
+                    "queries": plan.queries,
+                    "strategy_tags": plan.strategy_tags,
+                    "depth": plan.depth,
+                },
+                output_payload={"error": str(exc)},
+                reasoning="探索ノード単位の失敗を全体失敗に直結させず、別ノード探索を継続する。",
+                duration_ms=duration_ms,
+                parent_node_id=plan.parent_node_id,
+                branch_id=plan.node_key,
+                metrics=failure_summary,
+            )
+            artifacts.journal_node_id = node.id
+            return failure_summary
+
+    def _expand_candidates_from_summary(
+        self,
+        state: ResearchExecutionState,
+        *,
+        plan: SearchNodePlan,
+        summary: dict[str, Any],
+    ) -> list[SearchNodePlan]:
+        operators = [
+            str(item).strip()
+            for item in summary.get("expand_recommendations", []) or []
+            if str(item).strip()
+        ]
+        if not operators:
+            return []
+
+        parent_artifacts = state.node_artifacts.get(plan.node_key)
+        base_queries = plan.queries
+        base_profile = plan.ranking_profile
+        if parent_artifacts and parent_artifacts.rank.get("ranking_profile"):
+            base_profile = dict(parent_artifacts.rank.get("ranking_profile", {}))
+        children: list[SearchNodePlan] = []
+        for operator in operators[: self.tree_children_per_expansion]:
+            children.append(
+                self._make_node_plan(
+                    state,
+                    operator=operator,
+                    base_queries=base_queries,
+                    base_profile=base_profile,
+                    parent_key=plan.node_key,
+                    parent_node_id=parent_artifacts.journal_node_id if parent_artifacts else plan.parent_node_id,
+                    depth=plan.depth + 1,
+                    extra_tags=plan.strategy_tags,
+                    parent_summary=summary,
+                )
+            )
+        return children
 
     def _default_selected_branch_summary(self) -> dict[str, Any]:
         return {
             "branch_id": "none",
+            "node_key": "none",
             "label": "none",
             "status": "failed",
+            "depth": 0,
             "query_count": 0,
             "queries": [],
             "raw_result_count": 0,
@@ -1075,10 +1608,92 @@ class HousingResearchAgentManager:
             "avg_top3_score": 0.0,
             "source_diversity": 0,
             "branch_score": 0.0,
-            "issues": ["評価対象の分岐がありませんでした。"],
+            "frontier_score": 0.0,
+            "issues": ["tree search の評価対象がありませんでした。"],
             "recommendations": ["検索条件とソース設定を見直して再試行する"],
-            "summary": "branch search の結果がありません。",
+            "summary": "tree search の結果がありません。",
+            "strategy_tags": [],
+            "prune_reasons": [],
         }
+
+    def _selected_artifacts(self, state: ResearchExecutionState) -> SearchNodeArtifacts | None:
+        return state.node_artifacts.get(str(state.selected_branch_summary.get("branch_id") or ""))
+
+    def _build_selected_path(self, state: ResearchExecutionState) -> list[dict[str, Any]]:
+        branch_id = str(state.selected_branch_summary.get("branch_id") or "")
+        path: list[dict[str, Any]] = []
+        current_key = branch_id
+        while current_key:
+            artifacts = state.node_artifacts.get(current_key)
+            if artifacts is None:
+                break
+            summary = artifacts.summary or {}
+            path.append(
+                {
+                    "branch_id": current_key,
+                    "label": artifacts.plan.label,
+                    "depth": artifacts.plan.depth,
+                    "strategy_tags": artifacts.plan.strategy_tags,
+                    "branch_score": float(summary.get("branch_score") or 0.0),
+                    "frontier_score": float(summary.get("frontier_score") or artifacts.frontier_score),
+                    "summary": str(summary.get("summary") or ""),
+                }
+            )
+            current_key = artifacts.plan.parent_key or ""
+        path.reverse()
+        return path
+
+    def _build_search_tree_summary(self, state: ResearchExecutionState) -> dict[str, Any]:
+        issue_counter: Counter[str] = Counter()
+        max_depth = 0
+        for summary in state.branch_summaries:
+            issue_class = str(summary.get("top_issue_class") or "").strip()
+            if issue_class and issue_class != "healthy":
+                issue_counter[issue_class] += 1
+            max_depth = max(max_depth, int(summary.get("depth") or 0))
+        selected_path_tags: list[str] = []
+        for item in state.selected_path:
+            for tag in item.get("strategy_tags", []) or []:
+                text = str(tag).strip()
+                if text and text not in selected_path_tags:
+                    selected_path_tags.append(text)
+        return {
+            "executed_node_count": len(
+                [item for item in state.branch_summaries if item.get("status") == "completed"]
+            ),
+            "failed_node_count": len(
+                [item for item in state.branch_summaries if item.get("status") == "failed"]
+            ),
+            "pruned_node_count": len(state.pruned_nodes),
+            "frontier_remaining": len(state.frontier),
+            "termination_reason": state.termination_reason or "frontier_exhausted",
+            "max_depth_reached": max_depth,
+            "selected_branch_id": str(state.selected_branch_summary.get("branch_id") or ""),
+            "selected_path_tags": selected_path_tags,
+            "retry_context_used": bool(state.retry_context),
+            "issue_distribution": {
+                label: count for label, count in issue_counter.most_common(5)
+            },
+        }
+
+    def _best_node_readiness(self, state: ResearchExecutionState) -> str:
+        selected = select_best_branch(state.branch_summaries)
+        if selected is None:
+            return "low"
+        artifacts = state.node_artifacts.get(str(selected.get("branch_id") or ""))
+        ranked_properties = artifacts.rank.get("ranked_properties", []) if artifacts else []
+        result = evaluate_final_result(
+            selected_branch_summary=selected,
+            visible_ranked_properties=ranked_properties,
+            search_summary=(
+                artifacts.retrieve.get("summary", {})
+                | artifacts.enrich.get("summary", {})
+                | artifacts.normalize.get("summary", {})
+                if artifacts
+                else {}
+            ),
+        )
+        return str(result.get("readiness") or "low")
 
     def _handle_plan_finalize(self, state: ResearchExecutionState) -> str | None:
         _, state.plan_result = self._run_stage(
@@ -1097,303 +1712,139 @@ class HousingResearchAgentManager:
         state.query = str(state.plan_result.get("search_query") or "")
         if not state.query and state.seed_queries:
             state.query = state.seed_queries[0]
+        state.retry_context = self._retry_context()
         return None
 
-    def _handle_query_expand(self, state: ResearchExecutionState) -> str | None:
-        state.query_stage_node, query_result = self._run_stage(
-            stage_name="query_expand",
-            progress_percent=18,
-            latest_summary="branch search のための検索分岐を作成しています。",
-            input_payload={"search_query": state.query, "seed_queries": state.seed_queries},
-            reasoning="単発検索ではなく、安全な複数分岐を比較して最良の探索計画を選ぶ。",
-            runner=lambda: self.toolbox.run(
-                "query_expand",
-                self.context,
-                seed_queries=state.seed_queries or ([state.query] if state.query else []),
-            ),
-        )
-        state.branch_plans = [
-            ResearchBranchPlan(
-                branch_id=item["branch_id"],
-                label=item["label"],
-                description=item["description"],
-                queries=list(item["queries"]),
-                ranking_profile=dict(item.get("ranking_profile", {})),
-            )
-            for item in query_result["branches"]
-        ]
-        for branch in state.branch_plans:
-            branch_root = self._record_node(
-                stage="query_expand",
-                node_type="branch_root",
+    def _handle_tree_search(self, state: ResearchExecutionState) -> str | None:
+        def runner() -> dict[str, Any]:
+            retry_context = state.retry_context
+            state.root_node = self._record_node(
+                stage="tree_search",
+                node_type="search_root",
                 status="completed",
-                input_payload={"search_query": state.query, "seed_queries": state.seed_queries},
-                output_payload={
-                    "label": branch.label,
-                    "description": branch.description,
-                    "queries": branch.queries,
-                    "ranking_profile": branch.ranking_profile,
+                input_payload={
+                    "search_query": state.query,
+                    "seed_queries": state.seed_queries,
+                    "retry_context": retry_context,
                 },
-                reasoning="固定ステージの中で安全な探索枝を表すノード。",
-                branch_id=branch.branch_id,
-                parent_node_id=state.query_stage_node.id if state.query_stage_node else None,
+                output_payload={
+                    "summary": "承認済み計画から tree search を開始",
+                    "strategy_memory": self._strategy_memory(),
+                },
+                reasoning="承認済み計画、履歴戦略、再試行文脈を束ねた探索根を作る。",
             )
-            state.branch_roots[branch.branch_id] = branch_root
-            state.branch_parent_ids[branch.branch_id] = branch_root.id or 0
-            self._ensure_branch_artifacts(state, branch)
-        return None
 
-    def _handle_retrieve(self, state: ResearchExecutionState) -> str | None:
-        def runner() -> dict[str, Any]:
-            successful = 0
-            for branch in state.branch_plans:
-                parent_id = state.branch_parent_ids.get(branch.branch_id)
-                try:
-                    started = time.perf_counter()
-                    retrieve_result = self.toolbox.run("retrieve", self.context, branch=branch)
-                    duration_ms = int((time.perf_counter() - started) * 1000)
-                    retrieve_node = self._record_node(
-                        stage="retrieve",
-                        node_type="branch_stage",
-                        status="completed",
-                        input_payload={"queries": branch.queries},
-                        output_payload=retrieve_result,
-                        reasoning="分岐ごとに検索結果を収集し、URL単位で統合する。",
-                        duration_ms=duration_ms,
-                        parent_node_id=parent_id,
-                        branch_id=branch.branch_id,
-                    )
-                    state.branch_parent_ids[branch.branch_id] = retrieve_node.id or 0
-                    self._ensure_branch_artifacts(state, branch).retrieve = retrieve_result
-                    successful += 1
-                except Exception as exc:
-                    self._mark_branch_failed(
-                        state,
-                        branch=branch,
-                        stage_name="retrieve",
-                        parent_node_id=parent_id,
-                        input_payload={"queries": branch.queries},
-                        exc=exc,
-                    )
-            return {
-                "branch_count": len(state.branch_plans),
-                "successful_branch_count": successful,
-                "failed_branch_count": len(state.branch_failures),
-            }
+            for plan in self._initial_node_plans(state):
+                self._register_frontier_node(state, plan=plan)
 
-        self._run_stage(
-            stage_name="retrieve",
-            progress_percent=32,
-            latest_summary="branch search の収集結果を集約しています。",
-            input_payload={"branch_count": len(state.branch_plans)},
-            reasoning="複数分岐の検索を並列設計で比較可能な形に揃える。",
-            runner=runner,
-        )
-        return None
+            while state.frontier and len(state.branch_summaries) < self.tree_max_nodes:
+                selected_keys = self._select_frontier_nodes(state)
+                if not selected_keys:
+                    break
 
-    def _handle_enrich(self, state: ResearchExecutionState) -> str | None:
-        def runner() -> dict[str, Any]:
-            successful = 0
-            for branch in self._active_branches(state):
-                artifacts = self._ensure_branch_artifacts(state, branch)
-                parent_id = state.branch_parent_ids.get(branch.branch_id)
-                try:
-                    started = time.perf_counter()
-                    enrich_result = self.toolbox.run(
-                        "enrich",
-                        self.context,
-                        branch=branch,
-                        raw_results=artifacts.retrieve.get("raw_results", []),
+                should_stop = False
+                for node_key in selected_keys:
+                    if node_key not in state.frontier:
+                        continue
+                    state.frontier.remove(node_key)
+                    plan = state.node_plans[node_key]
+                    self._update_job(
+                        stage_name="tree_search",
+                        progress_percent=24 + min(58, len(state.branch_summaries) * 6),
+                        latest_summary=f"{plan.label} を depth {plan.depth} で検証しています。",
                     )
-                    duration_ms = int((time.perf_counter() - started) * 1000)
-                    enrich_node = self._record_node(
-                        stage="enrich",
-                        node_type="branch_stage",
-                        status="completed",
-                        input_payload={"raw_result_count": len(artifacts.retrieve.get("raw_results", []))},
-                        output_payload=enrich_result,
-                        reasoning="分岐ごとに詳細ページを取得し、構造化情報を増やす。",
-                        duration_ms=duration_ms,
-                        parent_node_id=parent_id,
-                        branch_id=branch.branch_id,
-                    )
-                    state.branch_parent_ids[branch.branch_id] = enrich_node.id or 0
-                    artifacts.enrich = enrich_result
-                    successful += 1
-                except Exception as exc:
-                    self._mark_branch_failed(
-                        state,
-                        branch=branch,
-                        stage_name="enrich",
-                        parent_node_id=parent_id,
-                        input_payload={"raw_result_count": len(artifacts.retrieve.get("raw_results", []))},
-                        exc=exc,
-                    )
-            return {
-                "branch_count": len(state.branch_plans),
-                "successful_branch_count": successful,
-                "failed_branch_count": len(state.branch_failures),
-            }
+                    summary = self._execute_candidate(state, plan=plan)
 
-        self._run_stage(
-            stage_name="enrich",
-            progress_percent=48,
-            latest_summary="詳細ページ補完結果を集約しています。",
-            input_payload={"branch_count": len(state.branch_plans)},
-            reasoning="各分岐の詳細取得状況を揃え、比較可能な情報量に近づける。",
-            runner=runner,
-        )
-        return None
+                    best_summary = select_best_branch(state.branch_summaries)
+                    if best_summary is not None:
+                        state.selected_branch_summary = best_summary
+                        best_key = str(best_summary.get("branch_id") or "")
+                        if best_key and best_key == state.best_node_key:
+                            state.best_node_stability += 1
+                        else:
+                            state.best_node_key = best_key
+                            state.best_node_stability = 1
 
-    def _handle_normalize(self, state: ResearchExecutionState) -> str | None:
-        def runner() -> dict[str, Any]:
-            successful = 0
-            for branch in self._active_branches(state):
-                artifacts = self._ensure_branch_artifacts(state, branch)
-                parent_id = state.branch_parent_ids.get(branch.branch_id)
-                try:
-                    started = time.perf_counter()
-                    normalize_result = self.toolbox.run(
-                        "normalize_dedupe",
-                        self.context,
-                        query=state.query,
-                        raw_results=artifacts.retrieve.get("raw_results", []),
-                        detail_html_map=artifacts.enrich.get("detail_html_map", {}),
-                    )
-                    duration_ms = int((time.perf_counter() - started) * 1000)
-                    normalize_node = self._record_node(
-                        stage="normalize_dedupe",
-                        node_type="branch_stage",
-                        status="completed",
-                        input_payload={
-                            "query": state.query,
-                            "raw_result_count": len(artifacts.retrieve.get("raw_results", [])),
-                        },
-                        output_payload=normalize_result,
-                        reasoning="共通スキーマへ揃えて重複候補を統合する。",
-                        duration_ms=duration_ms,
-                        parent_node_id=parent_id,
-                        branch_id=branch.branch_id,
-                    )
-                    state.branch_parent_ids[branch.branch_id] = normalize_node.id or 0
-                    artifacts.normalize = normalize_result
-                    successful += 1
-                except Exception as exc:
-                    self._mark_branch_failed(
-                        state,
-                        branch=branch,
-                        stage_name="normalize_dedupe",
-                        parent_node_id=parent_id,
-                        input_payload={
-                            "query": state.query,
-                            "raw_result_count": len(artifacts.retrieve.get("raw_results", [])),
-                        },
-                        exc=exc,
-                    )
-            return {
-                "branch_count": len(state.branch_plans),
-                "successful_branch_count": successful,
-                "failed_branch_count": len(state.branch_failures),
-            }
+                    if (
+                        self._best_node_readiness(state) == "high"
+                        and state.best_node_stability >= self.tree_stability_patience
+                    ):
+                        state.termination_reason = "stable_high_readiness"
+                        should_stop = True
+                        break
 
-        self._run_stage(
-            stage_name="normalize_dedupe",
-            progress_percent=66,
-            latest_summary="正規化と重複統合の代表結果を保存しています。",
-            input_payload={"branch_count": len(state.branch_plans)},
-            reasoning="各分岐を共通スキーマに揃え、比較と選択を可能にする。",
-            runner=runner,
-        )
-        return None
+                    if len(state.branch_summaries) >= self.tree_max_nodes:
+                        state.termination_reason = "node_budget_exhausted"
+                        should_stop = True
+                        break
 
-    def _handle_rank(self, state: ResearchExecutionState) -> str | None:
-        def runner() -> dict[str, Any]:
-            for branch in self._active_branches(state):
-                artifacts = self._ensure_branch_artifacts(state, branch)
-                parent_id = state.branch_parent_ids.get(branch.branch_id)
-                try:
-                    started = time.perf_counter()
-                    ranking_result = self.toolbox.run(
-                        "rank",
-                        self.context,
-                        normalized_properties=artifacts.normalize.get("normalized_properties", []),
-                        ranking_profile=branch.ranking_profile,
-                    )
-                    duration_ms = int((time.perf_counter() - started) * 1000)
-                    branch_summary = evaluate_branch(
-                        branch_id=branch.branch_id,
-                        label=branch.label,
-                        queries=branch.queries,
-                        raw_results=artifacts.retrieve.get("raw_results", []),
-                        normalized_properties=artifacts.normalize.get("normalized_properties", []),
-                        ranked_properties=ranking_result.get("ranked_properties", []),
-                        duplicate_groups=artifacts.normalize.get("duplicate_groups", []),
-                        search_summary=(
-                            artifacts.retrieve.get("summary", {})
-                            | artifacts.enrich.get("summary", {})
-                            | artifacts.normalize.get("summary", {})
-                        ),
-                    )
-                    rank_node = self._record_node(
-                        stage="rank",
-                        node_type="branch_stage",
-                        status="completed",
-                        input_payload={
-                            "normalized_property_count": len(
-                                artifacts.normalize.get("normalized_properties", [])
+                    if summary.get("status") == "completed" and not summary.get("prune_reasons"):
+                        for child in self._expand_candidates_from_summary(
+                            state,
+                            plan=plan,
+                            summary=summary,
+                        ):
+                            self._register_frontier_node(
+                                state,
+                                plan=child,
+                                parent_summary=summary,
                             )
-                        },
-                        output_payload=ranking_result,
-                        reasoning="分岐ごとの scoring profile で問い合わせ候補を評価する。",
-                        duration_ms=duration_ms,
-                        parent_node_id=parent_id,
-                        branch_id=branch.branch_id,
-                        metrics=branch_summary,
-                    )
-                    state.branch_parent_ids[branch.branch_id] = rank_node.id or 0
-                    artifacts.rank = ranking_result
-                    state.branch_summaries.append(branch_summary)
-                except Exception as exc:
-                    self._mark_branch_failed(
-                        state,
-                        branch=branch,
-                        stage_name="rank",
-                        parent_node_id=parent_id,
-                        input_payload={
-                            "normalized_property_count": len(
-                                artifacts.normalize.get("normalized_properties", [])
-                            )
-                        },
-                        exc=exc,
-                    )
+
+                if should_stop:
+                    break
+
+            if not state.termination_reason:
+                state.termination_reason = (
+                    "frontier_exhausted" if not state.frontier else "node_budget_exhausted"
+                )
 
             state.selected_branch_summary = (
                 select_best_branch(state.branch_summaries) or self._default_selected_branch_summary()
             )
-            selected_root = self.journal.branch_root(state.selected_branch_summary["branch_id"])
+            state.selected_path = self._build_selected_path(state)
+            selected_artifacts = self._selected_artifacts(state)
             self._record_node(
-                stage="rank",
-                node_type="branch_selection",
+                stage="tree_search",
+                node_type="search_selection",
                 status="completed",
-                input_payload={"branch_scores": state.branch_summaries},
-                output_payload=state.selected_branch_summary,
-                reasoning="deterministic offline evaluator により最良分岐を選択する。",
-                parent_node_id=selected_root.id if selected_root else state.query_stage_node.id if state.query_stage_node else None,
-                branch_id=state.selected_branch_summary["branch_id"],
+                input_payload={"candidate_count": len(state.branch_summaries)},
+                output_payload={
+                    "selected_branch": state.selected_branch_summary,
+                    "selected_path": state.selected_path,
+                },
+                reasoning="tree search の評価結果から最良ノードとその経路を採用する。",
+                parent_node_id=(
+                    selected_artifacts.journal_node_id
+                    if selected_artifacts and selected_artifacts.journal_node_id
+                    else state.root_node.id if state.root_node else None
+                ),
+                branch_id=str(state.selected_branch_summary.get("branch_id") or ""),
                 selected=True,
                 metrics=state.selected_branch_summary,
             )
+            state.search_tree_summary = self._build_search_tree_summary(state)
+            selected_label = str(state.selected_branch_summary.get("label") or "none")
             return {
+                "summary": (
+                    f"探索ノード{len(state.branch_summaries)}件を評価し、"
+                    f"{selected_label} を採用"
+                ),
                 "selected_branch": state.selected_branch_summary,
-                "branch_count": len(state.branch_summaries),
+                "selected_path": state.selected_path,
+                "pruned_node_count": len(state.pruned_nodes),
+                "search_tree_summary": state.search_tree_summary,
             }
 
         self._run_stage(
-            stage_name="rank",
-            progress_percent=82,
-            latest_summary="最良分岐を確定しています。",
-            input_payload={"branch_count": len(state.branch_plans)},
-            reasoning="分岐評価により最良の検索・順位付け結果を確定する。",
+            stage_name="tree_search",
+            progress_percent=22,
+            latest_summary="動的 tree search を初期化しています。",
+            input_payload={
+                "search_query": state.query,
+                "seed_queries": state.seed_queries,
+                "retry_context": state.retry_context,
+            },
+            reasoning="固定分岐ではなく、評価に応じて次ノードを選ぶ動的探索を行う。",
             runner=runner,
         )
         return None
@@ -1421,6 +1872,8 @@ class HousingResearchAgentManager:
             visible_ranked_properties=selected_rank.get("ranked_properties", []),
             search_summary=state.search_summary,
         )
+        state.offline_evaluation["selected_path"] = state.selected_path
+        state.offline_evaluation["search_tree_summary"] = state.search_tree_summary
         state.research_summary = self._build_fallback_research_summary(
             ranked_properties=selected_rank.get("ranked_properties", []),
             normalized_properties=selected_normalize.get("normalized_properties", []),
@@ -1439,6 +1892,8 @@ class HousingResearchAgentManager:
                     selected_branch_summary=state.selected_branch_summary,
                     branch_summaries=state.branch_summaries,
                     failure_summary=state.failure_summary,
+                    selected_path=state.selected_path,
+                    search_tree_summary=state.search_tree_summary,
                 )
                 if llm_summary:
                     state.research_summary = llm_summary
@@ -1452,9 +1907,10 @@ class HousingResearchAgentManager:
                 "query": state.query,
                 "selected_branch_id": state.selected_branch_summary["branch_id"],
                 "branch_summaries": state.branch_summaries,
+                "selected_path": state.selected_path,
             },
             selected_normalize,
-            "安全な branch search の中で最良分岐を選び、その正規化結果を採用",
+            "動的 tree search の最良ノードから正規化結果を採用",
         )
         self.db.add_audit_event(
             self.session_id,
@@ -1462,16 +1918,20 @@ class HousingResearchAgentManager:
             {
                 "selected_branch_id": state.selected_branch_summary["branch_id"],
                 "branch_summaries": state.branch_summaries,
+                "selected_path": state.selected_path,
             },
             selected_rank,
-            "branch evaluator により選ばれた分岐の順位付け結果を採用",
+            "最良探索ノードの順位付け結果を採用",
         )
         self.db.add_audit_event(
             self.session_id,
             "offline_evaluator",
-            {"selected_branch_id": state.selected_branch_summary["branch_id"]},
+            {
+                "selected_branch_id": state.selected_branch_summary["branch_id"],
+                "search_tree_summary": state.search_tree_summary,
+            },
             state.offline_evaluation,
-            "検索品質をオフライン指標で評価し、次の改善候補を提示",
+            "探索品質をオフライン指標で評価し、次の改善候補を提示",
         )
 
         self._run_stage(
@@ -1479,13 +1939,15 @@ class HousingResearchAgentManager:
             progress_percent=94,
             latest_summary="結果をユーザー向けに整理しています。",
             input_payload={"selected_branch_id": state.selected_branch_summary["branch_id"]},
-            reasoning="最良分岐、失敗要因、オフライン評価をまとめて次アクションへ接続する。",
+            reasoning="最良ノード、探索経路、失敗要因をまとめて次アクションへ接続する。",
             runner=lambda: {
                 "selected_branch_id": state.selected_branch_summary["branch_id"],
                 "source_item_count": len(state.source_items),
                 "research_summary": state.research_summary,
                 "offline_evaluation": state.offline_evaluation,
                 "failure_summary": state.failure_summary,
+                "selected_path": state.selected_path,
+                "search_tree_summary": state.search_tree_summary,
             },
         )
         return None
@@ -1512,4 +1974,7 @@ class HousingResearchAgentManager:
             offline_evaluation=state.offline_evaluation,
             failure_summary=state.failure_summary,
             research_summary=state.research_summary,
+            selected_path=state.selected_path,
+            search_tree_summary=state.search_tree_summary,
+            pruned_nodes=state.pruned_nodes,
         )

@@ -59,39 +59,33 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     ]
     assert completed_stage_names == [
         "plan_finalize",
-        "query_expand",
-        "retrieve",
-        "enrich",
-        "normalize_dedupe",
-        "rank",
+        "tree_search",
         "synthesize",
     ]
 
-    query_expand_node = next(
-        node for node in nodes if node["node_type"] == "stage" and node["stage"] == "query_expand"
-    )
-    branch_roots = [node for node in nodes if node["node_type"] == "branch_root"]
-    assert {node["branch_id"] for node in branch_roots} == {"balanced", "strict", "broad"}
-    assert all(node["parent_node_id"] == query_expand_node["id"] for node in branch_roots)
+    search_roots = [node for node in nodes if node["node_type"] == "search_root"]
+    assert len(search_roots) == 1
 
-    branch_stage_nodes = [node for node in nodes if node["node_type"] == "branch_stage"]
-    assert len(branch_stage_nodes) >= 12
-    assert all(node["branch_id"] in {"balanced", "strict", "broad"} for node in branch_stage_nodes)
-    assert all(node["parent_node_id"] is not None for node in branch_stage_nodes)
+    candidate_nodes = [node for node in nodes if node["node_type"] == "search_candidate"]
+    assert len(candidate_nodes) >= 2
+    assert all(node["branch_id"] for node in candidate_nodes)
+    assert all(node["parent_node_id"] is not None for node in candidate_nodes)
 
     branch_selections = [
-        node for node in nodes if node["node_type"] == "branch_selection" and node["selected"]
+        node for node in nodes if node["node_type"] == "search_selection" and node["selected"]
     ]
     assert len(branch_selections) == 1
     selected_node = branch_selections[0]
-    selected_root = next(node for node in branch_roots if node["branch_id"] == selected_node["branch_id"])
-    assert selected_node["parent_node_id"] == selected_root["id"]
+    assert selected_node["parent_node_id"] is not None
     assert selected_node["metrics"]["status"] == "completed"
     assert float(selected_node["metrics"]["branch_score"]) >= 0.0
 
     _, task_memory = db.get_memories(session_id)
     assert task_memory["selected_branch_id"] == selected_node["branch_id"]
-    assert len(task_memory["branch_summaries"]) == 3
+    assert len(task_memory["branch_summaries"]) >= 2
+    assert task_memory["selected_path"]
+    assert task_memory["search_tree_summary"]["executed_node_count"] >= 2
+    assert isinstance(task_memory["pruned_nodes"], list)
     assert task_memory["offline_evaluation"]["readiness"] in {"low", "medium", "high"}
     assert task_memory["failure_summary"]["recommendations"]
     assert task_memory["last_research_summary"]

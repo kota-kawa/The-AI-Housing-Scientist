@@ -36,11 +36,7 @@ from app.stages.risk_check import looks_like_contract_text
 
 RESEARCH_STAGE_ORDER = [
     ("plan_finalize", "計画確認"),
-    ("query_expand", "クエリ展開"),
-    ("retrieve", "情報収集"),
-    ("enrich", "詳細補完"),
-    ("normalize_dedupe", "正規化と重複統合"),
-    ("rank", "推薦順位付け"),
+    ("tree_search", "動的探索"),
     ("synthesize", "結果要約"),
 ]
 
@@ -699,6 +695,7 @@ class HousingOrchestrator:
         user_memory: dict[str, Any],
         query: str,
         adapter: LLMAdapter | None = None,
+        search_outcome: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         profile = self.db.get_profile(profile_id)
         if profile is None:
@@ -710,6 +707,7 @@ class HousingOrchestrator:
             user_memory=user_memory,
             searched_at=utc_now_iso(),
             adapter=adapter,
+            search_outcome=search_outcome,
         )
         merged_user_memory = merge_learned_preferences(
             {key: value for key, value in user_memory.items() if key != "learned_preferences"},
@@ -725,6 +723,7 @@ class HousingOrchestrator:
         property_snapshot: dict[str, Any],
         reaction: str,
         adapter: LLMAdapter | None = None,
+        strategy_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         profile = self.db.get_profile(profile_id)
         if profile is None:
@@ -736,6 +735,7 @@ class HousingOrchestrator:
             property_snapshot=property_snapshot,
             recorded_at=utc_now_iso(),
             adapter=adapter,
+            strategy_context=strategy_context,
         )
         merged_user_memory = merge_learned_preferences(
             {key: value for key, value in profile["user_memory"].items() if key != "learned_preferences"},
@@ -1085,7 +1085,9 @@ class HousingOrchestrator:
                 rows.append(
                     {
                         "branch": label,
+                        "depth": int(item.get("depth") or 0),
                         "score": float(item.get("branch_score") or 0.0),
+                        "frontier_score": float(item.get("frontier_score") or 0.0),
                         "query_count": int(item.get("query_count") or 0),
                         "normalized_count": int(item.get("normalized_count") or 0),
                         "detail_coverage": f"{round(float(item.get('detail_coverage') or 0.0) * 100)}%",
@@ -1099,7 +1101,9 @@ class HousingOrchestrator:
                     content={
                         "columns": [
                             "branch",
+                            "depth",
                             "score",
+                            "frontier_score",
                             "query_count",
                             "normalized_count",
                             "detail_coverage",
@@ -1110,10 +1114,35 @@ class HousingOrchestrator:
                 )
             )
 
+        selected_path = task_memory.get("selected_path") or []
+        if selected_path:
+            path_lines = []
+            for index, item in enumerate(selected_path, start=1):
+                label = str(item.get("label") or item.get("branch_id") or f"node-{index}")
+                tags = [
+                    str(tag).strip()
+                    for tag in item.get("strategy_tags", []) or []
+                    if str(tag).strip()
+                ]
+                extras = [f"depth {int(item.get('depth') or 0)}"]
+                if tags:
+                    extras.append("/".join(tags[:3]))
+                score = float(item.get("branch_score") or 0.0)
+                extras.append(f"score {round(score, 2)}")
+                path_lines.append(f"{index}. {label} ({', '.join(extras)})")
+            blocks.append(
+                UIBlock(
+                    type="text",
+                    title="選択された探索パス",
+                    content={"body": "\n".join(path_lines)},
+                )
+            )
+
         if source_items:
             blocks.append(self._build_sources_block(source_items))
 
         offline_evaluation = task_memory.get("offline_evaluation") or {}
+        search_tree_summary = task_memory.get("search_tree_summary") or {}
         if offline_evaluation:
             blocks.append(
                 UIBlock(
@@ -1125,6 +1154,8 @@ class HousingOrchestrator:
                             f"候補数: {offline_evaluation.get('visible_candidate_count', 0)}\n"
                             f"詳細補完率: {round(float(offline_evaluation.get('detail_coverage', 0.0)) * 100)}%\n"
                             f"構造化率: {round(float(offline_evaluation.get('structured_ratio', 0.0)) * 100)}%\n"
+                            f"探索終了理由: {search_tree_summary.get('termination_reason', 'unknown')}\n"
+                            f"探索ノード数: {search_tree_summary.get('executed_node_count', 0)}\n"
                             f"次の改善候補: {' / '.join(offline_evaluation.get('recommendations', [])[:3])}"
                         )
                     },
@@ -1722,6 +1753,12 @@ class HousingOrchestrator:
             collect_search_results=self._collect_search_results,
             fetch_detail_html=self.catalog.fetch_detail_html,
             collect_source_items=self._collect_research_source_items,
+            tree_max_nodes=self.settings.research_tree_max_nodes,
+            tree_max_depth=self.settings.research_tree_max_depth,
+            tree_batch_size=self.settings.research_tree_batch_size,
+            tree_children_per_expansion=self.settings.research_tree_children_per_expansion,
+            tree_prune_score=self.settings.research_tree_prune_score,
+            tree_stability_patience=self.settings.research_tree_stability_patience,
         )
         execution_result = manager.execute()
 
@@ -1734,6 +1771,13 @@ class HousingOrchestrator:
                 user_memory=updated_user_memory,
                 query=execution_result.query,
                 adapter=research_adapter,
+                search_outcome={
+                    "selected_branch_id": execution_result.selected_branch_id,
+                    "selected_path": execution_result.selected_path,
+                    "search_tree_summary": execution_result.search_tree_summary,
+                    "readiness": execution_result.offline_evaluation.get("readiness", ""),
+                    "top_issues": execution_result.failure_summary.get("top_issues", []),
+                },
             )
 
         task_memory["status"] = "research_completed"
@@ -1759,6 +1803,13 @@ class HousingOrchestrator:
         task_memory["branch_summaries"] = execution_result.branch_summaries
         task_memory["offline_evaluation"] = execution_result.offline_evaluation
         task_memory["failure_summary"] = execution_result.failure_summary
+        task_memory["selected_path"] = execution_result.selected_path
+        task_memory["search_tree_summary"] = execution_result.search_tree_summary
+        task_memory["pruned_nodes"] = execution_result.pruned_nodes
+        task_memory["latest_strategy_episode_id"] = job_id
+        task_memory["strategy_memory_snapshot"] = (
+            updated_user_memory.get("learned_preferences", {}) or {}
+        ).get("strategy_memory", {})
         self.db.set_pending_action(session_id, None)
         self.db.update_memories(session_id, updated_user_memory, task_memory)
 
@@ -2172,14 +2223,24 @@ class HousingOrchestrator:
 
             draft_llm_config = self._normalize_llm_config(task_memory.get("draft_llm_config"))
             research_route = route_config_for(draft_llm_config, "research_default")
+            retry_plan = {
+                **approved_plan,
+                "retry_context": {
+                    "selected_branch_id": str(task_memory.get("selected_branch_id") or ""),
+                    "selected_path": task_memory.get("selected_path") or [],
+                    "search_tree_summary": task_memory.get("search_tree_summary") or {},
+                    "top_issues": (task_memory.get("failure_summary") or {}).get("top_issues", []) or [],
+                },
+            }
             job_id, _ = self.db.create_research_job(
                 session_id=session_id,
                 provider=self._resolve_provider_for_model(str(research_route["model"])),
                 llm_config=draft_llm_config,
-                approved_plan=approved_plan,
+                approved_plan=retry_plan,
             )
             task_memory["status"] = "research_queued"
             task_memory["approved_llm_config"] = draft_llm_config
+            task_memory["approved_research_plan"] = retry_plan
             task_memory["active_research_job_id"] = job_id
             task_memory["last_research_job_id"] = job_id
             self.db.update_memories(session_id, user_memory, task_memory)
@@ -2261,6 +2322,20 @@ class HousingOrchestrator:
                     property_snapshot=property_snapshot,
                     reaction=reaction,
                     adapter=profile_adapter,
+                    strategy_context={
+                        "selected_branch_id": str(task_memory.get("selected_branch_id") or ""),
+                        "selected_path_tags": list(
+                            dict.fromkeys(
+                                str(tag).strip()
+                                for node in task_memory.get("selected_path", []) or []
+                                for tag in node.get("strategy_tags", []) or []
+                                if str(tag).strip()
+                            )
+                        ),
+                        "latest_strategy_episode_id": str(
+                            task_memory.get("latest_strategy_episode_id") or ""
+                        ),
+                    },
                 )
             if profile_user_memory is not None:
                 user_memory = merge_learned_preferences(
