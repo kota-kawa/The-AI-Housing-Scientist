@@ -259,3 +259,60 @@ def test_register_frontier_node_uses_executed_count_for_tree_budget(tmp_path: Pa
     assert child_plan.node_key in state.node_plans
     assert child_plan.node_key in state.node_artifacts
     assert state.frontier == ["existing-3", child_plan.node_key]
+
+
+def test_best_node_readiness_uses_cached_artifact_value(tmp_path: Path, monkeypatch):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+    state = ResearchExecutionState(best_node_key="node-1")
+    plan = SearchNodePlan(
+        node_key="node-1",
+        label="cached",
+        description="cached plan",
+        queries=["query-1"],
+        ranking_profile={},
+        strategy_tags=["cached"],
+        depth=1,
+    )
+    state.node_artifacts[plan.node_key] = SearchNodeArtifacts(
+        plan=plan,
+        query_hash=manager._hash_queries(plan.queries, plan.ranking_profile),
+        frontier_score=88.0,
+        readiness="high",
+        summary={"branch_id": "node-1", "status": "completed"},
+    )
+
+    monkeypatch.setattr(
+        "app.research.agent_manager_tree_mixin.evaluate_final_result",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not recompute readiness")),
+    )
+    monkeypatch.setattr(
+        "app.research.agent_manager_tree_mixin.select_best_branch",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not rescan branches")),
+    )
+
+    assert manager._best_node_readiness(state) == "high"

@@ -24,6 +24,8 @@ class SearchNodeArtifacts:
     plan: SearchNodePlan
     query_hash: str
     frontier_score: float
+    branch_score: float = 0.0
+    readiness: str = "low"
     retrieve: dict[str, Any] = field(default_factory=dict)
     enrich: dict[str, Any] = field(default_factory=dict)
     normalize: dict[str, Any] = field(default_factory=dict)
@@ -52,6 +54,7 @@ class ResearchExecutionState:
     selected_path: list[dict[str, Any]] = field(default_factory=list)
     best_node_key: str = ""
     best_node_stability: int = 0
+    best_node_readiness: str = "low"
     termination_reason: str = ""
     source_items: list[dict[str, Any]] = field(default_factory=list)
     search_summary: dict[str, Any] = field(default_factory=dict)

@@ -184,6 +184,54 @@ def evaluate_branch(
     }
 
 
+def branch_selection_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        float(item.get("branch_score") or 0.0),
+        float(item.get("frontier_score") or 0.0),
+        float(item.get("detail_coverage") or 0.0),
+        float(item.get("avg_top3_score") or 0.0),
+        int(item.get("normalized_count") or 0),
+        item.get("label", ""),
+    )
+
+
+def has_material_improvement_over_parent(
+    item: dict[str, Any],
+    parent: dict[str, Any],
+) -> bool:
+    branch_gain = float(item.get("branch_score") or 0.0) - float(parent.get("branch_score") or 0.0)
+    detail_gain = float(item.get("detail_coverage") or 0.0) - float(parent.get("detail_coverage") or 0.0)
+    avg_top3_gain = float(item.get("avg_top3_score") or 0.0) - float(
+        parent.get("avg_top3_score") or 0.0
+    )
+    normalized_gain = int(item.get("normalized_count") or 0) - int(parent.get("normalized_count") or 0)
+    if branch_gain >= REPEATED_ISSUE_HARD_BRANCH_SCORE_IMPROVEMENT:
+        return True
+    if branch_gain < REPEATED_ISSUE_MIN_BRANCH_SCORE_IMPROVEMENT:
+        return False
+    return (
+        detail_gain >= REPEATED_ISSUE_MIN_DETAIL_COVERAGE_IMPROVEMENT
+        or avg_top3_gain >= REPEATED_ISSUE_MIN_AVG_TOP3_IMPROVEMENT
+        or normalized_gain >= REPEATED_ISSUE_MIN_NORMALIZED_COUNT_IMPROVEMENT
+    )
+
+
+def is_branch_selection_eligible(
+    item: dict[str, Any],
+    *,
+    parent_summary: dict[str, Any] | None = None,
+) -> bool:
+    issue_class = str(item.get("top_issue_class") or "").strip()
+    if not issue_class or issue_class == "healthy":
+        return True
+    parent_key = str(item.get("parent_key") or "").strip()
+    if not parent_key or parent_summary is None:
+        return True
+    if issue_class != str(parent_summary.get("top_issue_class") or "").strip():
+        return True
+    return has_material_improvement_over_parent(item, parent_summary)
+
+
 def select_best_branch(branch_summaries: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not branch_summaries:
         return None
@@ -191,73 +239,25 @@ def select_best_branch(branch_summaries: list[dict[str, Any]]) -> dict[str, Any]
     if not completed:
         return None
 
-    def _summary_lookup() -> dict[str, dict[str, Any]]:
-        lookup: dict[str, dict[str, Any]] = {}
-        for item in completed:
-            branch_id = str(item.get("branch_id") or "").strip()
-            node_key = str(item.get("node_key") or "").strip()
-            if branch_id:
-                lookup[branch_id] = item
-            if node_key:
-                lookup[node_key] = item
-        return lookup
+    lookup: dict[str, dict[str, Any]] = {}
+    for item in completed:
+        branch_id = str(item.get("branch_id") or "").strip()
+        node_key = str(item.get("node_key") or "").strip()
+        if branch_id:
+            lookup[branch_id] = item
+        if node_key:
+            lookup[node_key] = item
 
-    def _sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
-        return (
-            float(item.get("branch_score") or 0.0),
-            float(item.get("frontier_score") or 0.0),
-            float(item.get("detail_coverage") or 0.0),
-            float(item.get("avg_top3_score") or 0.0),
-            int(item.get("normalized_count") or 0),
-            item.get("label", ""),
+    eligible = [
+        item
+        for item in completed
+        if is_branch_selection_eligible(
+            item,
+            parent_summary=lookup.get(str(item.get("parent_key") or "").strip()),
         )
-
-    def _has_material_improvement_over_parent(
-        item: dict[str, Any],
-        parent: dict[str, Any],
-    ) -> bool:
-        branch_gain = float(item.get("branch_score") or 0.0) - float(parent.get("branch_score") or 0.0)
-        detail_gain = float(item.get("detail_coverage") or 0.0) - float(
-            parent.get("detail_coverage") or 0.0
-        )
-        avg_top3_gain = float(item.get("avg_top3_score") or 0.0) - float(
-            parent.get("avg_top3_score") or 0.0
-        )
-        normalized_gain = int(item.get("normalized_count") or 0) - int(
-            parent.get("normalized_count") or 0
-        )
-        if branch_gain >= REPEATED_ISSUE_HARD_BRANCH_SCORE_IMPROVEMENT:
-            return True
-        if branch_gain < REPEATED_ISSUE_MIN_BRANCH_SCORE_IMPROVEMENT:
-            return False
-        return (
-            detail_gain >= REPEATED_ISSUE_MIN_DETAIL_COVERAGE_IMPROVEMENT
-            or avg_top3_gain >= REPEATED_ISSUE_MIN_AVG_TOP3_IMPROVEMENT
-            or normalized_gain >= REPEATED_ISSUE_MIN_NORMALIZED_COUNT_IMPROVEMENT
-        )
-
-    def _is_selection_eligible(
-        item: dict[str, Any],
-        *,
-        lookup: dict[str, dict[str, Any]],
-    ) -> bool:
-        issue_class = str(item.get("top_issue_class") or "").strip()
-        if not issue_class or issue_class == "healthy":
-            return True
-        parent_key = str(item.get("parent_key") or "").strip()
-        if not parent_key:
-            return True
-        parent = lookup.get(parent_key)
-        if parent is None:
-            return True
-        if issue_class != str(parent.get("top_issue_class") or "").strip():
-            return True
-        return _has_material_improvement_over_parent(item, parent)
-
-    lookup = _summary_lookup()
-    eligible = [item for item in completed if _is_selection_eligible(item, lookup=lookup)]
+    ]
     candidates = eligible or completed
-    return max(candidates, key=_sort_key)
+    return max(candidates, key=branch_selection_sort_key)
 
 
 def summarize_branch_failures(branch_summaries: list[dict[str, Any]]) -> dict[str, Any]:

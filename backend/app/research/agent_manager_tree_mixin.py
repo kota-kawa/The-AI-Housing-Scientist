@@ -6,7 +6,13 @@ import time
 from collections import Counter
 from typing import Any
 
-from app.research.offline_eval import evaluate_branch, evaluate_final_result, select_best_branch
+from app.research.offline_eval import (
+    branch_selection_sort_key,
+    evaluate_branch,
+    evaluate_final_result,
+    is_branch_selection_eligible,
+    select_best_branch,
+)
 
 from .agent_manager_types import ResearchExecutionState, SearchNodeArtifacts, SearchNodePlan
 
@@ -743,6 +749,11 @@ class AgentManagerTreeMixin:
             artifacts.summary = summary
             artifacts.frontier_score = float(summary.get("frontier_score") or artifacts.frontier_score)
             artifacts.status = "completed"
+            self._cache_candidate_readiness(
+                artifacts=artifacts,
+                summary=summary,
+                search_summary=search_summary,
+            )
             duration_ms = int((time.perf_counter() - started) * 1000)
             self._update_recorded_node(
                 artifacts.journal_node_id,
@@ -782,6 +793,11 @@ class AgentManagerTreeMixin:
             )
             artifacts.summary = failure_summary
             artifacts.status = "failed"
+            self._cache_candidate_readiness(
+                artifacts=artifacts,
+                summary=failure_summary,
+                search_summary={},
+            )
             state.branch_failures[plan.node_key] = failure_summary
             state.branch_summaries.append(failure_summary)
             self._update_recorded_node(
@@ -925,24 +941,73 @@ class AgentManagerTreeMixin:
             },
         }
 
-    def _best_node_readiness(self, state: ResearchExecutionState) -> str:
-        selected = select_best_branch(state.branch_summaries)
-        if selected is None:
-            return "low"
-        artifacts = state.node_artifacts.get(str(selected.get("branch_id") or ""))
-        ranked_properties = artifacts.rank.get("ranked_properties", []) if artifacts else []
+    def _cache_candidate_readiness(
+        self,
+        *,
+        artifacts: SearchNodeArtifacts,
+        summary: dict[str, Any],
+        search_summary: dict[str, Any],
+    ) -> None:
+        artifacts.branch_score = float(summary.get("branch_score") or 0.0)
+        if summary.get("status") != "completed":
+            artifacts.readiness = "low"
+            summary["readiness"] = artifacts.readiness
+            return
         result = evaluate_final_result(
-            selected_branch_summary=selected,
-            visible_ranked_properties=ranked_properties,
-            search_summary=(
-                artifacts.retrieve.get("summary", {})
-                | artifacts.enrich.get("summary", {})
-                | artifacts.normalize.get("summary", {})
-                if artifacts
-                else {}
-            ),
+            selected_branch_summary=summary,
+            visible_ranked_properties=artifacts.rank.get("ranked_properties", []),
+            search_summary=search_summary,
         )
-        return str(result.get("readiness") or "low")
+        artifacts.readiness = str(result.get("readiness") or "low")
+        summary["readiness"] = artifacts.readiness
+
+    def _refresh_best_node(self, state: ResearchExecutionState, *, candidate_key: str) -> None:
+        previous_best_key = state.best_node_key
+        best_artifacts = state.node_artifacts.get(previous_best_key) if previous_best_key else None
+        if best_artifacts is not None and best_artifacts.summary.get("status") != "completed":
+            best_artifacts = None
+
+        candidate_artifacts = state.node_artifacts.get(candidate_key)
+        candidate_summary = candidate_artifacts.summary if candidate_artifacts else {}
+        if candidate_artifacts is not None and candidate_summary.get("status") == "completed":
+            parent_key = str(candidate_summary.get("parent_key") or "").strip()
+            parent_artifacts = state.node_artifacts.get(parent_key) if parent_key else None
+            parent_summary = (
+                parent_artifacts.summary
+                if parent_artifacts is not None and parent_artifacts.summary.get("status") == "completed"
+                else None
+            )
+            if best_artifacts is None:
+                best_artifacts = candidate_artifacts
+            elif is_branch_selection_eligible(candidate_summary, parent_summary=parent_summary) and (
+                branch_selection_sort_key(candidate_summary)
+                > branch_selection_sort_key(best_artifacts.summary)
+            ):
+                best_artifacts = candidate_artifacts
+
+        if best_artifacts is None:
+            state.selected_branch_summary = {}
+            state.best_node_key = ""
+            state.best_node_stability = 0
+            state.best_node_readiness = "low"
+            return
+
+        best_key = best_artifacts.plan.node_key
+        state.selected_branch_summary = best_artifacts.summary
+        state.best_node_readiness = best_artifacts.readiness
+        if best_key == previous_best_key:
+            state.best_node_stability += 1
+        else:
+            state.best_node_key = best_key
+            state.best_node_stability = 1
+
+    def _best_node_readiness(self, state: ResearchExecutionState) -> str:
+        if not state.best_node_key:
+            return "low"
+        artifacts = state.node_artifacts.get(state.best_node_key)
+        if artifacts is None:
+            return "low"
+        return artifacts.readiness
 
     def _handle_plan_finalize(self, state: ResearchExecutionState) -> str | None:
         _, state.plan_result = self._run_stage(
@@ -1003,16 +1068,7 @@ class AgentManagerTreeMixin:
                         latest_summary=f"{plan.label} を depth {plan.depth} で検証しています。",
                     )
                     summary = self._execute_candidate(state, plan=plan)
-
-                    best_summary = select_best_branch(state.branch_summaries)
-                    if best_summary is not None:
-                        state.selected_branch_summary = best_summary
-                        best_key = str(best_summary.get("branch_id") or "")
-                        if best_key and best_key == state.best_node_key:
-                            state.best_node_stability += 1
-                        else:
-                            state.best_node_key = best_key
-                            state.best_node_stability = 1
+                    self._refresh_best_node(state, candidate_key=node_key)
 
                     if (
                         self._best_node_readiness(state) == "high"
@@ -1048,7 +1104,9 @@ class AgentManagerTreeMixin:
                 )
 
             state.selected_branch_summary = (
-                select_best_branch(state.branch_summaries) or self._default_selected_branch_summary()
+                state.selected_branch_summary
+                or select_best_branch(state.branch_summaries)
+                or self._default_selected_branch_summary()
             )
             state.selected_path = self._build_selected_path(state)
             selected_artifacts = self._selected_artifacts(state)
