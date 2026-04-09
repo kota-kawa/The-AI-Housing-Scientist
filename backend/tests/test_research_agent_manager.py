@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 from app.config import Settings
@@ -458,6 +459,226 @@ def test_research_tools_reuse_query_and_detail_caches(tmp_path: Path):
     assert retrieve_b["summary"]["cache_hit_count"] == 1
     assert detail_calls == ["https://example.com/q1", "https://example.com/q2"]
     assert enrich_b["summary"]["cache_hit_count"] == 1
+
+
+def test_expand_branch_batch_runs_candidates_in_parallel(tmp_path: Path, monkeypatch):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+        tree_batch_size=3,
+    )
+    state = ResearchExecutionState()
+    plans = [
+        SearchNodePlan(
+            node_key=f"node-{index}",
+            label=f"node-{index}",
+            description="parallel candidate",
+            queries=[f"query-{index}"],
+            ranking_profile={},
+            strategy_tags=[f"tag-{index}"],
+            depth=1,
+        )
+        for index in range(3)
+    ]
+    for plan in plans:
+        state.node_artifacts[plan.node_key] = SearchNodeArtifacts(
+            plan=plan,
+            query_hash=manager._hash_queries(plan.queries, plan.ranking_profile),
+            frontier_score=80.0,
+        )
+
+    started: list[str] = []
+    release = threading.Event()
+    lock = threading.Lock()
+    active_workers = 0
+    max_active_workers = 0
+
+    def fake_execute_candidate(state, *, plan):
+        nonlocal active_workers, max_active_workers
+        with lock:
+            started.append(plan.node_key)
+            active_workers += 1
+            max_active_workers = max(max_active_workers, active_workers)
+            if len(started) == len(plans):
+                release.set()
+        try:
+            assert release.wait(timeout=1.0)
+            return {
+                "branch_id": plan.node_key,
+                "node_key": plan.node_key,
+                "label": plan.label,
+                "status": "completed",
+                "depth": plan.depth,
+                "detail_coverage": 0.8,
+                "avg_top3_score": 88.0,
+                "normalized_count": 2,
+                "branch_score": 88.0,
+                "frontier_score": 88.0,
+                "top_issue_class": "healthy",
+                "prune_reasons": [],
+                "parent_key": plan.parent_key or "",
+                "strategy_tags": plan.strategy_tags,
+            }
+        finally:
+            with lock:
+                active_workers -= 1
+
+    monkeypatch.setattr(manager, "_execute_candidate", fake_execute_candidate)
+
+    summaries = manager._expand_branch_batch(state, plans=plans)
+
+    assert [summary["branch_id"] for summary in summaries] == [plan.node_key for plan in plans]
+    assert [summary["branch_id"] for summary in state.branch_summaries] == [plan.node_key for plan in plans]
+    assert max_active_workers >= 2
+
+
+def test_parallel_research_tools_share_singleflight_cache(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    search_calls: list[str] = []
+    detail_calls: list[str] = []
+    search_started = threading.Event()
+    release_search = threading.Event()
+    detail_started = threading.Event()
+    release_detail = threading.Event()
+
+    def collect_search_results(**kwargs):
+        query = kwargs["query"]
+        search_calls.append(query)
+        search_started.set()
+        assert release_search.wait(timeout=1.0)
+        return (
+            [{"url": "https://example.com/shared", "source_name": "catalog"}],
+            {
+                "catalog_result_count": 1,
+                "brave_result_count": 0,
+                "brave_error": "",
+            },
+        )
+
+    def fetch_detail_html(url: str) -> str | None:
+        detail_calls.append(url)
+        detail_started.set()
+        assert release_detail.wait(timeout=1.0)
+        return f"<html>{url}</html>"
+
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=collect_search_results,
+        fetch_detail_html=fetch_detail_html,
+        collect_source_items=lambda **kwargs: [],
+        tree_batch_size=2,
+    )
+    plan_a = SearchNodePlan(
+        node_key="parallel-a",
+        label="parallel-a",
+        description="parallel-a",
+        queries=["shared-query"],
+        ranking_profile={},
+        strategy_tags=["parallel"],
+        depth=1,
+    )
+    plan_b = SearchNodePlan(
+        node_key="parallel-b",
+        label="parallel-b",
+        description="parallel-b",
+        queries=["shared-query"],
+        ranking_profile={},
+        strategy_tags=["parallel"],
+        depth=1,
+    )
+
+    retrieve_results: dict[str, dict] = {}
+
+    def run_retrieve(slot: str, plan: SearchNodePlan) -> None:
+        retrieve_results[slot] = manager._tool_retrieve(context=manager.context, branch=plan)
+
+    retrieve_a = threading.Thread(target=run_retrieve, args=("a", plan_a))
+    retrieve_b = threading.Thread(target=run_retrieve, args=("b", plan_b))
+    retrieve_a.start()
+    assert search_started.wait(timeout=1.0)
+    retrieve_b.start()
+    release_search.set()
+    retrieve_a.join(timeout=1.0)
+    retrieve_b.join(timeout=1.0)
+
+    assert search_calls == ["shared-query"]
+    assert retrieve_results["a"]["raw_results"] == retrieve_results["b"]["raw_results"]
+    assert (
+        retrieve_results["a"]["summary"]["cache_hit_count"]
+        + retrieve_results["b"]["summary"]["cache_hit_count"]
+    ) == 1
+
+    enrich_results: dict[str, dict] = {}
+
+    def run_enrich(slot: str, plan: SearchNodePlan, raw_results: list[dict]) -> None:
+        enrich_results[slot] = manager._tool_enrich(
+            context=manager.context,
+            branch=plan,
+            raw_results=raw_results,
+        )
+
+    enrich_a = threading.Thread(
+        target=run_enrich,
+        args=("a", plan_a, retrieve_results["a"]["raw_results"]),
+    )
+    enrich_b = threading.Thread(
+        target=run_enrich,
+        args=("b", plan_b, retrieve_results["b"]["raw_results"]),
+    )
+    enrich_a.start()
+    assert detail_started.wait(timeout=1.0)
+    enrich_b.start()
+    release_detail.set()
+    enrich_a.join(timeout=1.0)
+    enrich_b.join(timeout=1.0)
+
+    assert detail_calls == ["https://example.com/shared"]
+    assert enrich_results["a"]["detail_html_map"] == enrich_results["b"]["detail_html_map"]
+    assert (
+        enrich_results["a"]["summary"]["cache_hit_count"]
+        + enrich_results["b"]["summary"]["cache_hit_count"]
+    ) == 1
 
 
 def test_select_frontier_nodes_balances_best_branch_and_alternative(tmp_path: Path):

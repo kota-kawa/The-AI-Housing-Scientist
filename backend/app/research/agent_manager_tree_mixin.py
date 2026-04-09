@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import Any
 
 from app.research.journal import ResearchIntent
@@ -653,6 +656,12 @@ class AgentManagerTreeMixin:
         state.frontier.append(plan.node_key)
 
     def _select_frontier_nodes(self, state: ResearchExecutionState) -> list[str]:
+        batch_limit = min(
+            self.tree_batch_size,
+            max(0, self.tree_max_nodes - self._executed_tree_node_count(state)),
+        )
+        if batch_limit <= 0:
+            return []
         queued = [
             state.node_artifacts[key]
             for key in state.frontier
@@ -666,8 +675,8 @@ class AgentManagerTreeMixin:
             ),
             reverse=True,
         )
-        if self.tree_batch_size <= 1 or not queued:
-            return [artifact.plan.node_key for artifact in queued[: self.tree_batch_size]]
+        if batch_limit <= 1 or not queued:
+            return [artifact.plan.node_key for artifact in queued[:batch_limit]]
 
         selected: list[str] = []
         selected_keys: set[str] = set()
@@ -701,12 +710,12 @@ class AgentManagerTreeMixin:
                 ),
                 None,
             )
-            if explore_candidate is not None and len(selected) < self.tree_batch_size:
+            if explore_candidate is not None and len(selected) < batch_limit:
                 selected.append(explore_candidate.plan.node_key)
                 selected_keys.add(explore_candidate.plan.node_key)
 
         for artifact in queued:
-            if len(selected) >= self.tree_batch_size:
+            if len(selected) >= batch_limit:
                 break
             if artifact.plan.node_key in selected_keys:
                 continue
@@ -996,15 +1005,6 @@ class AgentManagerTreeMixin:
                 is_failed=False,
                 debug_depth=plan.debug_depth,
             )
-            state.branch_summaries.append(summary)
-            if summary["prune_reasons"]:
-                self._record_pruned_node(
-                    state,
-                    plan=plan,
-                    parent_node_id=artifacts.journal_node_id,
-                    prune_reasons=summary["prune_reasons"],
-                    evaluation=summary,
-                )
             return summary
         except Exception as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -1022,8 +1022,6 @@ class AgentManagerTreeMixin:
                 summary=failure_summary,
                 search_summary={},
             )
-            state.branch_failures[plan.node_key] = failure_summary
-            state.branch_summaries.append(failure_summary)
             self._update_recorded_node(
                 artifacts.journal_node_id,
                 status="failed",
@@ -1042,6 +1040,85 @@ class AgentManagerTreeMixin:
                 debug_depth=plan.debug_depth,
             )
             return failure_summary
+
+    async def _execute_candidate_batch_async(
+        self,
+        state: ResearchExecutionState,
+        *,
+        plans: list[SearchNodePlan],
+    ) -> list[dict[str, Any]]:
+        loop = asyncio.get_running_loop()
+        worker_count = max(1, min(5, self.tree_batch_size, len(plans)))
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="tree-branch") as executor:
+            tasks = [
+                loop.run_in_executor(
+                    executor,
+                    partial(self._execute_candidate, state, plan=plan),
+                )
+                for plan in plans
+            ]
+            return await asyncio.gather(*tasks)
+
+    def _upsert_branch_summary(
+        self,
+        state: ResearchExecutionState,
+        *,
+        plan: SearchNodePlan,
+        summary: dict[str, Any],
+    ) -> None:
+        branch_id = plan.node_key
+        existing_index = next(
+            (
+                index
+                for index, item in enumerate(state.branch_summaries)
+                if str(item.get("branch_id") or "").strip() == branch_id
+            ),
+            None,
+        )
+        if existing_index is None:
+            state.branch_summaries.append(summary)
+        else:
+            state.branch_summaries[existing_index] = summary
+
+        if summary.get("status") == "failed":
+            state.branch_failures[branch_id] = summary
+        else:
+            state.branch_failures.pop(branch_id, None)
+
+        if summary.get("prune_reasons") and not any(
+            str(item.get("node_key") or "").strip() == branch_id for item in state.pruned_nodes
+        ):
+            artifacts = state.node_artifacts.get(branch_id)
+            self._record_pruned_node(
+                state,
+                plan=plan,
+                parent_node_id=artifacts.journal_node_id if artifacts else plan.parent_node_id,
+                prune_reasons=list(summary.get("prune_reasons", []) or []),
+                evaluation=summary,
+            )
+
+    def _expand_branch_batch(
+        self,
+        state: ResearchExecutionState,
+        *,
+        plans: list[SearchNodePlan],
+    ) -> list[dict[str, Any]]:
+        if not plans:
+            return []
+
+        if len(plans) == 1 or self.tree_batch_size <= 1:
+            summaries = [self._execute_candidate(state, plan=plans[0])]
+        else:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                summaries = asyncio.run(self._execute_candidate_batch_async(state, plans=plans))
+            else:
+                summaries = [self._execute_candidate(state, plan=plan) for plan in plans]
+
+        for plan, summary in zip(plans, summaries):
+            self._upsert_branch_summary(state, plan=plan, summary=summary)
+        return summaries
 
     def _expand_candidates_from_summary(
         self,
@@ -1506,40 +1583,54 @@ class AgentManagerTreeMixin:
                 if not selected_keys:
                     break
 
-                should_stop = False
+                selected_plans: list[SearchNodePlan] = []
                 for node_key in selected_keys:
                     if node_key not in state.frontier:
                         continue
                     state.frontier.remove(node_key)
-                    plan = state.node_plans[node_key]
-                    self._update_job(
-                        stage_name="tree_search",
-                        progress_percent=24 + min(58, len(state.branch_summaries) * 6),
-                        latest_summary=f"{plan.label} を depth {plan.depth} で検証しています。",
+                    selected_plans.append(state.node_plans[node_key])
+
+                if not selected_plans:
+                    continue
+
+                if len(selected_plans) == 1:
+                    latest_summary = (
+                        f"{selected_plans[0].label} を depth {selected_plans[0].depth} で検証しています。"
                     )
-                    summary = self._execute_candidate(state, plan=plan)
+                else:
+                    latest_summary = f"{len(selected_plans)}件の探索ノードを並列検証しています。"
+                self._update_job(
+                    stage_name="tree_search",
+                    progress_percent=24 + min(58, len(state.branch_summaries) * 6),
+                    latest_summary=latest_summary,
+                )
+
+                should_stop = False
+                summaries = self._expand_branch_batch(state, plans=selected_plans)
+                for plan, summary in zip(selected_plans, summaries):
+                    node_key = plan.node_key
                     self._refresh_best_node(state, candidate_key=node_key)
+
+                    if should_stop:
+                        continue
 
                     if self._can_stop_for_stable_best(state):
                         state.termination_reason = "stable_high_readiness"
                         should_stop = True
-                        break
-
-                    if self._tree_execution_budget_exhausted(state):
+                    elif self._tree_execution_budget_exhausted(state):
                         state.termination_reason = "node_budget_exhausted"
                         should_stop = True
-                        break
-
-                    for child in self._next_candidates_after_summary(
-                        state,
-                        plan=plan,
-                        summary=summary,
-                    ):
-                        self._register_frontier_node(
+                    else:
+                        for child in self._next_candidates_after_summary(
                             state,
-                            plan=child,
-                            parent_summary=summary,
-                        )
+                            plan=plan,
+                            summary=summary,
+                        ):
+                            self._register_frontier_node(
+                                state,
+                                plan=child,
+                                parent_summary=summary,
+                            )
 
                 if should_stop:
                     break

@@ -1,11 +1,68 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
 from app.llm.base import LLMAdapter
+
+
+@dataclass
+class _TokenBucket:
+    rate_per_second: float
+    capacity: int
+    tokens: float = field(init=False)
+    updated_at: float = field(init=False)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def __post_init__(self) -> None:
+        self.rate_per_second = max(0.1, float(self.rate_per_second))
+        self.capacity = max(1, int(self.capacity))
+        self.tokens = float(self.capacity)
+        self.updated_at = time.monotonic()
+
+    def acquire(self) -> None:
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                elapsed = max(0.0, now - self.updated_at)
+                if elapsed:
+                    self.tokens = min(
+                        float(self.capacity),
+                        self.tokens + (elapsed * self.rate_per_second),
+                    )
+                    self.updated_at = now
+                if self.tokens >= 1.0:
+                    self.tokens -= 1.0
+                    return
+                wait_seconds = max(0.01, (1.0 - self.tokens) / self.rate_per_second)
+            time.sleep(wait_seconds)
+
+
+_BRAVE_BUCKETS: dict[tuple[str, float, int], _TokenBucket] = {}
+_BRAVE_BUCKETS_LOCK = threading.Lock()
+
+
+def _get_brave_token_bucket(
+    *,
+    api_key: str,
+    rate_per_second: float,
+    burst_size: int,
+) -> _TokenBucket:
+    bucket_key = (api_key.strip(), float(rate_per_second), int(burst_size))
+    with _BRAVE_BUCKETS_LOCK:
+        bucket = _BRAVE_BUCKETS.get(bucket_key)
+        if bucket is None:
+            bucket = _TokenBucket(
+                rate_per_second=rate_per_second,
+                capacity=burst_size,
+            )
+            _BRAVE_BUCKETS[bucket_key] = bucket
+        return bucket
 
 
 def _rewrite_query_for_brave(adapter: LLMAdapter, query: str) -> str:
@@ -96,9 +153,18 @@ def _summarize_result_snippets(adapter: LLMAdapter, results: list[dict[str, Any]
 
 
 class BraveSearchClient:
-    def __init__(self, api_key: str, timeout_seconds: int = 20):
+    def __init__(
+        self,
+        api_key: str,
+        timeout_seconds: int = 20,
+        *,
+        rate_per_second: float = 2.0,
+        burst_size: int = 3,
+    ):
         self.api_key = api_key.strip()
         self.timeout_seconds = timeout_seconds
+        self.rate_per_second = max(0.1, float(rate_per_second))
+        self.burst_size = max(1, int(burst_size))
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
 
     def search(
@@ -122,6 +188,12 @@ class BraveSearchClient:
             "count": max(1, min(count, 20)),
             "safesearch": "moderate",
         }
+
+        _get_brave_token_bucket(
+            api_key=self.api_key,
+            rate_per_second=self.rate_per_second,
+            burst_size=self.burst_size,
+        ).acquire()
 
         with httpx.Client(timeout=self.timeout_seconds) as client:
             response = client.get(self.base_url, headers=headers, params=params)

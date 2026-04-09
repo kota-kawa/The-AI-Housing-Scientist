@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Callable
 
@@ -14,6 +15,52 @@ from .agent_manager_types import SearchNodePlan
 
 
 class AgentManagerToolingMixin:
+    def _cached_singleflight_load(
+        self,
+        *,
+        cache: dict[str, Any],
+        inflight: dict[str, dict[str, Any]],
+        key: str,
+        loader: Callable[[], Any],
+    ) -> tuple[Any, bool]:
+        with self._cache_lock:
+            if key in cache:
+                return self._cache_copy(cache[key]), True
+            entry = inflight.get(key)
+            if entry is None:
+                entry = {
+                    "event": threading.Event(),
+                    "error": None,
+                    "value": None,
+                }
+                inflight[key] = entry
+                owner = True
+            else:
+                owner = False
+
+        if owner:
+            try:
+                value = loader()
+            except Exception as exc:
+                with self._cache_lock:
+                    inflight.pop(key, None)
+                    entry["error"] = exc
+                    entry["event"].set()
+                raise
+
+            cached_value = self._cache_copy(value)
+            with self._cache_lock:
+                cache[key] = cached_value
+                inflight.pop(key, None)
+                entry["value"] = self._cache_copy(cached_value)
+                entry["event"].set()
+            return self._cache_copy(cached_value), False
+
+        entry["event"].wait()
+        if entry["error"] is not None:
+            raise entry["error"]
+        return self._cache_copy(entry["value"]), True
+
     def _build_state_machine(self) -> ResearchStateMachine:
         return ResearchStateMachine(
             [
@@ -224,12 +271,15 @@ class AgentManagerToolingMixin:
         )
 
     def _update_job(self, *, stage_name: str, progress_percent: int, latest_summary: str) -> None:
-        self.db.update_research_job(
-            self.job_id,
-            current_stage=stage_name,
-            progress_percent=progress_percent,
-            latest_summary=latest_summary,
-        )
+        with self._job_lock:
+            resolved_progress = max(self._job_progress_percent, progress_percent)
+            self._job_progress_percent = resolved_progress
+            self.db.update_research_job(
+                self.job_id,
+                current_stage=stage_name,
+                progress_percent=resolved_progress,
+                latest_summary=latest_summary,
+            )
 
     def _record_node(
         self,
@@ -250,42 +300,43 @@ class AgentManagerToolingMixin:
         metrics: dict[str, Any] | None = None,
     ) -> ResearchNode:
         resolved_is_failed = status == "failed" if is_failed is None else is_failed
-        row_id = self.db.add_research_journal_node(
-            job_id=self.job_id,
-            stage=stage,
-            node_type=node_type,
-            status=status,
-            input_payload=input_payload,
-            output_payload=output_payload,
-            reasoning=reasoning,
-            duration_ms=duration_ms,
-            parent_node_id=parent_node_id,
-            branch_id=branch_id,
-            selected=selected,
-            intent=intent,
-            is_failed=resolved_is_failed,
-            debug_depth=debug_depth,
-            metrics_payload=metrics,
-        )
-        node = ResearchNode(
-            id=row_id,
-            stage=stage,
-            node_type=node_type,
-            status=status,
-            input_payload=input_payload,
-            output_payload=output_payload,
-            reasoning=reasoning,
-            intent=intent,
-            is_failed=resolved_is_failed,
-            debug_depth=debug_depth,
-            duration_ms=duration_ms,
-            parent_node_id=parent_node_id,
-            branch_id=branch_id,
-            selected=selected,
-            metrics=metrics or {},
-        )
-        self.journal.append(node)
-        return node
+        with self._journal_lock:
+            row_id = self.db.add_research_journal_node(
+                job_id=self.job_id,
+                stage=stage,
+                node_type=node_type,
+                status=status,
+                input_payload=input_payload,
+                output_payload=output_payload,
+                reasoning=reasoning,
+                duration_ms=duration_ms,
+                parent_node_id=parent_node_id,
+                branch_id=branch_id,
+                selected=selected,
+                intent=intent,
+                is_failed=resolved_is_failed,
+                debug_depth=debug_depth,
+                metrics_payload=metrics,
+            )
+            node = ResearchNode(
+                id=row_id,
+                stage=stage,
+                node_type=node_type,
+                status=status,
+                input_payload=input_payload,
+                output_payload=output_payload,
+                reasoning=reasoning,
+                intent=intent,
+                is_failed=resolved_is_failed,
+                debug_depth=debug_depth,
+                duration_ms=duration_ms,
+                parent_node_id=parent_node_id,
+                branch_id=branch_id,
+                selected=selected,
+                metrics=metrics or {},
+            )
+            self.journal.append(node)
+            return node
 
     def _update_recorded_node(
         self,
@@ -307,49 +358,50 @@ class AgentManagerToolingMixin:
         if node_id is None:
             return
 
-        self.db.update_research_journal_node(
-            node_id,
-            status=status,
-            input_payload=input_payload,
-            output_payload=output_payload,
-            reasoning=reasoning,
-            duration_ms=duration_ms,
-            parent_node_id=parent_node_id,
-            branch_id=branch_id,
-            selected=selected,
-            intent=intent,
-            is_failed=is_failed,
-            debug_depth=debug_depth,
-            metrics_payload=metrics,
-        )
+        with self._journal_lock:
+            self.db.update_research_journal_node(
+                node_id,
+                status=status,
+                input_payload=input_payload,
+                output_payload=output_payload,
+                reasoning=reasoning,
+                duration_ms=duration_ms,
+                parent_node_id=parent_node_id,
+                branch_id=branch_id,
+                selected=selected,
+                intent=intent,
+                is_failed=is_failed,
+                debug_depth=debug_depth,
+                metrics_payload=metrics,
+            )
 
-        node = self.journal.get_node(node_id)
-        if node is None:
-            return
-        if status is not None:
-            node.status = status
-        if input_payload is not None:
-            node.input_payload = input_payload
-        if output_payload is not None:
-            node.output_payload = output_payload
-        if reasoning is not None:
-            node.reasoning = reasoning
-        if duration_ms is not None:
-            node.duration_ms = duration_ms
-        if parent_node_id is not None:
-            node.parent_node_id = parent_node_id
-        if branch_id is not None:
-            node.branch_id = branch_id
-        if selected is not None:
-            node.selected = selected
-        if intent is not None:
-            node.intent = intent
-        if is_failed is not None:
-            node.is_failed = is_failed
-        if debug_depth is not None:
-            node.debug_depth = debug_depth
-        if metrics is not None:
-            node.metrics = metrics
+            node = self.journal.get_node(node_id)
+            if node is None:
+                return
+            if status is not None:
+                node.status = status
+            if input_payload is not None:
+                node.input_payload = input_payload
+            if output_payload is not None:
+                node.output_payload = output_payload
+            if reasoning is not None:
+                node.reasoning = reasoning
+            if duration_ms is not None:
+                node.duration_ms = duration_ms
+            if parent_node_id is not None:
+                node.parent_node_id = parent_node_id
+            if branch_id is not None:
+                node.branch_id = branch_id
+            if selected is not None:
+                node.selected = selected
+            if intent is not None:
+                node.intent = intent
+            if is_failed is not None:
+                node.is_failed = is_failed
+            if debug_depth is not None:
+                node.debug_depth = debug_depth
+            if metrics is not None:
+                node.metrics = metrics
 
     def _run_stage(
         self,
@@ -426,28 +478,29 @@ class AgentManagerToolingMixin:
                 progress_percent=36,
                 latest_summary=f"{branch.label}: {index}/{len(branch.queries)}件目を収集中",
             )
-            cached = self.search_result_cache.get(query)
-            if cached is None:
-                results, source_summary = self.collect_search_results(
+            (results, source_summary), cache_hit = self._cached_singleflight_load(
+                cache=self.search_result_cache,
+                inflight=self._search_result_inflight,
+                key=query,
+                loader=lambda query=query: self.collect_search_results(
                     query=query,
                     user_memory=self._active_user_memory(),
                     adapter=self.research_adapter,
-                )
-                self.search_result_cache[query] = self._cache_copy((results, source_summary))
-            else:
+                ),
+            )
+            if cache_hit:
                 cache_hit_count += 1
-                results, source_summary = self._cache_copy(cached)
-            catalog_total += int(source_summary["catalog_result_count"])
-            brave_total += int(source_summary["brave_result_count"])
-            if source_summary["brave_error"]:
+            catalog_total += int(source_summary.get("catalog_result_count") or 0)
+            brave_total += int(source_summary.get("brave_result_count") or 0)
+            if source_summary.get("brave_error"):
                 brave_errors.append(str(source_summary["brave_error"]))
 
             per_query.append(
                 {
                     "query": query,
                     "result_count": len(results),
-                    "catalog_result_count": source_summary["catalog_result_count"],
-                    "brave_result_count": source_summary["brave_result_count"],
+                    "catalog_result_count": int(source_summary.get("catalog_result_count") or 0),
+                    "brave_result_count": int(source_summary.get("brave_result_count") or 0),
                 }
             )
 
@@ -506,12 +559,14 @@ class AgentManagerToolingMixin:
             url = str(item.get("url") or "").strip()
             if not url:
                 continue
-            if url in self.detail_html_cache:
+            detail_html, cache_hit = self._cached_singleflight_load(
+                cache=self.detail_html_cache,
+                inflight=self._detail_html_inflight,
+                key=url,
+                loader=lambda url=url: self.fetch_detail_html(url),
+            )
+            if cache_hit:
                 cache_hit_count += 1
-                detail_html = self.detail_html_cache[url]
-            else:
-                detail_html = self.fetch_detail_html(url)
-                self.detail_html_cache[url] = detail_html
             if detail_html:
                 detail_html_map[url] = detail_html
             if total and (index == 1 or index == total or index % 3 == 0):

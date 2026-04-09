@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import threading
 from typing import Any, Callable
 
 from app.db import Database
@@ -48,7 +49,7 @@ class HousingResearchAgentManager(
         collect_source_items: Callable[..., list[dict[str, Any]]],
         tree_max_nodes: int = 12,
         tree_max_depth: int = 4,
-        tree_batch_size: int = 2,
+        tree_batch_size: int = 3,
         tree_children_per_expansion: int = 2,
         tree_prune_score: int = 35,
         tree_stability_patience: int = 2,
@@ -69,7 +70,7 @@ class HousingResearchAgentManager(
         self.collect_source_items = collect_source_items
         self.tree_max_nodes = max(4, tree_max_nodes)
         self.tree_max_depth = max(1, tree_max_depth)
-        self.tree_batch_size = max(1, tree_batch_size)
+        self.tree_batch_size = max(1, min(5, tree_batch_size))
         self.tree_children_per_expansion = max(1, tree_children_per_expansion)
         self.tree_prune_score = max(1, tree_prune_score)
         self.tree_stability_patience = max(1, tree_stability_patience)
@@ -77,6 +78,12 @@ class HousingResearchAgentManager(
         self.tree_min_best_score_gap = max(0.0, float(tree_min_best_score_gap))
         self.search_result_cache: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {}
         self.detail_html_cache: dict[str, str | None] = {}
+        self._search_result_inflight: dict[str, dict[str, Any]] = {}
+        self._detail_html_inflight: dict[str, dict[str, Any]] = {}
+        self._cache_lock = threading.RLock()
+        self._job_lock = threading.RLock()
+        self._journal_lock = threading.RLock()
+        self._job_progress_percent = 0
         self._cache_copy = copy.deepcopy
         self.journal = ResearchJournal()
         self.context = ToolContext(
