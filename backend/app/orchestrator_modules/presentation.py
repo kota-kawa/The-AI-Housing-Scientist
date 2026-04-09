@@ -564,6 +564,59 @@ class OrchestratorPresentationMixin:
             ),
         ]
 
+    def _build_guidance_blocks(self, task_memory: dict[str, Any]) -> list[UIBlock]:
+        """状態に応じた次のアクションボタンを返す。情報不足時はブロックなし。"""
+        if task_memory.get("status") == "awaiting_plan_confirmation" and task_memory.get("draft_research_plan"):
+            return [
+                UIBlock(
+                    type="actions",
+                    title="次のステップ",
+                    content={
+                        "items": [
+                            {
+                                "label": "調査計画を承認して開始する",
+                                "action_type": "approve_research_plan",
+                                "payload": {},
+                            },
+                            {
+                                "label": "条件を修正する",
+                                "action_type": "revise_research_plan",
+                                "payload": {},
+                            },
+                        ]
+                    },
+                )
+            ]
+
+        ranked_properties = task_memory.get("last_ranked_properties") or []
+        if ranked_properties:
+            top_id = str(ranked_properties[0].get("property_id_norm") or "")
+            action_items: list[dict[str, Any]] = []
+            if top_id:
+                action_items.append(
+                    {
+                        "label": "第一候補の問い合わせ文を作成する",
+                        "action_type": "generate_inquiry",
+                        "payload": {"property_id": top_id},
+                    }
+                )
+            action_items.append(
+                {
+                    "label": "契約書チェックへ進む",
+                    "action_type": "start_contract_review",
+                    "payload": {},
+                }
+            )
+            return [
+                UIBlock(
+                    type="actions",
+                    title="次のステップ",
+                    content={"items": action_items},
+                )
+            ]
+
+        return []
+
     def _build_guidance_response(
         self,
         *,
@@ -612,13 +665,7 @@ class OrchestratorPresentationMixin:
             assistant_message=assistant_text,
             missing_slots=[],
             next_action="await_specific_input",
-            blocks=[
-                UIBlock(
-                    type="warning",
-                    title="入力ガイド",
-                    content={"body": assistant_text},
-                )
-            ],
+            blocks=self._build_guidance_blocks(task_memory),
             pending_confirmation=False,
             pending_action=None,
         )
