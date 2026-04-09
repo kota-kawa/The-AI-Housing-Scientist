@@ -11,7 +11,6 @@ from app.stages.result_summarizer import (
     PROPERTY_CANDIDATES_KEY,
 )
 
-
 final_report_system_msg = """You are a Japanese rental research analyst.
 You are given a compact research journal for one completed apartment search.
 Your task is to produce a clear markdown report that explains:
@@ -139,10 +138,14 @@ def _selected_context(selected_branch_nodes: list[ResearchNode]) -> dict[str, An
     if selection_node is not None:
         selected_branch = dict(selection_node.output_payload.get("selected_branch", {}) or {})
         selected_path = list(selection_node.output_payload.get("selected_path", []) or [])
-        search_tree_summary = dict(selection_node.output_payload.get("search_tree_summary", {}) or {})
+        search_tree_summary = dict(
+            selection_node.output_payload.get("search_tree_summary", {}) or {}
+        )
         branch_result_summary = dict(selected_branch.get("branch_result_summary", {}) or {})
         if not branch_result_summary:
-            branch_result_summary = dict(selection_node.metrics.get("branch_result_summary", {}) or {})
+            branch_result_summary = dict(
+                selection_node.metrics.get("branch_result_summary", {}) or {}
+            )
 
     return {
         "selected_branch": selected_branch,
@@ -166,9 +169,13 @@ def _synthesize_context(
             "research_summary": "",
         }
     return {
-        "offline_evaluation": dict(synthesize_node.output_payload.get("offline_evaluation", {}) or {}),
+        "offline_evaluation": dict(
+            synthesize_node.output_payload.get("offline_evaluation", {}) or {}
+        ),
         "failure_summary": dict(synthesize_node.output_payload.get("failure_summary", {}) or {}),
-        "research_summary": str(synthesize_node.output_payload.get("research_summary") or "").strip(),
+        "research_summary": str(
+            synthesize_node.output_payload.get("research_summary") or ""
+        ).strip(),
     }
 
 
@@ -193,7 +200,9 @@ def _comparison_table(candidates: list[dict[str, Any]]) -> str:
                     str(item.get("layout") or "要確認"),
                     f"{walk}分" if walk > 0 else "要確認",
                     f"{area:.1f}㎡" if area > 0 else "要確認",
-                    _compact_text(item.get("reason") or "比較中の候補です。", max_chars=80).replace("|", "/"),
+                    _compact_text(item.get("reason") or "比較中の候補です。", max_chars=80).replace(
+                        "|", "/"
+                    ),
                 ]
             )
             + " |"
@@ -216,8 +225,16 @@ def _build_fallback_report(
     failure_summary = dict(synthesize_context["failure_summary"] or {})
     research_summary = str(synthesize_context["research_summary"] or "").strip()
     candidates = list(branch_result_summary.get(PROPERTY_CANDIDATES_KEY, []) or [])
-    common_risks = [str(item).strip() for item in branch_result_summary.get(COMMON_RISKS_KEY, []) or [] if str(item).strip()]
-    open_questions = [str(item).strip() for item in branch_result_summary.get(OPEN_QUESTIONS_KEY, []) or [] if str(item).strip()]
+    common_risks = [
+        str(item).strip()
+        for item in branch_result_summary.get(COMMON_RISKS_KEY, []) or []
+        if str(item).strip()
+    ]
+    open_questions = [
+        str(item).strip()
+        for item in branch_result_summary.get(OPEN_QUESTIONS_KEY, []) or []
+        if str(item).strip()
+    ]
 
     if not common_risks:
         common_risks = [
@@ -261,8 +278,12 @@ def _build_fallback_report(
         top_name = str(selected_branch.get("label") or "推奨候補なし")
         recommendation_text = "現時点では問い合わせ推奨まで十分に整理できていません。"
 
-    risk_lines = [f"- {item}" for item in common_risks[:5]] or ["- 重大な共通リスクは明示されていません。"]
-    follow_up_lines = [f"- {item}" for item in open_questions[:6]] or ["- 追加調査の提案はまだありません。"]
+    risk_lines = [f"- {item}" for item in common_risks[:5]] or [
+        "- 重大な共通リスクは明示されていません。"
+    ]
+    follow_up_lines = [f"- {item}" for item in open_questions[:6]] or [
+        "- 追加調査の提案はまだありません。"
+    ]
     report = "\n".join(
         [
             "# 最終レポート",

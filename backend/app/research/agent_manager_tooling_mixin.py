@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import threading
 import time
-from typing import Any, Callable
+from typing import Any
 
 from app.research.journal import ResearchIntent, ResearchNode
 from app.research.state_machine import ResearchStageDefinition, ResearchStateMachine
-from app.research.tools import CallableResearchTool, ToolContext, ToolSpec, Toolbox
+from app.research.tools import CallableResearchTool, Toolbox, ToolContext, ToolSpec
 from app.stages.integrity_review import run_integrity_review
 from app.stages.ranking import run_ranking
 from app.stages.search_normalize import run_search_and_normalize
@@ -221,7 +222,10 @@ class AgentManagerToolingMixin:
                             "properties": {
                                 "normalized_properties": {"type": "array"},
                                 "integrity_reviews": {"type": "array"},
-                                "dropped_property_ids": {"type": "array", "items": {"type": "string"}},
+                                "dropped_property_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
                                 "summary": {"type": "object"},
                             },
                             "required": [

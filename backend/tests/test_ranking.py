@@ -148,8 +148,14 @@ def test_run_ranking_llm_adds_semantic_nice_to_have_bonus_and_reasoning():
     ranked = result["ranked_properties"]
     assert adapter.calls == 1
     assert ranked[0]["property_id_norm"] == "p1"
-    assert ranked[0]["why_selected"] == "高速回線とワークスペースの記載があり、在宅勤務のイメージが持ちやすい候補です。"
-    assert ranked[1]["why_not_selected"] == "在宅ワーク向けと判断できる材料がなく、決め手はやや弱めです。"
+    assert (
+        ranked[0]["why_selected"]
+        == "高速回線とワークスペースの記載があり、在宅勤務のイメージが持ちやすい候補です。"
+    )
+    assert (
+        ranked[1]["why_not_selected"]
+        == "在宅ワーク向けと判断できる材料がなく、決め手はやや弱めです。"
+    )
     assert result["nice_to_have_assessments"]["p1"][0]["match_level"] == "strong"
     assert result["llm_reasoning_applied"] is True
 

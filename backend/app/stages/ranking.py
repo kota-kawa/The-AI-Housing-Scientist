@@ -7,7 +7,6 @@ from app.llm.base import LLMAdapter
 from app.models import RankedProperty
 from app.stages.prompt_examples import PromptExamplesError, sample_prompt_examples
 
-
 DEFAULT_RANKING_PROFILE = {
     "base_score": 50.0,
     "budget_match_bonus": 25.0,
@@ -401,20 +400,28 @@ def run_ranking(
         property_id = prop["property_id_norm"]
         rule_result = rule_results_by_id[property_id]
         enhancement = llm_enhancements.get(property_id, {})
-        assessments = enhancement.get("nice_to_have_assessments") or _build_fallback_nice_to_have_assessments(
+        assessments = enhancement.get(
+            "nice_to_have_assessments"
+        ) or _build_fallback_nice_to_have_assessments(
             prop=prop,
             user_memory=user_memory,
         )
-        score_delta, nice_to_have_positives, nice_to_have_negatives = _score_nice_to_have_assessments(
-            assessments,
-            profile,
+        score_delta, nice_to_have_positives, nice_to_have_negatives = (
+            _score_nice_to_have_assessments(
+                assessments,
+                profile,
+            )
         )
         score = round(float(rule_result["score"]) + score_delta, 2)
-        why_selected = str(enhancement.get("why_selected") or "").strip() or _build_fallback_selected_reason(
+        why_selected = str(
+            enhancement.get("why_selected") or ""
+        ).strip() or _build_fallback_selected_reason(
             rule_result["positives"],
             nice_to_have_positives,
         )
-        why_not_selected = str(enhancement.get("why_not_selected") or "").strip() or _build_fallback_not_selected_reason(
+        why_not_selected = str(
+            enhancement.get("why_not_selected") or ""
+        ).strip() or _build_fallback_not_selected_reason(
             rule_result["negatives"],
             nice_to_have_negatives,
         )
@@ -432,14 +439,8 @@ def run_ranking(
 
     return {
         "ranked_properties": [item.model_dump() for item in ranked],
-        "why_selected": {
-            item.property_id_norm: item.why_selected
-            for item in ranked
-        },
-        "why_not_selected": {
-            item.property_id_norm: item.why_not_selected
-            for item in ranked
-        },
+        "why_selected": {item.property_id_norm: item.why_selected for item in ranked},
+        "why_not_selected": {item.property_id_norm: item.why_not_selected for item in ranked},
         "nice_to_have_assessments": nice_to_have_assessments_by_id,
         "llm_reasoning_applied": bool(llm_enhancements),
         "ranking_profile": profile,

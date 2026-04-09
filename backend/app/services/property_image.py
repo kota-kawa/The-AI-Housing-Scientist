@@ -9,7 +9,6 @@ from app.llm.base import LLMAdapter
 
 from .brave_search import BraveImageSearchClient
 
-
 IMAGE_BLACKLIST_TOKENS = (
     "logo",
     "icon",
@@ -76,9 +75,7 @@ def _normalize_candidate_url(raw_url: str, page_url: str) -> str:
         return ""
     if candidate.startswith("//"):
         candidate = f"https:{candidate}"
-    elif candidate.startswith("/"):
-        candidate = urljoin(page_url, candidate) if page_url else ""
-    elif not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", candidate):
+    elif candidate.startswith("/") or not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", candidate):
         candidate = urljoin(page_url, candidate) if page_url else ""
     if not candidate.startswith(("http://", "https://")):
         return ""
@@ -207,8 +204,12 @@ def _extract_html_image_candidates(detail_html: str, page_url: str) -> list[dict
                 "alt": _compact_text(attrs.get("alt") or "", max_chars=120),
                 "title": _compact_text(attrs.get("title") or "", max_chars=120),
                 "context": context,
-                "width": int(attrs.get("width") or 0) if str(attrs.get("width") or "").isdigit() else 0,
-                "height": int(attrs.get("height") or 0) if str(attrs.get("height") or "").isdigit() else 0,
+                "width": int(attrs.get("width") or 0)
+                if str(attrs.get("width") or "").isdigit()
+                else 0,
+                "height": int(attrs.get("height") or 0)
+                if str(attrs.get("height") or "").isdigit()
+                else 0,
             }
         )
 
@@ -387,7 +388,9 @@ class PropertyImageResolver:
                         },
                         "search_result": {
                             "title": str(search_result.get("title") or ""),
-                            "description": _compact_text(search_result.get("description") or "", max_chars=140),
+                            "description": _compact_text(
+                                search_result.get("description") or "", max_chars=140
+                            ),
                             "url": str(search_result.get("url") or ""),
                         },
                     },
@@ -547,7 +550,9 @@ class PropertyImageResolver:
         detail_html: str = "",
         adapter: LLMAdapter | None = None,
     ) -> str:
-        explicit = str(property_data.get("image_url") or search_result.get("image_url") or "").strip()
+        explicit = str(
+            property_data.get("image_url") or search_result.get("image_url") or ""
+        ).strip()
         if explicit:
             return explicit
 
@@ -583,6 +588,10 @@ class PropertyImageResolver:
                 adapter=adapter,
             )
 
-        resolved = str(chosen.get("display_url") or chosen.get("image_url") or "").strip() if chosen else ""
+        resolved = (
+            str(chosen.get("display_url") or chosen.get("image_url") or "").strip()
+            if chosen
+            else ""
+        )
         self._resolution_cache[cache_key] = resolved
         return resolved

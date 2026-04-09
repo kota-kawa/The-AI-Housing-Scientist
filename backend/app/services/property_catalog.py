@@ -10,7 +10,6 @@ from app.db import Database
 from app.llm.base import LLMAdapter
 from app.stages.search_normalize import _split_address_levels
 
-
 DEFAULT_CATALOG_PROFILE = {
     "area_exact_bonus": 40.0,
     "area_municipality_bonus": 24.0,
@@ -349,7 +348,10 @@ class PropertyCatalogService:
         scored.sort(
             key=lambda pair: (
                 pair["score"],
-                -abs(int(user_memory.get("budget_max") or pair["item"]["rent"]) - pair["item"]["rent"]),
+                -abs(
+                    int(user_memory.get("budget_max") or pair["item"]["rent"])
+                    - pair["item"]["rent"]
+                ),
                 -pair["item"]["station_walk_min"],
             ),
             reverse=True,
@@ -387,7 +389,10 @@ class PropertyCatalogService:
             scored.sort(
                 key=lambda pair: (
                     pair["score"],
-                    -abs(int(user_memory.get("budget_max") or pair["item"]["rent"]) - pair["item"]["rent"]),
+                    -abs(
+                        int(user_memory.get("budget_max") or pair["item"]["rent"])
+                        - pair["item"]["rent"]
+                    ),
                     -pair["item"]["station_walk_min"],
                 ),
                 reverse=True,
@@ -404,7 +409,8 @@ class PropertyCatalogService:
                         f"{item['area_m2']}㎡ 徒歩{item['station_walk_min']}分"
                     ),
                     "url": item["detail_url"],
-                    "image_url": item.get("image_url") or build_catalog_image_url(item["property_id"]),
+                    "image_url": item.get("image_url")
+                    or build_catalog_image_url(item["property_id"]),
                     "description": (
                         f"{item['address']} / 賃料{item['rent']:,}円 管理費{item['management_fee']:,}円 / "
                         f"{item['nearest_station']} 徒歩{item['station_walk_min']}分"
@@ -532,11 +538,15 @@ class PropertyCatalogService:
 
         must_conditions = _collect_condition_list(user_memory, "must_conditions")
         nice_to_have = _collect_condition_list(user_memory, "nice_to_have")
-        must_assessments = enhancement.get("must_condition_assessments") or _build_fallback_condition_assessments(
+        must_assessments = enhancement.get(
+            "must_condition_assessments"
+        ) or _build_fallback_condition_assessments(
             conditions=must_conditions,
             haystack="",
         )
-        nice_assessments = enhancement.get("nice_to_have_assessments") or _build_fallback_condition_assessments(
+        nice_assessments = enhancement.get(
+            "nice_to_have_assessments"
+        ) or _build_fallback_condition_assessments(
             conditions=nice_to_have,
             haystack="",
         )

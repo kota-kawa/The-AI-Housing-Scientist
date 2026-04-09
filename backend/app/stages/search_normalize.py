@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from collections.abc import Callable
 import hashlib
 import html
 import json
 import re
+from typing import Any
 import unicodedata
-from collections import defaultdict
-from typing import Any, Callable
 
 from app.llm.base import LLMAdapter
 from app.models import DuplicateGroup, PropertyNormalized
-
 
 UNKNOWN_ADDRESS_VALUES = {"", "住所要確認", "要確認"}
 BUILDING_TOKEN_ALIASES = {
@@ -72,7 +72,9 @@ def _normalize_address(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value or "").strip()
     if normalized in UNKNOWN_ADDRESS_VALUES:
         return ""
-    normalized = normalized.replace("丁目", "-").replace("番地", "-").replace("番", "-").replace("号", "")
+    normalized = (
+        normalized.replace("丁目", "-").replace("番地", "-").replace("番", "-").replace("号", "")
+    )
     normalized = re.sub(r"[\s　,/]+", "", normalized)
     normalized = re.sub(r"-+", "-", normalized)
     return normalized.lower()
@@ -439,7 +441,10 @@ def _build_detail_property(
     adapter: LLMAdapter | None = None,
 ) -> PropertyNormalized | None:
     text = _strip_html(detail_html)
-    building_name = _extract_html_field(detail_html, "building_name") or item.get("title", "").split("|")[0].strip()
+    building_name = (
+        _extract_html_field(detail_html, "building_name")
+        or item.get("title", "").split("|")[0].strip()
+    )
     property_id = _extract_html_field(detail_html, "property_id")
     seed = property_id or f"{source_id}:{item.get('url', '')}:{building_name}"
     property_id_norm = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
@@ -461,9 +466,17 @@ def _build_detail_property(
 
     rent = int(rent_raw) if rent_raw.isdigit() else _extract_rent(text)
     management_fee = int(management_fee_raw) if management_fee_raw.isdigit() else 0
-    deposit = int(deposit_raw) if deposit_raw.isdigit() else _extract_deposit_or_key_money(text, "敷金")
-    key_money = int(key_money_raw) if key_money_raw.isdigit() else _extract_deposit_or_key_money(text, "礼金")
-    station_walk_min = int(station_walk_raw) if station_walk_raw.isdigit() else _extract_station_walk(text)
+    deposit = (
+        int(deposit_raw) if deposit_raw.isdigit() else _extract_deposit_or_key_money(text, "敷金")
+    )
+    key_money = (
+        int(key_money_raw)
+        if key_money_raw.isdigit()
+        else _extract_deposit_or_key_money(text, "礼金")
+    )
+    station_walk_min = (
+        int(station_walk_raw) if station_walk_raw.isdigit() else _extract_station_walk(text)
+    )
     llm_fields, _ = _extract_property_fields_with_llm(
         adapter=adapter,
         item=item,
@@ -485,7 +498,11 @@ def _build_detail_property(
     line_name = _extract_html_field(detail_html, "line_name")
     available_date = _extract_html_field(detail_html, "available_date") or "要確認"
     agency_name = _extract_html_field(detail_html, "agency_name") or "要確認"
-    notes = _extract_html_field(detail_html, "notes") or item.get("description", "") or "詳細ページから抽出"
+    notes = (
+        _extract_html_field(detail_html, "notes")
+        or item.get("description", "")
+        or "詳細ページから抽出"
+    )
     contract_text = _extract_html_field(detail_html, "contract_text")
     features = _extract_html_json_field(detail_html, "features")
     image_url = _extract_html_field(detail_html, "image_url")
@@ -511,7 +528,9 @@ def _build_detail_property(
         station_walk_min=station_walk_min,
         available_date=available_date,
         agency_name=agency_name,
-        notes=" / ".join(part for part in [notes, contract_text, " ".join(features)] if part).strip(),
+        notes=" / ".join(
+            part for part in [notes, contract_text, " ".join(features)] if part
+        ).strip(),
         features=features,
     )
 
@@ -551,7 +570,9 @@ def _address_similarity(left: str, right: str) -> float:
     return round(min(score, 1.0), 3)
 
 
-def _duplicate_match(left: PropertyNormalized, right: PropertyNormalized) -> tuple[float, str] | None:
+def _duplicate_match(
+    left: PropertyNormalized, right: PropertyNormalized
+) -> tuple[float, str] | None:
     name_similarity = _levenshtein_ratio(left.building_name_norm, right.building_name_norm)
     address_similarity = _address_similarity(left.address, right.address)
     same_layout = bool(left.layout and left.layout == right.layout)
@@ -559,7 +580,12 @@ def _duplicate_match(left: PropertyNormalized, right: PropertyNormalized) -> tup
     rent_gap = abs(int(left.rent or 0) - int(right.rent or 0))
     same_station = bool(left.nearest_station and left.nearest_station == right.nearest_station)
 
-    if address_similarity >= 0.8 and same_layout and area_gap <= 1.5 and (name_similarity >= 0.45 or same_station):
+    if (
+        address_similarity >= 0.8
+        and same_layout
+        and area_gap <= 1.5
+        and (name_similarity >= 0.45 or same_station)
+    ):
         confidence = round(min(1.0, 0.55 + address_similarity * 0.3 + name_similarity * 0.15), 3)
         return confidence, "住所階層が一致し、間取り・面積も近い"
 
@@ -704,7 +730,9 @@ def _build_duplicate_groups(
                 confidence, reason = match
                 union(left_index, right_index, confidence, reason)
             elif adapter is not None and len(llm_candidates) < _LLM_DUPLICATE_CANDIDATE_LIMIT:
-                name_sim = _levenshtein_ratio(left_prop.building_name_norm, right_prop.building_name_norm)
+                name_sim = _levenshtein_ratio(
+                    left_prop.building_name_norm, right_prop.building_name_norm
+                )
                 if name_sim > 0.6:
                     llm_candidates.append((left_index, right_index, left_prop, right_prop))
 

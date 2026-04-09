@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import copy
+from functools import cache
 import json
 import logging
-import random
-from functools import lru_cache
 from pathlib import Path
+import random
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ def _validate_planner_examples(filename: str, payload: list[Any]) -> None:
         _expect_string(filename, input_payload.get("user_message"), f"{path}.input.user_message")
         current_memory = input_payload.get("current_user_memory")
         _expect_type(filename, current_memory, dict, f"{path}.input.current_user_memory")
-        for key in current_memory.keys():
+        for key in current_memory:
             if key not in PLANNER_ALLOWED_SLOTS:
                 _fail(filename, f"{path}.input.current_user_memory contains unsupported key {key}")
         _expect_type(
@@ -150,8 +150,12 @@ def _validate_planner_examples(filename: str, payload: list[Any]) -> None:
 
         intent = output_payload.get("intent")
         if intent not in PLANNER_ALLOWED_INTENTS:
-            _fail(filename, f"{path}.output.intent must be one of {sorted(PLANNER_ALLOWED_INTENTS)}")
-        _expect_slot_memory_shape(filename, output_payload.get("user_memory"), f"{path}.output.user_memory")
+            _fail(
+                filename, f"{path}.output.intent must be one of {sorted(PLANNER_ALLOWED_INTENTS)}"
+            )
+        _expect_slot_memory_shape(
+            filename, output_payload.get("user_memory"), f"{path}.output.user_memory"
+        )
 
         missing_slots = output_payload.get("missing_slots")
         _expect_type(filename, missing_slots, list, f"{path}.output.missing_slots")
@@ -176,14 +180,22 @@ def _validate_planner_examples(filename: str, payload: list[Any]) -> None:
                 filename,
                 f"{path}.output.next_action must be one of {sorted(PLANNER_ALLOWED_NEXT_ACTIONS)}",
             )
-        _expect_string_list(filename, output_payload.get("seed_queries"), f"{path}.output.seed_queries")
+        _expect_string_list(
+            filename, output_payload.get("seed_queries"), f"{path}.output.seed_queries"
+        )
 
         research_plan = output_payload.get("research_plan")
         _expect_type(filename, research_plan, dict, f"{path}.output.research_plan")
-        _expect_string(filename, research_plan.get("summary"), f"{path}.output.research_plan.summary")
+        _expect_string(
+            filename, research_plan.get("summary"), f"{path}.output.research_plan.summary"
+        )
         _expect_string(filename, research_plan.get("goal"), f"{path}.output.research_plan.goal")
-        _expect_string_list(filename, research_plan.get("strategy"), f"{path}.output.research_plan.strategy")
-        _expect_string(filename, research_plan.get("rationale"), f"{path}.output.research_plan.rationale")
+        _expect_string_list(
+            filename, research_plan.get("strategy"), f"{path}.output.research_plan.strategy"
+        )
+        _expect_string(
+            filename, research_plan.get("rationale"), f"{path}.output.research_plan.rationale"
+        )
         _expect_condition_reasons_shape(
             filename,
             output_payload.get("condition_reasons"),
@@ -214,7 +226,10 @@ def _validate_ranking_examples(filename: str, payload: list[Any]) -> None:
             "nice_to_have",
         }
         if set(user_preferences.keys()) != required_pref_keys:
-            _fail(filename, f"{path}.input.user_preferences must have keys {sorted(required_pref_keys)}")
+            _fail(
+                filename,
+                f"{path}.input.user_preferences must have keys {sorted(required_pref_keys)}",
+            )
         if not isinstance(user_preferences["budget_max"], int) or isinstance(
             user_preferences["budget_max"],
             bool,
@@ -259,8 +274,18 @@ def _validate_ranking_examples(filename: str, payload: list[Any]) -> None:
             "rule_based_negatives",
         }
         if set(input_property.keys()) != required_property_keys:
-            _fail(filename, f"{path}.input.property must have keys {sorted(required_property_keys)}")
-        for key in ["property_id_norm", "building_name", "address", "area_name", "nearest_station", "layout", "notes"]:
+            _fail(
+                filename, f"{path}.input.property must have keys {sorted(required_property_keys)}"
+            )
+        for key in [
+            "property_id_norm",
+            "building_name",
+            "address",
+            "area_name",
+            "nearest_station",
+            "layout",
+            "notes",
+        ]:
             _expect_string(filename, input_property[key], f"{path}.input.property.{key}")
         if not isinstance(input_property["station_walk_min"], int) or isinstance(
             input_property["station_walk_min"],
@@ -289,9 +314,14 @@ def _validate_ranking_examples(filename: str, payload: list[Any]) -> None:
             f"{path}.output.property_id_norm",
         )
         if output_payload["property_id_norm"] != input_property["property_id_norm"]:
-            _fail(filename, f"{path}.output.property_id_norm must match input.property.property_id_norm")
+            _fail(
+                filename,
+                f"{path}.output.property_id_norm must match input.property.property_id_norm",
+            )
         _expect_string(filename, output_payload.get("why_selected"), f"{path}.output.why_selected")
-        _expect_string(filename, output_payload.get("why_not_selected"), f"{path}.output.why_not_selected")
+        _expect_string(
+            filename, output_payload.get("why_not_selected"), f"{path}.output.why_not_selected"
+        )
 
         assessments = output_payload.get("nice_to_have_assessments")
         _expect_type(filename, assessments, list, f"{path}.output.nice_to_have_assessments")
@@ -314,7 +344,7 @@ VALIDATORS = {
 }
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load_prompt_examples(filename: str) -> tuple[dict[str, Any], ...]:
     path = PROMPTS_DIR / filename
     validator = VALIDATORS.get(filename)

@@ -13,9 +13,7 @@ RESEARCH_STAGE_ORDER = [
 ]
 
 
-def _generate_llm_resume_body(
-    profile_summary: dict[str, Any], adapter: LLMAdapter
-) -> str:
+def _generate_llm_resume_body(profile_summary: dict[str, Any], adapter: LLMAdapter) -> str:
     """LLMで自然なセッション再開メッセージを生成する。失敗時は空文字を返す。"""
     labels = profile_summary.get("last_search_labels") or []
     frequent_area = str(profile_summary.get("frequent_area") or "")
@@ -132,7 +130,9 @@ def _generate_llm_plan_presentation(
         "goal": _normalize_display_text(result.get("goal")),
         "rationale": _normalize_display_text(result.get("rationale")),
         "strategy": _normalize_display_texts(list(result.get("strategy") or []), limit=5),
-        "open_questions": _normalize_display_texts(list(result.get("open_questions") or []), limit=3),
+        "open_questions": _normalize_display_texts(
+            list(result.get("open_questions") or []), limit=3
+        ),
     }
     if not any(
         [
@@ -150,14 +150,12 @@ def _generate_llm_plan_presentation(
 
 def _generate_response_labels(
     *,
-    response: "ChatMessageResponse",
+    response: ChatMessageResponse,
     adapter: LLMAdapter,
-) -> "ChatMessageResponse":
+) -> ChatMessageResponse:
     """status_label と各 UIBlock の display_label を LLM で生成して差し込む。"""
     # status_label: ステータスとブロック数を踏まえた一言ラベル
-    block_summary = ", ".join(
-        f"{b.type}({b.title})" for b in response.blocks[:4]
-    ) or "なし"
+    block_summary = ", ".join(f"{b.type}({b.title})" for b in response.blocks[:4]) or "なし"
     system = (
         "You are a Japanese UI labeling assistant. "
         "Return only the requested JSON with no explanation."

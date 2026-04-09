@@ -6,7 +6,6 @@ from typing import Any
 
 from app.llm.base import LLMAdapter
 
-
 PROPERTY_CANDIDATES_KEY = "物件候補リスト"
 REJECTION_REASONS_KEY = "却下理由"
 COMMON_RISKS_KEY = "共通リスク"
@@ -142,12 +141,17 @@ def _build_candidate_snapshot(
         "detail_url": str(prop.get("detail_url") or ""),
         "score": float(ranked.get("score") or 0.0),
         "reason": _compact_text(
-            ranked.get("why_selected") or search_excerpt or detail_excerpt or "条件に合う候補として残った物件です。",
+            ranked.get("why_selected")
+            or search_excerpt
+            or detail_excerpt
+            or "条件に合う候補として残った物件です。",
             max_chars=180,
         ),
         "rejection_reason": _compact_text(ranked.get("why_not_selected") or "", max_chars=180),
         "evidence": evidence,
-        "matched_queries": _unique_strings(list(raw_result.get("matched_queries", []) or []), limit=3),
+        "matched_queries": _unique_strings(
+            list(raw_result.get("matched_queries", []) or []), limit=3
+        ),
         "source_nodes": [node_label],
         "detail_excerpt": detail_excerpt,
         "seen_count": 1,
@@ -210,7 +214,9 @@ def _build_node_snapshot(branch_node: dict[str, Any]) -> dict[str, Any]:
                 item.get("snippet_summary") or item.get("description") or "",
                 max_chars=140,
             ),
-            "matched_queries": _unique_strings(list(item.get("matched_queries", []) or []), limit=2),
+            "matched_queries": _unique_strings(
+                list(item.get("matched_queries", []) or []), limit=2
+            ),
         }
         for item in raw_results[:MAX_CANDIDATES]
         if str(item.get("title") or "").strip() or str(item.get("url") or "").strip()
@@ -226,7 +232,9 @@ def _build_node_snapshot(branch_node: dict[str, Any]) -> dict[str, Any]:
             "raw_result_count": len(raw_results),
             "normalized_count": len(normalized_properties),
             "ranked_count": len(ranked_properties),
-            "detail_hit_count": int(branch_node.get("search_summary", {}).get("detail_hit_count") or 0),
+            "detail_hit_count": int(
+                branch_node.get("search_summary", {}).get("detail_hit_count") or 0
+            ),
             "duplicate_group_count": len(duplicate_groups),
         },
         "candidates": candidates,
@@ -292,7 +300,8 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
                     ]:
                         existing[field] = candidate.get(field)
                 existing["evidence"] = _unique_strings(
-                    list(existing.get("evidence", []) or []) + list(candidate.get("evidence", []) or []),
+                    list(existing.get("evidence", []) or [])
+                    + list(candidate.get("evidence", []) or []),
                     limit=4,
                 )
                 existing["matched_queries"] = _unique_strings(
@@ -337,7 +346,9 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
                     "score": 0.0,
                     "reason": str(item.get("summary") or "検索結果から見つかった候補です。"),
                     "evidence": _unique_strings([item.get("summary")], limit=2),
-                    "matched_queries": _unique_strings(list(item.get("matched_queries", []) or []), limit=2),
+                    "matched_queries": _unique_strings(
+                        list(item.get("matched_queries", []) or []), limit=2
+                    ),
                     "source_nodes": [],
                     "seen_count": 1,
                 }
@@ -404,7 +415,9 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
             "score": float(item.get("score") or 0.0),
             "reason": str(item.get("reason") or ""),
             "evidence": _unique_strings(list(item.get("evidence", []) or []), limit=4),
-            "matched_queries": _unique_strings(list(item.get("matched_queries", []) or []), limit=4),
+            "matched_queries": _unique_strings(
+                list(item.get("matched_queries", []) or []), limit=4
+            ),
             "source_nodes": _unique_strings(list(item.get("source_nodes", []) or []), limit=4),
         }
         for item in shortlisted
@@ -522,7 +535,9 @@ def _coerce_result_summary(
     if not isinstance(result, dict):
         return fallback
     merged = {
-        PROPERTY_CANDIDATES_KEY: result.get(PROPERTY_CANDIDATES_KEY, fallback[PROPERTY_CANDIDATES_KEY]),
+        PROPERTY_CANDIDATES_KEY: result.get(
+            PROPERTY_CANDIDATES_KEY, fallback[PROPERTY_CANDIDATES_KEY]
+        ),
         REJECTION_REASONS_KEY: result.get(REJECTION_REASONS_KEY, fallback[REJECTION_REASONS_KEY]),
         COMMON_RISKS_KEY: result.get(COMMON_RISKS_KEY, fallback[COMMON_RISKS_KEY]),
         OPEN_QUESTIONS_KEY: result.get(OPEN_QUESTIONS_KEY, fallback[OPEN_QUESTIONS_KEY]),

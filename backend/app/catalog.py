@@ -4,7 +4,6 @@ import html
 import json
 from typing import Any
 
-
 CATALOG_URL_PREFIX = "https://mock-housing.local/properties/"
 MOCK_PROPERTY_IMAGE_URLS = {
     "koto-shinonome-bay": "https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&w=1200&q=80",
@@ -289,7 +288,10 @@ def rewrite_catalog_notes(catalog: list[dict[str, Any]], adapter: Any) -> list[d
 
 
 def render_property_detail_html(property_row: dict[str, Any]) -> str:
-    image_url = str(property_row.get("image_url") or build_catalog_image_url(str(property_row.get("property_id") or "")))
+    image_url = str(
+        property_row.get("image_url")
+        or build_catalog_image_url(str(property_row.get("property_id") or ""))
+    )
     payload = dict(property_row)
     payload["image_url"] = image_url
     features_json = json.dumps(property_row.get("features", []), ensure_ascii=False)

@@ -1,7 +1,7 @@
 import pytest
 
 from app.research.state_machine import ResearchStageDefinition, ResearchStateMachine
-from app.research.tools import CallableResearchTool, ToolContext, ToolSpec, Toolbox
+from app.research.tools import CallableResearchTool, Toolbox, ToolContext, ToolSpec
 
 
 def test_research_state_machine_runs_declared_transitions():
@@ -22,8 +22,12 @@ def test_research_state_machine_runs_declared_transitions():
 
     machine = ResearchStateMachine(
         [
-            ResearchStageDefinition(name="start", handler=start_handler, default_next_stage="middle"),
-            ResearchStageDefinition(name="middle", handler=middle_handler, default_next_stage="final"),
+            ResearchStageDefinition(
+                name="start", handler=start_handler, default_next_stage="middle"
+            ),
+            ResearchStageDefinition(
+                name="middle", handler=middle_handler, default_next_stage="final"
+            ),
             ResearchStageDefinition(name="final", handler=final_handler, default_next_stage=None),
         ]
     )
@@ -67,5 +71,5 @@ def test_toolbox_validates_input_and_output_schema():
 
     assert toolbox.run("echo", context, count=3) == {"count": 3}
 
-    with pytest.raises(Exception):
+    with pytest.raises((TypeError, ValueError)):
         toolbox.run("echo", context, count="bad")

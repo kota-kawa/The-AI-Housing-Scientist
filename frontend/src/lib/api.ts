@@ -97,7 +97,10 @@ export type CreateSessionResponse = {
 export type PreflightReport = {
   strict_mode: boolean;
   brave_reachable: boolean;
-  providers: Record<string, { key_present: boolean; reachable: boolean; model_valid: boolean; details: string }>;
+  providers: Record<
+    string,
+    { key_present: boolean; reachable: boolean; model_valid: boolean; details: string }
+  >;
 };
 
 export type ResearchState = {

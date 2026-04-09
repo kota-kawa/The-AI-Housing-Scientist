@@ -188,11 +188,7 @@ function TableIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
       <rect x="3" y="4" width="14" height="12" rx="1.6" stroke="currentColor" strokeWidth="1.7" />
-      <path
-        d="M3 8.5H17M3 12.5H17M8.5 4V16M13 4V16"
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
+      <path d="M3 8.5H17M3 12.5H17M8.5 4V16M13 4V16" stroke="currentColor" strokeWidth="1.4" />
     </svg>
   );
 }
@@ -270,7 +266,15 @@ function PlanIcon({ className = "h-4 w-4" }: IconProps) {
         strokeWidth="1.7"
         strokeLinecap="round"
       />
-      <rect x="3" y="2.8" width="14" height="14.4" rx="2.2" stroke="currentColor" strokeWidth="1.5" />
+      <rect
+        x="3"
+        y="2.8"
+        width="14"
+        height="14.4"
+        rx="2.2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
     </svg>
   );
 }
@@ -278,7 +282,12 @@ function PlanIcon({ className = "h-4 w-4" }: IconProps) {
 function TimelineIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
-      <path d="M6 4V16M6 6H14M6 10H14M6 14H11" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path
+        d="M6 4V16M6 6H14M6 10H14M6 14H11"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
       <circle cx="6" cy="4" r="1.4" fill="currentColor" />
       <circle cx="6" cy="10" r="1.4" fill="currentColor" />
       <circle cx="6" cy="16" r="1.4" fill="currentColor" />
@@ -366,12 +375,7 @@ function PlusCircleIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
       <circle cx="10" cy="10" r="7.6" stroke="currentColor" strokeWidth="1.6" />
-      <path
-        d="M10 7V13M7 10H13"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
+      <path d="M10 7V13M7 10H13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </svg>
   );
 }
@@ -487,9 +491,7 @@ function toRecordArray(value: unknown): Array<Record<string, unknown>> {
 }
 
 function toStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.map((item) => toDisplayText(item)).filter(Boolean)
-    : [];
+  return Array.isArray(value) ? value.map((item) => toDisplayText(item)).filter(Boolean) : [];
 }
 
 function toPercentLabel(value: number | null, digits: number = 0): string {
@@ -532,7 +534,7 @@ function escapeSvgText(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
 }
 
@@ -632,18 +634,30 @@ function MarkdownBody({ body }: { body: string }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          h1: ({ children }) => <h1 className="mt-1 text-xl font-semibold text-slate-950 first:mt-0">{children}</h1>,
+          h1: ({ children }) => (
+            <h1 className="mt-1 text-xl font-semibold text-slate-950 first:mt-0">{children}</h1>
+          ),
           h2: ({ children }) => (
             <h2 className="mt-6 border-b border-slate-200 pb-2 text-lg font-semibold text-slate-900 first:mt-0">
               {children}
             </h2>
           ),
-          h3: ({ children }) => <h3 className="mt-5 text-base font-semibold text-slate-900">{children}</h3>,
-          p: ({ children }) => <p className="mt-3 text-[14px] leading-7 text-ink first:mt-0">{children}</p>,
-          ul: ({ children }) => <ul className="mt-3 list-disc space-y-1 pl-5 text-[14px] text-ink">{children}</ul>,
-          ol: ({ children }) => <ol className="mt-3 list-decimal space-y-1 pl-5 text-[14px] text-ink">{children}</ol>,
+          h3: ({ children }) => (
+            <h3 className="mt-5 text-base font-semibold text-slate-900">{children}</h3>
+          ),
+          p: ({ children }) => (
+            <p className="mt-3 text-[14px] leading-7 text-ink first:mt-0">{children}</p>
+          ),
+          ul: ({ children }) => (
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-[14px] text-ink">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="mt-3 list-decimal space-y-1 pl-5 text-[14px] text-ink">{children}</ol>
+          ),
           li: ({ children }) => <li className="leading-7">{children}</li>,
-          strong: ({ children }) => <strong className="font-semibold text-slate-950">{children}</strong>,
+          strong: ({ children }) => (
+            <strong className="font-semibold text-slate-950">{children}</strong>
+          ),
           blockquote: ({ children }) => (
             <blockquote className="mt-4 rounded-r-2xl border-l-4 border-sky-300 bg-sky-50/70 px-4 py-3 text-slate-700">
               {children}
@@ -653,7 +667,9 @@ function MarkdownBody({ body }: { body: string }) {
             String(children).includes("\n") ? (
               <code className="block text-[13px] leading-6 text-slate-50">{children}</code>
             ) : (
-              <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] text-slate-800">{children}</code>
+              <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] text-slate-800">
+                {children}
+              </code>
             ),
           pre: ({ children }) => <pre className="mt-4 overflow-x-auto">{children}</pre>,
           hr: () => <hr className="my-6 border-slate-200" />,
@@ -663,8 +679,14 @@ function MarkdownBody({ body }: { body: string }) {
             </div>
           ),
           thead: ({ children }) => <thead className="bg-slate-50 text-slate-700">{children}</thead>,
-          th: ({ children }) => <th className="border-b border-slate-200 px-3 py-2 font-semibold">{children}</th>,
-          td: ({ children }) => <td className="border-b border-slate-100 px-3 py-2 align-top text-slate-700">{children}</td>,
+          th: ({ children }) => (
+            <th className="border-b border-slate-200 px-3 py-2 font-semibold">{children}</th>
+          ),
+          td: ({ children }) => (
+            <td className="border-b border-slate-100 px-3 py-2 align-top text-slate-700">
+              {children}
+            </td>
+          ),
         }}
       >
         {body}
@@ -697,13 +719,7 @@ function buildTreePruneSummary(nodes: TreeNodeItem[]): Map<number, TreePruneSumm
 
 /* ---------- Section header ---------- */
 
-function SectionHeader({
-  block,
-  count,
-}: {
-  block: UIBlock;
-  count?: number;
-}) {
+function SectionHeader({ block, count }: { block: UIBlock; count?: number }) {
   const tone = TONES[block.type];
   const Icon = TYPE_ICONS[block.type];
 
@@ -715,9 +731,7 @@ function SectionHeader({
         <Icon className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <p
-          className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.accentLabel}`}
-        >
+        <p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.accentLabel}`}>
           {block.display_label || tone.label}
         </p>
         <h3 className={`truncate text-sm font-semibold ${tone.accentTitle}`}>{block.title}</h3>
@@ -819,7 +833,9 @@ function PropertyCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {reactionLabel && (
-            <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${reactionTone}`}>
+            <span
+              className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${reactionTone}`}
+            >
               {reactionLabel}
             </span>
           )}
@@ -1192,7 +1208,15 @@ function TreeLegendItem({
     <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/88 px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm">
       <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4">
         {doubleRing && (
-          <circle cx="10" cy="10" r="8.2" fill="none" stroke={accent} strokeWidth="2.2" opacity="0.45" />
+          <circle
+            cx="10"
+            cy="10"
+            r="8.2"
+            fill="none"
+            stroke={accent}
+            strokeWidth="2.2"
+            opacity="0.45"
+          />
         )}
         <circle
           cx="10"
@@ -1311,11 +1335,32 @@ function TreeDiagram({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <TreeLegendItem color="#ffffff" accent="#0f766e" label="採用" count={selectedCount} doubleRing />
+          <TreeLegendItem
+            color="#ffffff"
+            accent="#0f766e"
+            label="採用"
+            count={selectedCount}
+            doubleRing
+          />
           <TreeLegendItem color="#ffffff" accent="#0891b2" label="採用パス" count={pathCount} />
-          <TreeLegendItem color="#38bdf8" accent="#0369a1" label="実行中" count={stats.running_node_count} />
-          <TreeLegendItem color="#10b981" accent="#047857" label="完了" count={stats.executed_node_count} />
-          <TreeLegendItem color="#e0f2fe" accent="#0284c7" label="待機" count={stats.frontier_remaining} />
+          <TreeLegendItem
+            color="#38bdf8"
+            accent="#0369a1"
+            label="実行中"
+            count={stats.running_node_count}
+          />
+          <TreeLegendItem
+            color="#10b981"
+            accent="#047857"
+            label="完了"
+            count={stats.executed_node_count}
+          />
+          <TreeLegendItem
+            color="#e0f2fe"
+            accent="#0284c7"
+            label="待機"
+            count={stats.frontier_remaining}
+          />
           <TreeLegendItem
             color="#ffffff"
             accent="#c2410c"
@@ -1324,7 +1369,12 @@ function TreeDiagram({
             dashed
             cut
           />
-          <TreeLegendItem color="#fda4af" accent="#be123c" label="失敗" count={stats.failed_node_count} />
+          <TreeLegendItem
+            color="#fda4af"
+            accent="#be123c"
+            label="失敗"
+            count={stats.failed_node_count}
+          />
         </div>
       </div>
 
@@ -1341,7 +1391,14 @@ function TreeDiagram({
             className="w-full"
             style={{ height: `${layout.height}px` }}
           >
-            <rect x="0" y="0" width={layout.width} height={layout.height} rx="26" fill="rgba(255,255,255,0.26)" />
+            <rect
+              x="0"
+              y="0"
+              width={layout.width}
+              height={layout.height}
+              rx="26"
+              fill="rgba(255,255,255,0.26)"
+            />
 
             {layout.depths.map((depth, index) => {
               const columnNodes = layout.nodes.filter((node) => node.depth === depth);
@@ -1377,16 +1434,20 @@ function TreeDiagram({
                 : edge.failed
                   ? "#fb7185"
                   : edge.highlighted
-                      ? "#0f766e"
-                      : edge.queued
-                        ? "#0284c7"
-                        : "#cbd5e1";
+                    ? "#0f766e"
+                    : edge.queued
+                      ? "#0284c7"
+                      : "#cbd5e1";
               return (
                 <g key={edge.key}>
                   <path
                     d={edge.path}
                     fill="none"
-                    stroke={edge.highlighted || edge.running ? "rgba(45,212,191,0.16)" : "rgba(148,163,184,0.12)"}
+                    stroke={
+                      edge.highlighted || edge.running
+                        ? "rgba(45,212,191,0.16)"
+                        : "rgba(148,163,184,0.12)"
+                    }
                     strokeWidth={edge.highlighted || edge.running ? 12 : 8}
                     strokeLinecap="round"
                   />
@@ -1431,7 +1492,14 @@ function TreeDiagram({
                   {node.kind === "root" && (
                     <>
                       <circle cx="0" cy="0" r={node.radius + 12} fill="rgba(15,118,110,0.10)" />
-                      <circle cx="0" cy="0" r={node.radius} fill="#ffffff" stroke="#0f766e" strokeWidth="3" />
+                      <circle
+                        cx="0"
+                        cy="0"
+                        r={node.radius}
+                        fill="#ffffff"
+                        stroke="#0f766e"
+                        strokeWidth="3"
+                      />
                       <circle cx="0" cy="0" r={10} fill="#0f766e" opacity="0.92" />
                       <circle cx="-16" cy="-12" r={3} fill="#14b8a6" opacity="0.95" />
                       <circle cx="16" cy="-12" r={3} fill="#0ea5e9" opacity="0.95" />
@@ -1497,8 +1565,24 @@ function TreeDiagram({
                       )}
                       {node.status === "failed" && (
                         <>
-                          <line x1={-8} y1={-8} x2={8} y2={8} stroke="#881337" strokeWidth="3" strokeLinecap="round" />
-                          <line x1={8} y1={-8} x2={-8} y2={8} stroke="#881337" strokeWidth="3" strokeLinecap="round" />
+                          <line
+                            x1={-8}
+                            y1={-8}
+                            x2={8}
+                            y2={8}
+                            stroke="#881337"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                          />
+                          <line
+                            x1={8}
+                            y1={-8}
+                            x2={-8}
+                            y2={8}
+                            stroke="#881337"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                          />
                         </>
                       )}
                     </>
@@ -1521,7 +1605,9 @@ function TreeDiagram({
                     <g transform={`translate(${node.radius * 0.88} ${-node.radius * 0.84})`}>
                       <title>
                         {`剪定 ${pruneSummary.count}件${
-                          pruneSummary.reasons.length > 0 ? `\n${pruneSummary.reasons.slice(0, 3).join("\n")}` : ""
+                          pruneSummary.reasons.length > 0
+                            ? `\n${pruneSummary.reasons.slice(0, 3).join("\n")}`
+                            : ""
                         }`}
                       </title>
                       <rect
@@ -1560,9 +1646,7 @@ function TreeDiagram({
         <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">
           depth {stats.max_depth_reached}
         </span>
-        <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">
-          hover for details
-        </span>
+        <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">hover for details</span>
       </div>
 
       {focusBranch && (
@@ -1593,9 +1677,7 @@ function TreeDiagram({
         </div>
       )}
 
-      {summary && (
-        <p className="text-[12px] leading-6 text-slate-600">{summary}</p>
-      )}
+      {summary && <p className="text-[12px] leading-6 text-slate-600">{summary}</p>}
     </div>
   );
 }
@@ -1687,9 +1769,27 @@ function TimelineStageGlyph({
             stroke={status.stroke}
             strokeWidth="3"
           />
-          <path d="M-14 -10 H12" stroke="#ffffff" strokeWidth="3.4" strokeLinecap="round" opacity="0.96" />
-          <path d="M-14 0 H18" stroke="#ffffff" strokeWidth="3.4" strokeLinecap="round" opacity="0.88" />
-          <path d="M-14 10 H8" stroke="#ffffff" strokeWidth="3.4" strokeLinecap="round" opacity="0.78" />
+          <path
+            d="M-14 -10 H12"
+            stroke="#ffffff"
+            strokeWidth="3.4"
+            strokeLinecap="round"
+            opacity="0.96"
+          />
+          <path
+            d="M-14 0 H18"
+            stroke="#ffffff"
+            strokeWidth="3.4"
+            strokeLinecap="round"
+            opacity="0.88"
+          />
+          <path
+            d="M-14 10 H8"
+            stroke="#ffffff"
+            strokeWidth="3.4"
+            strokeLinecap="round"
+            opacity="0.78"
+          />
         </>
       )}
 
@@ -1700,7 +1800,12 @@ function TimelineStageGlyph({
           <circle cx="-16" cy="-12" r="5.5" fill="#ffffff" opacity="0.9" />
           <circle cx="16" cy="-12" r="5.5" fill="#ffffff" opacity="0.9" />
           <circle cx="0" cy="18" r="5.5" fill="#ffffff" opacity="0.9" />
-          <path d="M-11 -8 L-4 -3 M11 -8 L4 -3 M0 10 L0 4" stroke={status.stroke} strokeWidth="2.4" strokeLinecap="round" />
+          <path
+            d="M-11 -8 L-4 -3 M11 -8 L4 -3 M0 10 L0 4"
+            stroke={status.stroke}
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
         </>
       )}
 
@@ -1716,15 +1821,37 @@ function TimelineStageGlyph({
             stroke={status.stroke}
             strokeWidth="3"
           />
-          <path d="M-12 -8 H8 M-12 0 H14 M-12 8 H4" stroke="#ffffff" strokeWidth="3.4" strokeLinecap="round" opacity="0.92" />
+          <path
+            d="M-12 -8 H8 M-12 0 H14 M-12 8 H4"
+            stroke="#ffffff"
+            strokeWidth="3.4"
+            strokeLinecap="round"
+            opacity="0.92"
+          />
           <circle cx="16" cy="0" r="4" fill="#ffffff" opacity="0.96" />
         </>
       )}
 
       {failed && (
         <>
-          <line x1="-11" y1="-11" x2="11" y2="11" stroke="#7f1d1d" strokeWidth="4" strokeLinecap="round" />
-          <line x1="11" y1="-11" x2="-11" y2="11" stroke="#7f1d1d" strokeWidth="4" strokeLinecap="round" />
+          <line
+            x1="-11"
+            y1="-11"
+            x2="11"
+            y2="11"
+            stroke="#7f1d1d"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
+          <line
+            x1="11"
+            y1="-11"
+            x2="-11"
+            y2="11"
+            stroke="#7f1d1d"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
         </>
       )}
     </>
@@ -1747,16 +1874,14 @@ function TimelineDiagram({
     { label: "動的探索", status: currentStage === "動的探索" ? "running" : "pending", detail: "" },
     { label: "結果要約", status: currentStage === "結果要約" ? "running" : "pending", detail: "" },
   ];
-  const stages = (items.length > 0 ? items : fallbackItems)
-    .slice(0, 3)
-    .map((item, index) => ({
-      label: toDisplayText(item.label) || `step-${index + 1}`,
-      status: toDisplayText(item.status) || "pending",
-      detail: toDisplayText(item.detail),
-      x: 120 + index * 300,
-      y: 116,
-      kind: timelineStageKind(index, toDisplayText(item.label)),
-    }));
+  const stages = (items.length > 0 ? items : fallbackItems).slice(0, 3).map((item, index) => ({
+    label: toDisplayText(item.label) || `step-${index + 1}`,
+    status: toDisplayText(item.status) || "pending",
+    detail: toDisplayText(item.detail),
+    x: 120 + index * 300,
+    y: 116,
+    kind: timelineStageKind(index, toDisplayText(item.label)),
+  }));
   const width = stages.length > 1 ? stages[stages.length - 1].x + 120 : 840;
   const height = 250;
   const connectors = stages.slice(0, -1).map((stage, index) => {
@@ -1783,8 +1908,12 @@ function TimelineDiagram({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-600">
-          <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">完了 {completedCount}</span>
-          <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">実行中 {runningCount}</span>
+          <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">
+            完了 {completedCount}
+          </span>
+          <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">
+            実行中 {runningCount}
+          </span>
           <span className="rounded-full bg-white/88 px-3 py-1.5 shadow-sm">失敗 {failedCount}</span>
         </div>
       </div>
@@ -1888,11 +2017,7 @@ function TimelineDiagram({
         </div>
       </div>
 
-      {summary && (
-        <p className="text-[12px] leading-6 text-slate-600">
-          {summary}
-        </p>
-      )}
+      {summary && <p className="text-[12px] leading-6 text-slate-600">{summary}</p>}
     </div>
   );
 }
@@ -1915,7 +2040,9 @@ export default function StructuredBlock({
     const body = toDisplayText(block.content.body);
     const format = toDisplayText(block.content.format).toLowerCase();
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} />
         <div className="px-4 py-3.5">
           {format === "markdown" ? (
@@ -1931,7 +2058,9 @@ export default function StructuredBlock({
   if (block.type === "warning") {
     const tone = TONES.warning;
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} />
         <div className="px-4 py-3.5">
           <p className="whitespace-pre-wrap text-[14px] leading-7 text-amber-900">
@@ -1962,14 +2091,18 @@ export default function StructuredBlock({
       : [];
 
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} />
         <div className="space-y-4 px-4 py-3.5">
           {(summary || goal || rationale) && (
             <div className="rounded-2xl border border-indigo-100 bg-white/85 p-4">
               {summary && <p className="text-sm font-semibold text-indigo-900">{summary}</p>}
               {goal && <p className="mt-2 text-[13px] leading-6 text-inkMuted">{goal}</p>}
-              {rationale && <p className="mt-2 text-[13px] leading-6 text-indigo-800/80">{rationale}</p>}
+              {rationale && (
+                <p className="mt-2 text-[13px] leading-6 text-indigo-800/80">{rationale}</p>
+              )}
             </div>
           )}
 
@@ -1980,8 +2113,13 @@ export default function StructuredBlock({
               </p>
               <dl className="mt-3 grid gap-2 sm:grid-cols-2">
                 {conditions.map((condition, idx) => (
-                  <div key={`${toDisplayText(condition.label)}-${idx}`} className="rounded-xl bg-indigo-50/70 px-3 py-2">
-                    <dt className="text-[11px] font-semibold text-indigo-700">{toDisplayText(condition.label)}</dt>
+                  <div
+                    key={`${toDisplayText(condition.label)}-${idx}`}
+                    className="rounded-xl bg-indigo-50/70 px-3 py-2"
+                  >
+                    <dt className="text-[11px] font-semibold text-indigo-700">
+                      {toDisplayText(condition.label)}
+                    </dt>
                     <dd className="mt-1 text-sm text-ink">{toDisplayText(condition.value)}</dd>
                     {toDisplayText(condition.reason) && (
                       <dd className="mt-1 text-[12px] leading-5 text-inkMuted">
@@ -2049,7 +2187,10 @@ export default function StructuredBlock({
 
   if (block.type === "timeline") {
     const tone = TONES.timeline;
-    const progress = Math.max(0, Math.min(100, toDisplayNumber(block.content.progress_percent) ?? 0));
+    const progress = Math.max(
+      0,
+      Math.min(100, toDisplayNumber(block.content.progress_percent) ?? 0)
+    );
     const currentStage = toDisplayText(block.content.current_stage);
     const summary = toDisplayText(block.content.summary);
     const items = Array.isArray(block.content.items)
@@ -2057,7 +2198,9 @@ export default function StructuredBlock({
       : [];
 
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} />
         <div className="px-4 py-3.5">
           <TimelineDiagram
@@ -2137,8 +2280,13 @@ export default function StructuredBlock({
       : null;
 
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
-        <SectionHeader block={block} count={nodes.filter((node) => node.kind !== "pruned").length} />
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
+        <SectionHeader
+          block={block}
+          count={nodes.filter((node) => node.kind !== "pruned").length}
+        />
         <div className="px-4 py-3.5">
           <TreeDiagram
             nodes={nodes}
@@ -2160,7 +2308,9 @@ export default function StructuredBlock({
       ? (block.content.items as Array<Record<string, unknown>>)
       : [];
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} count={items.length} />
         <div className="space-y-3 p-4">
           {items.map((item, idx) => {
@@ -2169,10 +2319,15 @@ export default function StructuredBlock({
               : [];
             const url = toDisplayText(item.url);
             return (
-              <article key={`${toDisplayText(item.title)}-${idx}`} className="rounded-2xl border border-teal-100 bg-white/90 p-4">
+              <article
+                key={`${toDisplayText(item.title)}-${idx}`}
+                className="rounded-2xl border border-teal-100 bg-white/90 p-4"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-teal-900">{toDisplayText(item.title)}</p>
+                    <p className="text-sm font-semibold text-teal-900">
+                      {toDisplayText(item.title)}
+                    </p>
                     {toDisplayText(item.matched_property) && (
                       <p className="mt-1 text-[12px] text-teal-700">
                         紐づく候補: {toDisplayText(item.matched_property)}
@@ -2187,13 +2342,18 @@ export default function StructuredBlock({
                 </div>
 
                 {toDisplayText(item.reason) && (
-                  <p className="mt-3 text-[13px] leading-6 text-ink">{toDisplayText(item.reason)}</p>
+                  <p className="mt-3 text-[13px] leading-6 text-ink">
+                    {toDisplayText(item.reason)}
+                  </p>
                 )}
 
                 {queries.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {queries.map((query) => (
-                      <span key={query} className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-medium text-teal-700">
+                      <span
+                        key={query}
+                        className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-medium text-teal-700"
+                      >
                         {query}
                       </span>
                     ))}
@@ -2227,7 +2387,9 @@ export default function StructuredBlock({
     }).length;
     const tone = TONES.question;
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} count={items.length} />
         <div className="space-y-3 px-4 py-3.5">
           {intro && <p className="text-[14px] leading-7 text-emerald-900">{intro}</p>}
@@ -2312,7 +2474,9 @@ export default function StructuredBlock({
     const selectedCount = items.filter((item) => Boolean(item.compare_selected)).length;
     const tone = TONES.cards;
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} count={items.length} />
         <div className="space-y-3 p-4">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -2355,7 +2519,9 @@ export default function StructuredBlock({
     const rows = (block.content.rows as Array<Record<string, unknown>>) ?? [];
     const tone = TONES.table;
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} count={rows.length} />
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs">
@@ -2390,7 +2556,9 @@ export default function StructuredBlock({
     const doneCount = items.filter((i) => i.checked).length;
     const tone = TONES.checklist;
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} count={items.length} />
         {items.length > 0 && (
           <div className="border-b border-sky-100 bg-sky-50/50 px-4 py-2 text-[11px] font-semibold text-sky-700">
@@ -2431,7 +2599,9 @@ export default function StructuredBlock({
     const items = (block.content.items as ActionDescriptor[]) ?? [];
     const tone = TONES.actions;
     return (
-      <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
+      <section
+        className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}
+      >
         <SectionHeader block={block} count={items.length} />
         <div className="space-y-2 p-4">
           {items.map((item, idx) => (

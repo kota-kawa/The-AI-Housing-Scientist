@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+from datetime import date
 import json
 import re
-from datetime import date
 from typing import Any
 
 from app.llm.base import LLMAdapter
-
 
 INTEGRITY_DIMENSIONS = (
     "freshness",
@@ -73,8 +72,7 @@ def _extract_layout_values(text: str) -> list[str]:
 
 def _extract_walk_values(text: str) -> list[int]:
     values = [
-        int(match.group(1))
-        for match in re.finditer(r"徒歩\s*(\d{1,2})\s*分", str(text or ""))
+        int(match.group(1)) for match in re.finditer(r"徒歩\s*(\d{1,2})\s*分", str(text or ""))
     ]
     return [value for value in values if value > 0]
 
@@ -197,7 +195,9 @@ def _rule_review_for_property(
 
     if any(token in source_text for token in UNAVAILABLE_TOKENS):
         scores["freshness"] = 1
-        inconsistencies.append("募集終了・成約済みを示す表記があり、現時点の募集情報として信頼しづらい")
+        inconsistencies.append(
+            "募集終了・成約済みを示す表記があり、現時点の募集情報として信頼しづらい"
+        )
         hard_drop = True
 
     available_date = _parse_available_date(
@@ -210,7 +210,9 @@ def _rule_review_for_property(
 
     if any(token in source_text for token in REFERENCE_TOKENS):
         scores["listing_consistency"] = min(scores["listing_consistency"], 3)
-        inconsistencies.append("参考写真・別部屋情報の可能性があり、実際の募集住戸と一致するか再確認が必要")
+        inconsistencies.append(
+            "参考写真・別部屋情報の可能性があり、実際の募集住戸と一致するか再確認が必要"
+        )
 
     rent = int(prop.get("rent") or 0)
     rent_values = _extract_labeled_money_values(source_text, ("家賃", "賃料"))
@@ -253,10 +255,14 @@ def _rule_review_for_property(
 
     station_walk = int(prop.get("station_walk_min") or 0)
     walk_values = _unique_numeric(_extract_walk_values(source_text), tolerance=1)
-    if station_walk > 0 and walk_values:
-        if all(abs(value - station_walk) > 1 for value in walk_values) and len(walk_values) >= 1:
-            scores["listing_consistency"] = min(scores["listing_consistency"], 2)
-            inconsistencies.append("駅徒歩分数の表記が抽出値と食い違っている")
+    if (
+        station_walk > 0
+        and walk_values
+        and all(abs(value - station_walk) > 1 for value in walk_values)
+        and len(walk_values) >= 1
+    ):
+        scores["listing_consistency"] = min(scores["listing_consistency"], 2)
+        inconsistencies.append("駅徒歩分数の表記が抽出値と食い違っている")
 
     if scores["evidence_completeness"] <= 2:
         inconsistencies.append("比較に必要な主要項目が不足している")
@@ -296,9 +302,21 @@ def _build_llm_integrity_reviews(
                             "type": "object",
                             "properties": {
                                 "freshness": {"type": "integer", "minimum": 1, "maximum": 5},
-                                "pricing_consistency": {"type": "integer", "minimum": 1, "maximum": 5},
-                                "listing_consistency": {"type": "integer", "minimum": 1, "maximum": 5},
-                                "evidence_completeness": {"type": "integer", "minimum": 1, "maximum": 5},
+                                "pricing_consistency": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 5,
+                                },
+                                "listing_consistency": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 5,
+                                },
+                                "evidence_completeness": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 5,
+                                },
                             },
                             "required": list(INTEGRITY_DIMENSIONS),
                             "additionalProperties": False,
@@ -454,7 +472,9 @@ def _merge_reviews(
         )
 
     return {
-        "property_id_norm": str(rule_review.get("property_id_norm") or llm_review.get("property_id_norm") or ""),
+        "property_id_norm": str(
+            rule_review.get("property_id_norm") or llm_review.get("property_id_norm") or ""
+        ),
         "trust_score": trust_score,
         "dimension_scores": merged_scores,
         "inconsistencies": inconsistencies,
@@ -462,7 +482,9 @@ def _merge_reviews(
             list(rule_review.get("evidence_urls", []) or [])
             + list(llm_review.get("evidence_urls", []) or [])
         ),
-        "should_drop": bool(rule_review.get("should_drop") or llm_review.get("should_drop") or trust_score < 55),
+        "should_drop": bool(
+            rule_review.get("should_drop") or llm_review.get("should_drop") or trust_score < 55
+        ),
     }
 
 

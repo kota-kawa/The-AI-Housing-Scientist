@@ -33,7 +33,9 @@ class AnthropicAdapter(LLMAdapter):
             "content-type": "application/json",
         }
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         last_error: Exception | None = None
 
@@ -46,7 +48,15 @@ class AnthropicAdapter(LLMAdapter):
                 except httpx.HTTPError as exc:
                     last_error = exc
                     status = getattr(getattr(exc, "response", None), "status_code", None)
-                    non_retryable = status is not None and status not in (408, 409, 429, 500, 502, 503, 504)
+                    non_retryable = status is not None and status not in (
+                        408,
+                        409,
+                        429,
+                        500,
+                        502,
+                        503,
+                        504,
+                    )
                     if non_retryable or attempt == self.max_retries:
                         break
 
@@ -95,9 +105,7 @@ class AnthropicAdapter(LLMAdapter):
     ) -> dict[str, Any]:
         system = with_current_date_context(system)
         strict_user = (
-            f"{user}\n\n"
-            "Return only one JSON object that satisfies this JSON Schema:\n"
-            f"{schema}"
+            f"{user}\n\nReturn only one JSON object that satisfies this JSON Schema:\n{schema}"
         )
         total_prompt_tokens = 0
         total_completion_tokens = 0
@@ -128,7 +136,9 @@ class AnthropicAdapter(LLMAdapter):
                         total_tokens=total_prompt_tokens + total_completion_tokens,
                         raw=total_usage_raw,
                     )
-                    raise RuntimeError(f"claude structured response validation failed: {exc}") from exc
+                    raise RuntimeError(
+                        f"claude structured response validation failed: {exc}"
+                    ) from exc
                 strict_user = (
                     strict_user
                     + "\n\nThe previous response was invalid. Return only valid JSON without markdown fences."

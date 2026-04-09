@@ -209,7 +209,8 @@ class OrchestratorActionsMixin:
                     "selected_branch_id": str(task_memory.get("selected_branch_id") or ""),
                     "selected_path": task_memory.get("selected_path") or [],
                     "search_tree_summary": task_memory.get("search_tree_summary") or {},
-                    "top_issues": (task_memory.get("failure_summary") or {}).get("top_issues", []) or [],
+                    "top_issues": (task_memory.get("failure_summary") or {}).get("top_issues", [])
+                    or [],
                 },
             }
             job_id, _ = self.db.create_research_job(
@@ -257,7 +258,9 @@ class OrchestratorActionsMixin:
                     )
                     + self._build_compare_blocks(
                         property_ids=property_ids,
-                        ranked_properties=self._visible_ranked_properties(ranked_properties, task_memory),
+                        ranked_properties=self._visible_ranked_properties(
+                            ranked_properties, task_memory
+                        ),
                         normalized_properties=normalized_properties,
                         property_reactions=property_reactions,
                     )
@@ -336,7 +339,9 @@ class OrchestratorActionsMixin:
 
             self.db.update_memories(session_id, user_memory, task_memory)
 
-            visible_ranked_properties = self._visible_ranked_properties(ranked_properties, task_memory)
+            visible_ranked_properties = self._visible_ranked_properties(
+                ranked_properties, task_memory
+            )
             reaction_label = {
                 "favorite": "気になる",
                 "exclude": "除外",
@@ -408,7 +413,9 @@ class OrchestratorActionsMixin:
                 missing_slots=[],
                 next_action="confirm_before_send",
                 blocks=self._build_inquiry_blocks(
-                    ranked_properties=self._visible_ranked_properties(ranked_properties, task_memory),
+                    ranked_properties=self._visible_ranked_properties(
+                        ranked_properties, task_memory
+                    ),
                     normalized_properties=normalized_properties,
                     communication=communication_result,
                     selected_property_id=property_id,
@@ -421,7 +428,9 @@ class OrchestratorActionsMixin:
             return response
 
         if action_type == "start_contract_review":
-            property_id = str(payload.get("property_id") or task_memory.get("selected_property_id") or "")
+            property_id = str(
+                payload.get("property_id") or task_memory.get("selected_property_id") or ""
+            )
             task_memory["status"] = "awaiting_contract_text"
             task_memory["awaiting_contract_text"] = True
             if property_id:

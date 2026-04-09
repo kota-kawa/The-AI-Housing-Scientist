@@ -14,7 +14,9 @@ def test_generate_text_adds_hidden_reasoning_for_groq_qwen(monkeypatch):
     )
     captured: dict[str, object] = {}
 
-    def fake_request(method: str, path: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+    def fake_request(
+        method: str, path: str, payload: dict[str, object] | None = None
+    ) -> dict[str, object]:
         captured["method"] = method
         captured["path"] = path
         captured["payload"] = payload or {}
@@ -60,7 +62,9 @@ def test_generate_structured_adds_hidden_reasoning_for_groq_qwen(monkeypatch):
     )
     captured: dict[str, object] = {}
 
-    def fake_request(method: str, path: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+    def fake_request(
+        method: str, path: str, payload: dict[str, object] | None = None
+    ) -> dict[str, object]:
         captured["method"] = method
         captured["path"] = path
         captured["payload"] = payload or {}
@@ -122,7 +126,9 @@ def test_generate_text_does_not_add_hidden_reasoning_for_other_models(monkeypatc
     )
     captured: dict[str, object] = {}
 
-    def fake_request(method: str, path: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+    def fake_request(
+        method: str, path: str, payload: dict[str, object] | None = None
+    ) -> dict[str, object]:
         captured["payload"] = payload or {}
         return {
             "choices": [

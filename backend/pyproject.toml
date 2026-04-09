@@ -1,0 +1,53 @@
+[project]
+name = "ai-housing-scientist"
+version = "0.1.0"
+description = "AI-powered rental property research and recommendation agent"
+requires-python = ">=3.11"
+
+# ─────────────────────────────────────────────
+# Ruff — linting & formatting
+# https://docs.astral.sh/ruff/
+# ─────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (unused imports, undefined names, etc.)
+    "I",   # isort (import ordering)
+    "B",   # flake8-bugbear (likely bugs and design problems)
+    "UP",  # pyupgrade (modernize Python syntax)
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",   # line too long — handled by the formatter
+    "B008",   # FastAPI uses function calls as default arguments (Depends, Query, etc.)
+    "B904",   # allow raise without from in exception handlers
+    "UP007",  # X | Y union syntax — keep Optional[] for readability
+    "SIM108", # ternary expressions can hurt readability in complex logic
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+force-sort-within-sections = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+# ─────────────────────────────────────────────
+# Coverage
+# ─────────────────────────────────────────────
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/stages/prompts/*", "*/tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 60

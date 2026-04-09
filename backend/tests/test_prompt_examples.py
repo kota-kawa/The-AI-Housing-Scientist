@@ -42,7 +42,9 @@ def test_planner_prompt_examples_golden_cases_cover_core_slot_patterns():
     assert explicit["user_memory"]["budget_max"] == 100000
     assert explicit["user_memory"]["must_conditions"] == ["RC造"]
     assert len(explicit["seed_queries"]) >= 5
-    assert any(any(area in query for area in ["相模原", "南町田"]) for query in explicit["seed_queries"])
+    assert any(
+        any(area in query for area in ["相模原", "南町田"]) for query in explicit["seed_queries"]
+    )
     assert any("小田急線" in query for query in explicit["seed_queries"])
     assert any("11万円以下" in query for query in explicit["seed_queries"])
 

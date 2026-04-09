@@ -224,7 +224,11 @@ def run_communication(
     top = ranked_properties[0]
     if selected_property_id:
         selected = next(
-            (item for item in ranked_properties if item["property_id_norm"] == selected_property_id),
+            (
+                item
+                for item in ranked_properties
+                if item["property_id_norm"] == selected_property_id
+            ),
             None,
         )
         if selected is not None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from collections import Counter
+import json
 from pathlib import Path
 from typing import Any
 
@@ -200,7 +200,9 @@ def evaluate_branch(
     )
     issue_class = _classify_top_issue(issues)
     parent_score = float((parent_summary or {}).get("branch_score") or 0.0)
-    delta_from_parent = round(score - parent_score, 2) if parent_summary is not None else round(score, 2)
+    delta_from_parent = (
+        round(score - parent_score, 2) if parent_summary is not None else round(score, 2)
+    )
     frontier_score = round(score, 2)
     prune_reasons: list[str] = []
 
@@ -269,7 +271,10 @@ def has_material_improvement_over_parent(
     return (
         (detail_gain is not None and detail_gain >= REPEATED_ISSUE_MIN_DETAIL_COVERAGE_IMPROVEMENT)
         or (avg_top3_gain is not None and avg_top3_gain >= REPEATED_ISSUE_MIN_AVG_TOP3_IMPROVEMENT)
-        or (normalized_gain is not None and normalized_gain >= REPEATED_ISSUE_MIN_NORMALIZED_COUNT_IMPROVEMENT)
+        or (
+            normalized_gain is not None
+            and normalized_gain >= REPEATED_ISSUE_MIN_NORMALIZED_COUNT_IMPROVEMENT
+        )
     )
 
 
@@ -366,7 +371,9 @@ def evaluate_final_result(
         and structured_ratio_metric >= _metric_value(0.6, name="structured_ratio")
     ):
         readiness = "high"
-    elif visible_count >= 1 and detail_coverage_metric >= _metric_value(0.3, name="detail_coverage"):
+    elif visible_count >= 1 and detail_coverage_metric >= _metric_value(
+        0.3, name="detail_coverage"
+    ):
         readiness = "medium"
 
     recommendations: list[str] = []
@@ -442,7 +449,9 @@ def generate_branch_selection_rationale(
             temperature=0.1,
         )
         why = str(result.get("why_selected") or "").strip()
-        suggestions = [str(s).strip() for s in (result.get("improvement_suggestions") or []) if str(s).strip()]
+        suggestions = [
+            str(s).strip() for s in (result.get("improvement_suggestions") or []) if str(s).strip()
+        ]
         parts = [why] + suggestions
         return " / ".join(p for p in parts if p)
     except Exception:
@@ -481,7 +490,9 @@ def run_offline_eval_case(
 
     analysis: dict[str, Any] = {}
     if adapter is not None and selected_branch is not None and len(branch_summaries) > 1:
-        other_branches = [b for b in branch_summaries if b.get("branch_id") != selected_branch.get("branch_id")]
+        other_branches = [
+            b for b in branch_summaries if b.get("branch_id") != selected_branch.get("branch_id")
+        ]
         rationale = generate_branch_selection_rationale(
             selected_branch=selected_branch,
             other_branches=other_branches,

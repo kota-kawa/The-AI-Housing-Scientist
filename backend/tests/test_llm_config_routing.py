@@ -88,7 +88,9 @@ def test_session_llm_config_defaults_and_custom_update(tmp_path: Path, monkeypat
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
     db.init()
-    orchestrator = HousingOrchestrator(settings=build_settings(database_path, with_keys=True), db=db)
+    orchestrator = HousingOrchestrator(
+        settings=build_settings(database_path, with_keys=True), db=db
+    )
     session_id, _ = db.create_session()
 
     monkeypatch.setattr(
@@ -141,10 +143,12 @@ def test_research_job_uses_llm_config_snapshot_per_execution(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
     db.init()
-    orchestrator = HousingOrchestrator(settings=build_settings(database_path, with_keys=False), db=db)
+    orchestrator = HousingOrchestrator(
+        settings=build_settings(database_path, with_keys=False), db=db
+    )
     planner_adapter = FakePlannerRouteAdapter()
-    orchestrator._get_adapter_for_route = (
-        lambda **kwargs: planner_adapter if kwargs.get("route_key") == "planner" else None
+    orchestrator._get_adapter_for_route = lambda **kwargs: (
+        planner_adapter if kwargs.get("route_key") == "planner" else None
     )
     session_id, _ = db.create_session()
 

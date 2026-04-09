@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
-import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+import hashlib
+import json
+import time
 from typing import Any
 
 from app.research.journal import ResearchIntent
@@ -119,7 +119,11 @@ class AgentManagerTreeMixin:
         except Exception:
             return []
         return self._dedupe_queries(
-            [str(item).strip() for item in result.get("query_suggestions", []) if str(item).strip()],
+            [
+                str(item).strip()
+                for item in result.get("query_suggestions", [])
+                if str(item).strip()
+            ],
             limit=2,
         )
 
@@ -150,7 +154,9 @@ class AgentManagerTreeMixin:
             queries.extend(
                 [
                     self._compose_query(area, layout, " ".join(must_conditions[:2]), "賃貸"),
-                    self._compose_query(area, layout, f"{int(budget / 10000)}万円" if budget else "", "賃貸"),
+                    self._compose_query(
+                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "賃貸"
+                    ),
                     self._compose_query(area, layout, f"徒歩{walk}分" if walk else "", "賃貸"),
                 ]
             )
@@ -173,7 +179,9 @@ class AgentManagerTreeMixin:
         elif operator == "detail_first":
             queries.extend(
                 [
-                    self._compose_query(area, layout, f"{int(budget / 10000)}万円" if budget else "", "設備", "賃貸"),
+                    self._compose_query(
+                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "設備", "賃貸"
+                    ),
                     self._compose_query(area, layout, "詳細", "賃貸"),
                     self._compose_query(area, "初期費用", "賃貸"),
                 ]
@@ -189,7 +197,9 @@ class AgentManagerTreeMixin:
         elif operator == "exploit_best":
             queries.extend(
                 [
-                    self._compose_query(area, layout, f"{int(budget / 10000)}万円" if budget else "", "駅近", "賃貸"),
+                    self._compose_query(
+                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "駅近", "賃貸"
+                    ),
                     self._compose_query(area, layout, "候補", "賃貸"),
                 ]
             )
@@ -752,13 +762,21 @@ class AgentManagerTreeMixin:
     ) -> float:
         score = float(summary.get("branch_score") or 0.0)
         if parent_summary is not None:
-            if float(summary.get("detail_coverage") or 0.0) > float(parent_summary.get("detail_coverage") or 0.0):
+            if float(summary.get("detail_coverage") or 0.0) > float(
+                parent_summary.get("detail_coverage") or 0.0
+            ):
                 score += 10.0
-            if float(summary.get("structured_ratio") or 0.0) > float(parent_summary.get("structured_ratio") or 0.0):
+            if float(summary.get("structured_ratio") or 0.0) > float(
+                parent_summary.get("structured_ratio") or 0.0
+            ):
                 score += 8.0
-            if str(summary.get("top_issue_class") or "") == str(parent_summary.get("top_issue_class") or ""):
+            if str(summary.get("top_issue_class") or "") == str(
+                parent_summary.get("top_issue_class") or ""
+            ):
                 score -= 8.0
-        parent_tags = set(parent_summary.get("strategy_tags", []) or []) if parent_summary else set()
+        parent_tags = (
+            set(parent_summary.get("strategy_tags", []) or []) if parent_summary else set()
+        )
         if any(tag not in parent_tags for tag in strategy_tags):
             score += 5.0
 
@@ -780,14 +798,18 @@ class AgentManagerTreeMixin:
         reasons: list[str] = []
         if float(summary.get("branch_score") or 0.0) < self.tree_prune_score:
             reasons.append("low_branch_score")
-        if int(summary.get("depth") or 0) >= 1 and float(summary.get("detail_coverage") or 0.0) < 0.2:
+        if (
+            int(summary.get("depth") or 0) >= 1
+            and float(summary.get("detail_coverage") or 0.0) < 0.2
+        ):
             reasons.append("low_detail_coverage")
         if int(summary.get("depth") or 0) > self.tree_max_depth:
             reasons.append("depth_limit")
         if (
             parent_summary is not None
             and str(summary.get("top_issue_class") or "")
-            and str(summary.get("top_issue_class") or "") == str(parent_summary.get("top_issue_class") or "")
+            and str(summary.get("top_issue_class") or "")
+            == str(parent_summary.get("top_issue_class") or "")
         ):
             artifact = state.node_artifacts.get(str(summary.get("branch_id") or ""))
             if artifact is not None and artifact.issue_streak >= 2:
@@ -964,8 +986,12 @@ class AgentManagerTreeMixin:
                 depth=plan.depth,
             )
             parent_artifacts = state.node_artifacts.get(plan.parent_key or "")
-            if parent_summary is not None and summary["top_issue_class"] == parent_summary.get("top_issue_class"):
-                artifacts.issue_streak = (parent_artifacts.issue_streak if parent_artifacts else 0) + 1
+            if parent_summary is not None and summary["top_issue_class"] == parent_summary.get(
+                "top_issue_class"
+            ):
+                artifacts.issue_streak = (
+                    parent_artifacts.issue_streak if parent_artifacts else 0
+                ) + 1
             elif summary["top_issue_class"] != "healthy":
                 artifacts.issue_streak = 1
             else:
@@ -976,7 +1002,9 @@ class AgentManagerTreeMixin:
                 parent_summary=parent_summary,
             )
             artifacts.summary = summary
-            artifacts.frontier_score = float(summary.get("frontier_score") or artifacts.frontier_score)
+            artifacts.frontier_score = float(
+                summary.get("frontier_score") or artifacts.frontier_score
+            )
             artifacts.status = "completed"
             self._cache_candidate_readiness(
                 artifacts=artifacts,
@@ -1049,7 +1077,9 @@ class AgentManagerTreeMixin:
     ) -> list[dict[str, Any]]:
         loop = asyncio.get_running_loop()
         worker_count = max(1, min(5, self.tree_batch_size, len(plans)))
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="tree-branch") as executor:
+        with ThreadPoolExecutor(
+            max_workers=worker_count, thread_name_prefix="tree-branch"
+        ) as executor:
             tasks = [
                 loop.run_in_executor(
                     executor,
@@ -1116,7 +1146,7 @@ class AgentManagerTreeMixin:
             else:
                 summaries = [self._execute_candidate(state, plan=plan) for plan in plans]
 
-        for plan, summary in zip(plans, summaries):
+        for plan, summary in zip(plans, summaries, strict=False):
             self._upsert_branch_summary(state, plan=plan, summary=summary)
         return summaries
 
@@ -1150,7 +1180,9 @@ class AgentManagerTreeMixin:
                     base_queries=base_queries,
                     base_profile=base_profile,
                     parent_key=plan.node_key,
-                    parent_node_id=parent_artifacts.journal_node_id if parent_artifacts else plan.parent_node_id,
+                    parent_node_id=parent_artifacts.journal_node_id
+                    if parent_artifacts
+                    else plan.parent_node_id,
                     depth=plan.depth + 1,
                     extra_tags=plan.strategy_tags,
                     parent_summary=summary,
@@ -1173,7 +1205,9 @@ class AgentManagerTreeMixin:
         plan: SearchNodePlan,
         summary: dict[str, Any],
     ) -> list[str]:
-        prune_reasons = {str(item).strip() for item in summary.get("prune_reasons", []) if str(item).strip()}
+        prune_reasons = {
+            str(item).strip() for item in summary.get("prune_reasons", []) if str(item).strip()
+        }
         if "depth_limit" in prune_reasons or any(
             reason.startswith("repeated_issue:") for reason in prune_reasons
         ):
@@ -1186,7 +1220,10 @@ class AgentManagerTreeMixin:
         if summary.get("status") == "failed":
             if failure_stage == "retrieve" or "検索結果が取得できていない" in joined_issues:
                 operators.extend(["source_diversify", "relax_for_coverage"])
-            if failure_stage in {"enrich", "normalize_dedupe", "integrity_review"} or "詳細ページ補完率が低い" in joined_issues:
+            if (
+                failure_stage in {"enrich", "normalize_dedupe", "integrity_review"}
+                or "詳細ページ補完率が低い" in joined_issues
+            ):
                 operators.extend(["detail_first", "schema_first"])
             if failure_stage == "rank" or "上位候補の条件一致度が低い" in joined_issues:
                 operators.extend(["tighten_match", "explore_adjacent"])
@@ -1210,9 +1247,7 @@ class AgentManagerTreeMixin:
 
         deduped: list[str] = []
         preferred = [
-            operator
-            for operator in operators
-            if operator and operator not in plan.strategy_tags
+            operator for operator in operators if operator and operator not in plan.strategy_tags
         ] + [operator for operator in operators if operator]
         for operator in preferred:
             if operator not in deduped:
@@ -1295,7 +1330,9 @@ class AgentManagerTreeMixin:
                     "debug_depth": int(summary.get("debug_depth") or artifacts.plan.debug_depth),
                     "strategy_tags": artifacts.plan.strategy_tags,
                     "branch_score": float(summary.get("branch_score") or 0.0),
-                    "frontier_score": float(summary.get("frontier_score") or artifacts.frontier_score),
+                    "frontier_score": float(
+                        summary.get("frontier_score") or artifacts.frontier_score
+                    ),
                     "summary": str(summary.get("summary") or ""),
                 }
             )
@@ -1370,7 +1407,11 @@ class AgentManagerTreeMixin:
             if artifacts.summary.get("status") != "completed":
                 continue
             path_artifacts = self._branch_path_artifacts(state, node_key=artifacts.plan.node_key)
-            path_keys = tuple(item.plan.node_key for item in path_artifacts if item.summary.get("status") == "completed")
+            path_keys = tuple(
+                item.plan.node_key
+                for item in path_artifacts
+                if item.summary.get("status") == "completed"
+            )
             if not path_keys:
                 continue
             if path_keys not in cache:
@@ -1381,7 +1422,9 @@ class AgentManagerTreeMixin:
             branch_result_summary = self._cache_copy(cache[path_keys])
             artifacts.normalize["branch_result_summary"] = self._cache_copy(branch_result_summary)
             if artifacts.integrity:
-                artifacts.integrity["branch_result_summary"] = self._cache_copy(branch_result_summary)
+                artifacts.integrity["branch_result_summary"] = self._cache_copy(
+                    branch_result_summary
+                )
             artifacts.summary["branch_result_summary"] = self._cache_copy(branch_result_summary)
 
     def _build_search_tree_summary(self, state: ResearchExecutionState) -> dict[str, Any]:
@@ -1412,9 +1455,7 @@ class AgentManagerTreeMixin:
             "selected_branch_id": str(state.selected_branch_summary.get("branch_id") or ""),
             "selected_path_tags": selected_path_tags,
             "retry_context_used": bool(state.retry_context),
-            "issue_distribution": {
-                label: count for label, count in issue_counter.most_common(5)
-            },
+            "issue_distribution": dict(issue_counter.most_common(5)),
         }
 
     def _cache_candidate_readiness(
@@ -1496,14 +1537,17 @@ class AgentManagerTreeMixin:
             parent_artifacts = state.node_artifacts.get(parent_key) if parent_key else None
             parent_summary = (
                 parent_artifacts.summary
-                if parent_artifacts is not None and parent_artifacts.summary.get("status") == "completed"
+                if parent_artifacts is not None
+                and parent_artifacts.summary.get("status") == "completed"
                 else None
             )
-            if best_artifacts is None:
-                best_artifacts = candidate_artifacts
-            elif is_branch_selection_eligible(candidate_summary, parent_summary=parent_summary) and (
-                branch_selection_sort_key(candidate_summary)
-                > branch_selection_sort_key(best_artifacts.summary)
+            if (
+                best_artifacts is None
+                or is_branch_selection_eligible(candidate_summary, parent_summary=parent_summary)
+                and (
+                    branch_selection_sort_key(candidate_summary)
+                    > branch_selection_sort_key(best_artifacts.summary)
+                )
             ):
                 best_artifacts = candidate_artifacts
 
@@ -1594,9 +1638,7 @@ class AgentManagerTreeMixin:
                     continue
 
                 if len(selected_plans) == 1:
-                    latest_summary = (
-                        f"{selected_plans[0].label} を depth {selected_plans[0].depth} で検証しています。"
-                    )
+                    latest_summary = f"{selected_plans[0].label} を depth {selected_plans[0].depth} で検証しています。"
                 else:
                     latest_summary = f"{len(selected_plans)}件の探索ノードを並列検証しています。"
                 self._update_job(
@@ -1607,7 +1649,7 @@ class AgentManagerTreeMixin:
 
                 should_stop = False
                 summaries = self._expand_branch_batch(state, plans=selected_plans)
-                for plan, summary in zip(selected_plans, summaries):
+                for plan, summary in zip(selected_plans, summaries, strict=False):
                     node_key = plan.node_key
                     self._refresh_best_node(state, candidate_key=node_key)
 
@@ -1661,7 +1703,9 @@ class AgentManagerTreeMixin:
                 parent_node_id=(
                     selected_artifacts.journal_node_id
                     if selected_artifacts and selected_artifacts.journal_node_id
-                    else state.root_node.id if state.root_node else None
+                    else state.root_node.id
+                    if state.root_node
+                    else None
                 ),
                 branch_id=str(state.selected_branch_summary.get("branch_id") or ""),
                 selected=True,
@@ -1674,8 +1718,7 @@ class AgentManagerTreeMixin:
             selected_label = str(state.selected_branch_summary.get("label") or "none")
             return {
                 "summary": (
-                    f"探索ノード{len(state.branch_summaries)}件を評価し、"
-                    f"{selected_label} を採用"
+                    f"探索ノード{len(state.branch_summaries)}件を評価し、{selected_label} を採用"
                 ),
                 "selected_branch": state.selected_branch_summary,
                 "selected_path": state.selected_path,

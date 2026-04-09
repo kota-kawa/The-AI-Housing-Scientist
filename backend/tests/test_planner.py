@@ -299,10 +299,16 @@ def test_planner_uses_llm_generated_questions_queries_and_plan():
     assert result["intent"] == "search"
     assert result["next_action"] == "search_and_compare"
     assert result["seed_queries"][0] == "江東区 賃貸 12万円 1LDK ペット可"
-    assert result["research_plan"]["strategy"][1] == "在宅ワーク向け設備や回線条件は詳細ページで重点確認します。"
+    assert (
+        result["research_plan"]["strategy"][1]
+        == "在宅ワーク向け設備や回線条件は詳細ページで重点確認します。"
+    )
     assert result["follow_up_questions"][0]["slot"] == "move_in_date"
     assert "ペットと一緒に住む前提" in result["follow_up_questions"][0]["question"]
-    assert result["condition_reasons"]["must_conditions"] == "ペット可は候補数が限られるので最優先で見ます。"
+    assert (
+        result["condition_reasons"]["must_conditions"]
+        == "ペット可は候補数が限られるので最優先で見ます。"
+    )
 
 
 def test_planner_keeps_up_to_eight_seed_queries():
@@ -442,9 +448,7 @@ def test_planner_injects_two_prompt_examples_into_llm_payload():
     assert all("case_id" in item for item in payload["examples"])
     assert all("input" in item for item in payload["examples"])
     assert all("output" in item for item in payload["examples"])
-    assert any(
-        "非網羅" in rule or "固定候補" in rule for rule in payload["decision_rules"]
-    )
+    assert any("非網羅" in rule or "固定候補" in rule for rule in payload["decision_rules"])
     assert any("近隣エリア" in rule or "沿線違い" in rule for rule in payload["decision_rules"])
     assert any("必須条件を外した比較用" in rule for rule in payload["decision_rules"])
     assert "固定してはいけません" in payload["examples_instruction"]

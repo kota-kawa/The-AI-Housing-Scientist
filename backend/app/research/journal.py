@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, field
+import threading
 from typing import Any, Literal
 
 ResearchIntent = Literal["draft", "refine", "pivot", "recovery"]
@@ -99,7 +99,9 @@ class ResearchJournal:
 
     def latest_stage_node(self, stage: str) -> ResearchNode | None:
         with self._lock:
-            candidates = [node for node in self.nodes if node.node_type == "stage" and node.stage == stage]
+            candidates = [
+                node for node in self.nodes if node.node_type == "stage" and node.stage == stage
+            ]
             if not candidates:
                 return None
             return candidates[-1]

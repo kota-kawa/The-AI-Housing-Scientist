@@ -6,7 +6,6 @@ from typing import Any
 from app.llm.base import LLMAdapter
 from app.models import RiskItem
 
-
 RISK_RULES = [
     (
         "renewal_fee",
@@ -134,14 +133,9 @@ def _build_llm_risk_result(source_text: str, adapter: LLMAdapter) -> dict[str, A
         temperature=0.0,
     )
     return {
-        "risk_items": [
-            RiskItem(**item).model_dump()
-            for item in result.get("risk_items", [])
-        ],
+        "risk_items": [RiskItem(**item).model_dump() for item in result.get("risk_items", [])],
         "must_confirm_list": [
-            str(item).strip()
-            for item in result.get("must_confirm_list", [])
-            if str(item).strip()
+            str(item).strip() for item in result.get("must_confirm_list", []) if str(item).strip()
         ],
     }
 

@@ -62,7 +62,9 @@ def _compose_query(*parts: str) -> str:
 
 
 class OrchestratorResearchMixin:
-    def _build_research_queries(self, user_memory: dict[str, Any], seed_queries: list[str]) -> list[str]:
+    def _build_research_queries(
+        self, user_memory: dict[str, Any], seed_queries: list[str]
+    ) -> list[str]:
         area = _normalize_query_text(user_memory.get("target_area"))
         layout = str(user_memory.get("layout_preference") or "").strip()
         budget = int(user_memory.get("budget_max") or 0)
@@ -86,9 +88,7 @@ class OrchestratorResearchMixin:
         line_hints = _lookup_area_hints(area, AREA_LINE_HINTS)
 
         normalized_seed_queries = [
-            _normalize_query_text(item)
-            for item in seed_queries
-            if _normalize_query_text(item)
+            _normalize_query_text(item) for item in seed_queries if _normalize_query_text(item)
         ]
         strict_candidates: list[str] = []
         nearby_candidates: list[str] = []
@@ -106,7 +106,9 @@ class OrchestratorResearchMixin:
             signal_candidates.append(_compose_query(area, "駅近", walk_token, "賃貸", layout))
         if must_conditions:
             strict_candidates.append(_compose_query(area, layout, core_must, "賃貸", budget_token))
-            relaxed_candidates.append(_compose_query(area, "賃貸", budget_token, layout, walk_token, core_nice))
+            relaxed_candidates.append(
+                _compose_query(area, "賃貸", budget_token, layout, walk_token, core_nice)
+            )
         if nice_to_have:
             signal_candidates.append(_compose_query(area, layout, core_nice, "賃貸", budget_token))
         if budget:
@@ -122,7 +124,9 @@ class OrchestratorResearchMixin:
                     )
             else:
                 nearby_candidates.append(
-                    _compose_query(f"{area}周辺", "賃貸", budget_token, layout, core_must or core_nice)
+                    _compose_query(
+                        f"{area}周辺", "賃貸", budget_token, layout, core_must or core_nice
+                    )
                 )
 
             if line_hints:
@@ -364,7 +368,9 @@ class OrchestratorResearchMixin:
 
         assistant_text = str(draft_plan.get("assistant_message") or "").strip()
         if not assistant_text:
-            assistant_text = "調査計画を作成しました。内容を確認してから、明示承認で調査を開始します。"
+            assistant_text = (
+                "調査計画を作成しました。内容を確認してから、明示承認で調査を開始します。"
+            )
         if follow_up_questions and "追加" not in assistant_text:
             assistant_text += "追加で分かる条件があれば、下の候補から反映できます。"
 
@@ -389,7 +395,9 @@ class OrchestratorResearchMixin:
         approved_plan = job["approved_plan"]
         user_memory, task_memory = self.db.get_memories(session_id)
         job_llm_config = self._normalize_llm_config(
-            job.get("llm_config") or task_memory.get("approved_llm_config") or task_memory.get("draft_llm_config")
+            job.get("llm_config")
+            or task_memory.get("approved_llm_config")
+            or task_memory.get("draft_llm_config")
         )
         research_route = route_config_for(job_llm_config, "research_default")
         research_provider = str(

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import copy
 import threading
-from typing import Any, Callable
+from typing import Any
 
 from app.db import Database
 from app.llm.base import LLMAdapter

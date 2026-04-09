@@ -4,7 +4,8 @@ from pathlib import Path
 from app.config import Settings
 from app.db import Database
 from app.llm.base import LLMAdapter
-from app.main import app, create_session as create_session_endpoint
+from app.main import app
+from app.main import create_session as create_session_endpoint
 from app.models import CreateSessionRequest
 from app.orchestrator import HousingOrchestrator
 
@@ -398,9 +399,18 @@ def test_orchestrator_uses_llm_generated_plan_content(tmp_path: Path):
 
     assert response.status == "awaiting_plan_confirmation"
     plan_block = next(block for block in response.blocks if block.type == "plan")
-    assert plan_block.content["summary"] == "江東区でペット可かつ在宅ワークしやすい1LDKを優先して調べます。"
-    assert plan_block.content["rationale"] == "希少条件があるため、母集団を先に確保してから絞り込む進め方を取ります。"
-    assert plan_block.content["seed_queries"][1] == "江東区で家賃12万円以下、ペット可で在宅ワークしやすい賃貸"
+    assert (
+        plan_block.content["summary"]
+        == "江東区でペット可かつ在宅ワークしやすい1LDKを優先して調べます。"
+    )
+    assert (
+        plan_block.content["rationale"]
+        == "希少条件があるため、母集団を先に確保してから絞り込む進め方を取ります。"
+    )
+    assert (
+        plan_block.content["seed_queries"][1]
+        == "江東区で家賃12万円以下、ペット可で在宅ワークしやすい賃貸"
+    )
     must_condition = next(
         item for item in plan_block.content["conditions"] if item["label"] == "必須条件"
     )
@@ -511,8 +521,14 @@ def test_orchestrator_uses_llm_plan_presentation_for_plan_copy(tmp_path: Path):
     assert response.status == "awaiting_plan_confirmation"
     assert response.assistant_message.startswith("町田で家賃10万円以下、RC造を優先する前提")
     plan_block = next(block for block in response.blocks if block.type == "plan")
-    assert plan_block.content["summary"] == "町田で予算内に収まるRC造の賃貸を先に広めに集め、条件が揃う順に比較します。"
-    assert plan_block.content["strategy"][0] == "町田エリアで家賃10万円以下かつRC造の募集を横断的に集めます。"
+    assert (
+        plan_block.content["summary"]
+        == "町田で予算内に収まるRC造の賃貸を先に広めに集め、条件が揃う順に比較します。"
+    )
+    assert (
+        plan_block.content["strategy"][0]
+        == "町田エリアで家賃10万円以下かつRC造の募集を横断的に集めます。"
+    )
     assert plan_block.content["open_questions"] == ["駅から徒歩何分くらいまで許容できるか"]
 
 

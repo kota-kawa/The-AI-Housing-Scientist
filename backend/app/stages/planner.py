@@ -68,7 +68,7 @@ def _blank_research_plan() -> dict[str, Any]:
 
 
 def _blank_condition_reasons() -> dict[str, str]:
-    return {key: "" for key in SEARCH_SIGNAL_KEYS}
+    return dict.fromkeys(SEARCH_SIGNAL_KEYS, "")
 
 
 def _sanitize_slot_memory(raw_memory: Any) -> dict[str, Any]:
@@ -360,7 +360,9 @@ def _llm_parse(
     )
 
 
-def _parse_planner_output(payload: dict[str, Any], *, default_user_memory: dict[str, Any]) -> dict[str, Any]:
+def _parse_planner_output(
+    payload: dict[str, Any], *, default_user_memory: dict[str, Any]
+) -> dict[str, Any]:
     intent = _normalize_text(payload.get("intent"))
     if intent not in INTENT_VALUES:
         intent = "general_question"

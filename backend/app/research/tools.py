@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, is_dataclass
-from typing import Any, Callable
+from typing import Any
 
 import jsonschema
 
@@ -48,7 +49,9 @@ class Toolbox:
 
     def _normalize_for_validation(self, value: Any) -> Any:
         if is_dataclass(value):
-            return {key: self._normalize_for_validation(item) for key, item in asdict(value).items()}
+            return {
+                key: self._normalize_for_validation(item) for key, item in asdict(value).items()
+            }
         if isinstance(value, dict):
             return {str(key): self._normalize_for_validation(item) for key, item in value.items()}
         if isinstance(value, (list, tuple)):

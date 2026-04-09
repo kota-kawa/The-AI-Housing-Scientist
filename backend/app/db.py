@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import json
-import sqlite3
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
+import sqlite3
 from typing import Any
+import uuid
 
 from app.catalog import CATALOG_SEED, build_catalog_detail_url, build_catalog_image_url
 
-
-UTC = timezone.utc
+UTC = UTC
 
 
 def utc_now_iso() -> str:
@@ -163,8 +162,12 @@ class Database:
             )
             self._ensure_column(conn, "sessions", "profile_id", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "research_journal_nodes", "parent_node_id", "INTEGER")
-            self._ensure_column(conn, "research_journal_nodes", "branch_id", "TEXT NOT NULL DEFAULT ''")
-            self._ensure_column(conn, "research_journal_nodes", "selected", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(
+                conn, "research_journal_nodes", "branch_id", "TEXT NOT NULL DEFAULT ''"
+            )
+            self._ensure_column(
+                conn, "research_journal_nodes", "selected", "INTEGER NOT NULL DEFAULT 0"
+            )
             self._ensure_column(
                 conn,
                 "research_journal_nodes",
@@ -195,9 +198,15 @@ class Database:
                 "llm_config_json",
                 "TEXT NOT NULL DEFAULT '{}'",
             )
-            self._ensure_column(conn, "llm_call_events", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "llm_call_events", "completion_tokens", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "llm_call_events", "total_tokens", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(
+                conn, "llm_call_events", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0"
+            )
+            self._ensure_column(
+                conn, "llm_call_events", "completion_tokens", "INTEGER NOT NULL DEFAULT 0"
+            )
+            self._ensure_column(
+                conn, "llm_call_events", "total_tokens", "INTEGER NOT NULL DEFAULT 0"
+            )
             self._ensure_column(conn, "llm_call_events", "estimated_cost_usd", "REAL")
             self._ensure_column(conn, "property_catalog", "image_url", "TEXT NOT NULL DEFAULT ''")
             self._seed_property_catalog(conn)
@@ -279,7 +288,9 @@ class Database:
 
     def _backfill_property_catalog_image_urls(self, conn: sqlite3.Connection) -> None:
         for item in CATALOG_SEED:
-            image_url = str(item.get("image_url") or build_catalog_image_url(item.get("property_id")) or "").strip()
+            image_url = str(
+                item.get("image_url") or build_catalog_image_url(item.get("property_id")) or ""
+            ).strip()
             property_id = str(item.get("property_id") or "").strip()
             if not image_url or not property_id:
                 continue
@@ -422,7 +433,9 @@ class Database:
             "id": row["id"],
             "profile_id": row["profile_id"],
             "status": row["status"],
-            "pending_action": json.loads(row["pending_action_json"]) if row["pending_action_json"] else None,
+            "pending_action": json.loads(row["pending_action_json"])
+            if row["pending_action_json"]
+            else None,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }

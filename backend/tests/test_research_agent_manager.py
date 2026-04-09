@@ -1,5 +1,5 @@
-import threading
 from pathlib import Path
+import threading
 
 from app.config import Settings
 from app.db import Database
@@ -97,8 +97,8 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     db.init()
     orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
     planner_adapter = FakePlannerRouteAdapter()
-    orchestrator._get_adapter_for_route = (
-        lambda **kwargs: planner_adapter if kwargs.get("route_key") == "planner" else None
+    orchestrator._get_adapter_for_route = lambda **kwargs: (
+        planner_adapter if kwargs.get("route_key") == "planner" else None
     )
 
     session_id, _ = db.create_session()
@@ -140,7 +140,9 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     assert len(candidate_nodes) >= 2
     assert all(node["branch_id"] for node in candidate_nodes)
     assert all(node["parent_node_id"] is not None for node in candidate_nodes)
-    assert all(node["intent"] in {"draft", "refine", "pivot", "recovery"} for node in candidate_nodes)
+    assert all(
+        node["intent"] in {"draft", "refine", "pivot", "recovery"} for node in candidate_nodes
+    )
     assert all(isinstance(node["is_failed"], bool) for node in candidate_nodes)
     assert all(isinstance(node["debug_depth"], int) for node in candidate_nodes)
 
@@ -181,7 +183,9 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     assert "最終レポート" in block_titles
     assert "探索分岐の比較" in block_titles
     assert "オフライン評価" in block_titles
-    tree_block = next((block for block in research_state.response.blocks if block.type == "tree"), None)
+    tree_block = next(
+        (block for block in research_state.response.blocks if block.type == "tree"), None
+    )
     assert tree_block is not None
     tree_nodes = tree_block.content["nodes"]
     assert isinstance(tree_nodes, list)
@@ -345,9 +349,7 @@ def test_initial_node_plans_use_retry_issues_to_change_seed_strategies(tmp_path:
             "nice_to_have": [],
             "learned_preferences": {},
         },
-        "retry_context": {
-            "top_issues": ["詳細ページ補完率が低い", "比較に必要な項目の欠損が多い"]
-        },
+        "retry_context": {"top_issues": ["詳細ページ補完率が低い", "比較に必要な項目の欠損が多い"]},
     }
     job_id, _ = db.create_research_job(
         session_id=session_id,
@@ -550,7 +552,9 @@ def test_expand_branch_batch_runs_candidates_in_parallel(tmp_path: Path, monkeyp
     summaries = manager._expand_branch_batch(state, plans=plans)
 
     assert [summary["branch_id"] for summary in summaries] == [plan.node_key for plan in plans]
-    assert [summary["branch_id"] for summary in state.branch_summaries] == [plan.node_key for plan in plans]
+    assert [summary["branch_id"] for summary in state.branch_summaries] == [
+        plan.node_key for plan in plans
+    ]
     assert max_active_workers >= 2
 
 
@@ -1129,7 +1133,9 @@ def test_tree_search_expands_recovery_nodes_after_initial_failures(tmp_path: Pat
     assert all(bool(summary.get("is_failed")) for summary in state.branch_summaries)
 
 
-def test_tree_search_attaches_branch_result_summary_before_final_selection(tmp_path: Path, monkeypatch):
+def test_tree_search_attaches_branch_result_summary_before_final_selection(
+    tmp_path: Path, monkeypatch
+):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
     db.init()
@@ -1294,7 +1300,11 @@ def test_tree_search_attaches_branch_result_summary_before_final_selection(tmp_p
 
     assert manager._handle_tree_search(state) is None
     assert state.selected_branch_summary["branch_id"] == "node-2"
-    assert state.selected_branch_summary["branch_result_summary"]["summary"]["branch_node_count"] == 2
+    assert (
+        state.selected_branch_summary["branch_result_summary"]["summary"]["branch_node_count"] == 2
+    )
     selected_artifacts = manager._selected_artifacts(state)
     assert selected_artifacts is not None
-    assert selected_artifacts.normalize["branch_result_summary"]["共通リスク"] == ["管理費の内訳が未確認"]
+    assert selected_artifacts.normalize["branch_result_summary"]["共通リスク"] == [
+        "管理費の内訳が未確認"
+    ]

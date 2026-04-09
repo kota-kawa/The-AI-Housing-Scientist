@@ -101,9 +101,7 @@ class LLMConfigManagerMixin:
 
         user_memory, task_memory, llm_config = self._ensure_session_llm_config(session_id)
         active_job = self._active_job_for_session(task_memory)
-        editable = not (
-            active_job is not None and active_job["status"] in {"queued", "running"}
-        )
+        editable = not (active_job is not None and active_job["status"] in {"queued", "running"})
         return {
             "session_id": session_id,
             "preset": str(llm_config.get("preset") or "custom"),
@@ -131,9 +129,7 @@ class LLMConfigManagerMixin:
                 models = self._list_models_for_provider(provider)
             except Exception as exc:
                 if self.settings.model_strict_mode:
-                    raise RuntimeError(
-                        f"failed to list models for {provider}: {exc}"
-                    ) from exc
+                    raise RuntimeError(f"failed to list models for {provider}: {exc}") from exc
                 continue
             if models and model not in models:
                 raise RuntimeError(f"model not available for {provider}: {model}")

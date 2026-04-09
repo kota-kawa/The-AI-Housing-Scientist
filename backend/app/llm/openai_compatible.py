@@ -30,10 +30,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
         self._last_usage: LLMUsage | None = None
 
     def _should_hide_reasoning(self) -> bool:
-        return (
-            self.provider_name == "groq"
-            and str(self.model).strip().lower() == "qwen/qwen3-32b"
-        )
+        return self.provider_name == "groq" and str(self.model).strip().lower() == "qwen/qwen3-32b"
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -42,7 +39,9 @@ class OpenAICompatibleAdapter(LLMAdapter):
             "Content-Type": "application/json",
         }
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         last_error: Exception | None = None
 
@@ -55,7 +54,15 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 except (httpx.HTTPError, json.JSONDecodeError) as exc:
                     last_error = exc
                     status = getattr(getattr(exc, "response", None), "status_code", None)
-                    non_retryable = status is not None and status not in (408, 409, 429, 500, 502, 503, 504)
+                    non_retryable = status is not None and status not in (
+                        408,
+                        409,
+                        429,
+                        500,
+                        502,
+                        503,
+                        504,
+                    )
                     if non_retryable or attempt == self.max_retries:
                         break
 
@@ -73,7 +80,12 @@ class OpenAICompatibleAdapter(LLMAdapter):
             raw=usage if isinstance(usage, dict) else {},
         )
 
-    def _chat(self, messages: list[dict[str, Any]], temperature: float, response_format: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _chat(
+        self,
+        messages: list[dict[str, Any]],
+        temperature: float,
+        response_format: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import logging
-import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
+import logging
+import threading
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,21 +15,20 @@ from app.models import (
     AuditEventResponse,
     ChatMessageRequest,
     ChatMessageResponse,
-    LLMCapabilitiesResponse,
-    LLMConfigPayload,
-    LLMCallEventResponse,
-    SessionLLMConfigResponse,
     ConfirmActionRequest,
     CreateSessionRequest,
     CreateSessionResponse,
+    LLMCallEventResponse,
+    LLMCapabilitiesResponse,
+    LLMConfigPayload,
     PreflightReport,
     ResearchStateResponse,
+    SessionLLMConfigResponse,
     SessionStateResponse,
 )
 from app.orchestrator import HousingOrchestrator
 from app.preflight import run_preflight
 from app.stages.prompt_examples import validate_required_prompt_examples
-
 
 logger = logging.getLogger(__name__)
 

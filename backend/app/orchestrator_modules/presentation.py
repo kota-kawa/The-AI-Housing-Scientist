@@ -119,7 +119,7 @@ class OrchestratorPresentationMixin:
                                 normalized_properties=normalized_properties,
                                 selectable=True,
                                 property_reactions=reactions,
-                            )
+                            ),
                         },
                     ),
                     UIBlock(
@@ -146,7 +146,9 @@ class OrchestratorPresentationMixin:
                 UIBlock(
                     type="warning",
                     title="候補なし",
-                    content={"body": "詳細ページまで解析できた候補が見つかりませんでした。条件を少し広げて再検索してください。"},
+                    content={
+                        "body": "詳細ページまで解析できた候補が見つかりませんでした。条件を少し広げて再検索してください。"
+                    },
                 )
             )
 
@@ -406,7 +408,7 @@ class OrchestratorPresentationMixin:
                         ranked_properties=selected_ranked or ranked_properties[:1],
                         normalized_properties=normalized_properties,
                         selectable=False,
-                    )
+                    ),
                 },
             ),
             UIBlock(
@@ -417,7 +419,9 @@ class OrchestratorPresentationMixin:
             UIBlock(
                 type="checklist",
                 title="問い合わせ前チェック",
-                content={"items": [{"label": x, "checked": False} for x in communication["check_items"]]},
+                content={
+                    "items": [{"label": x, "checked": False} for x in communication["check_items"]]
+                },
             ),
             UIBlock(
                 type="actions",
@@ -516,7 +520,7 @@ class OrchestratorPresentationMixin:
                         selectable=True,
                         property_reactions=property_reactions,
                         max_items=None,
-                    )
+                    ),
                 },
             ),
             UIBlock(
@@ -580,18 +584,26 @@ class OrchestratorPresentationMixin:
             UIBlock(
                 type="checklist",
                 title="契約前の必須確認",
-                content={"items": [{"label": x, "checked": False} for x in risk_result["must_confirm_list"]]},
+                content={
+                    "items": [
+                        {"label": x, "checked": False} for x in risk_result["must_confirm_list"]
+                    ]
+                },
             ),
             UIBlock(
                 type="warning",
                 title="免責",
-                content={"body": "契約判断は最終的にユーザーおよび専門家確認の上で実施してください。"},
+                content={
+                    "body": "契約判断は最終的にユーザーおよび専門家確認の上で実施してください。"
+                },
             ),
         ]
 
     def _build_guidance_blocks(self, task_memory: dict[str, Any]) -> list[UIBlock]:
         """状態に応じた次のアクションボタンを返す。情報不足時はブロックなし。"""
-        if task_memory.get("status") == "awaiting_plan_confirmation" and task_memory.get("draft_research_plan"):
+        if task_memory.get("status") == "awaiting_plan_confirmation" and task_memory.get(
+            "draft_research_plan"
+        ):
             return [
                 UIBlock(
                     type="actions",
@@ -653,10 +665,10 @@ class OrchestratorPresentationMixin:
         assistant_text = (
             "検索条件の追加・物件選択・契約書チェックのいずれを進めるかを指定してください。"
         )
-        if task_memory.get("status") == "awaiting_plan_confirmation" and task_memory.get("draft_research_plan"):
-            assistant_text = (
-                "調査計画は作成済みです。承認ボタンで開始するか、条件を追加して計画を更新してください。"
-            )
+        if task_memory.get("status") == "awaiting_plan_confirmation" and task_memory.get(
+            "draft_research_plan"
+        ):
+            assistant_text = "調査計画は作成済みです。承認ボタンで開始するか、条件を追加して計画を更新してください。"
         elif task_memory.get("last_ranked_properties"):
             assistant_text = (
                 "直前の候補は保持しています。物件カードのボタンで問い合わせ文を作るか、"
@@ -665,9 +677,7 @@ class OrchestratorPresentationMixin:
 
         # LLMで文脈依存メッセージに差し替え（失敗時はフォールバックを維持）
         try:
-            _, _, llm_config = self._ensure_session_llm_config(
-                session_id, task_memory=task_memory
-            )
+            _, _, llm_config = self._ensure_session_llm_config(session_id, task_memory=task_memory)
             adapter = self._get_adapter_for_route(
                 llm_config=llm_config,
                 route_key="planner",

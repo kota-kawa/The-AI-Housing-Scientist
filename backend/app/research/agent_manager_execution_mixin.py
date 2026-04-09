@@ -18,10 +18,9 @@ class AgentManagerExecutionMixin:
             or selected_normalize.get("branch_result_summary", {})
             or state.selected_branch_summary.get("branch_result_summary", {})
         )
-        selected_properties = (
-            selected_integrity.get("normalized_properties", [])
-            or selected_normalize.get("normalized_properties", [])
-        )
+        selected_properties = selected_integrity.get(
+            "normalized_properties", []
+        ) or selected_normalize.get("normalized_properties", [])
 
         state.source_items = self.collect_source_items(
             ranked_properties=selected_rank.get("ranked_properties", []),
@@ -148,10 +147,9 @@ class AgentManagerExecutionMixin:
             or selected_normalize.get("branch_result_summary", {})
             or state.selected_branch_summary.get("branch_result_summary", {})
         )
-        selected_properties = (
-            selected_integrity.get("normalized_properties", [])
-            or selected_normalize.get("normalized_properties", [])
-        )
+        selected_properties = selected_integrity.get(
+            "normalized_properties", []
+        ) or selected_normalize.get("normalized_properties", [])
 
         return ResearchExecutionResult(
             query=state.query,

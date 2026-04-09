@@ -69,12 +69,13 @@ class OrchestratorPlanningMixin:
             )
 
         summary = str(
-            output_payload.get("summary")
-            or metrics.get("summary")
-            or node.get("reasoning")
-            or ""
+            output_payload.get("summary") or metrics.get("summary") or node.get("reasoning") or ""
         )
-        queries = [str(item).strip() for item in input_payload.get("queries", []) or [] if str(item).strip()]
+        queries = [
+            str(item).strip()
+            for item in input_payload.get("queries", []) or []
+            if str(item).strip()
+        ]
         strategy_tags = [
             str(item).strip()
             for item in (metrics.get("strategy_tags") or input_payload.get("strategy_tags") or [])
@@ -82,11 +83,7 @@ class OrchestratorPlanningMixin:
         ]
         prune_reasons = [
             self._tree_prune_reason_label(str(item))
-            for item in (
-                output_payload.get("prune_reasons")
-                or metrics.get("prune_reasons")
-                or []
-            )
+            for item in (output_payload.get("prune_reasons") or metrics.get("prune_reasons") or [])
             if self._tree_prune_reason_label(str(item))
         ]
         return {
@@ -104,13 +101,16 @@ class OrchestratorPlanningMixin:
             "node_type": node_type,
             "label": label,
             "description": str(
-                input_payload.get("description")
-                or metrics.get("description")
-                or ""
+                input_payload.get("description") or metrics.get("description") or ""
             ),
             "summary": summary,
             "depth": 0 if node_type == "search_root" else depth,
-            "intent": str(node.get("intent") or metrics.get("intent") or input_payload.get("intent") or "draft"),
+            "intent": str(
+                node.get("intent")
+                or metrics.get("intent")
+                or input_payload.get("intent")
+                or "draft"
+            ),
             "is_failed": bool(node.get("is_failed") or metrics.get("is_failed")),
             "debug_depth": int(
                 node.get("debug_depth")
@@ -174,7 +174,11 @@ class OrchestratorPlanningMixin:
         ]
         nodes_by_id = {int(node["id"]): node for node in tree_nodes}
         for node in tree_nodes:
-            parent = nodes_by_id.get(int(node["parent_id"])) if node.get("parent_id") is not None else None
+            parent = (
+                nodes_by_id.get(int(node["parent_id"]))
+                if node.get("parent_id") is not None
+                else None
+            )
             node["parent_label"] = str(parent.get("label") or "") if parent else ""
             branch_id = str(node.get("branch_id") or "")
             node["is_selected"] = bool(branch_id and branch_id == selected_branch_id)
@@ -248,14 +252,14 @@ class OrchestratorPlanningMixin:
                     if node.get("kind") == "candidate" and node.get("status") == "running"
                 ]
             ),
-            "max_depth_reached": max([int(node.get("depth") or 0) for node in tree_nodes], default=0),
+            "max_depth_reached": max(
+                [int(node.get("depth") or 0) for node in tree_nodes], default=0
+            ),
         }
         summary_source = dict((task_memory or {}).get("search_tree_summary") or {})
         termination_reason = str(summary_source.get("termination_reason") or "")
         if not termination_reason:
-            if job is None:
-                termination_reason = "queued"
-            elif job.get("status") == "queued":
+            if job is None or job.get("status") == "queued":
                 termination_reason = "queued"
             elif job.get("status") == "running":
                 termination_reason = "in_progress"
@@ -290,7 +294,9 @@ class OrchestratorPlanningMixin:
             type="tree",
             title="探索ツリー",
             content={
-                "current_stage": self._stage_label(str(job.get("current_stage") or "")) if job else "",
+                "current_stage": self._stage_label(str(job.get("current_stage") or ""))
+                if job
+                else "",
                 "summary": str(job.get("latest_summary") or "") if job else "",
                 "is_live": bool(job and job.get("status") in {"queued", "running"}),
                 "selected_branch_id": selected_branch_id,
@@ -352,7 +358,9 @@ class OrchestratorPlanningMixin:
         if user_memory.get("layout_preference"):
             add_condition("layout_preference", "間取り", str(user_memory["layout_preference"]))
         if user_memory.get("station_walk_max"):
-            add_condition("station_walk_max", "駅徒歩", self._format_walk(user_memory["station_walk_max"]))
+            add_condition(
+                "station_walk_max", "駅徒歩", self._format_walk(user_memory["station_walk_max"])
+            )
         if user_memory.get("move_in_date"):
             add_condition("move_in_date", "入居時期", str(user_memory["move_in_date"]))
         if user_memory.get("must_conditions"):
@@ -486,7 +494,9 @@ class OrchestratorPlanningMixin:
             title="調査の進捗",
             content={
                 "progress_percent": int(job.get("progress_percent", 0)) if job else 0,
-                "current_stage": self._stage_label(str(job.get("current_stage") or "")) if job else "",
+                "current_stage": self._stage_label(str(job.get("current_stage") or ""))
+                if job
+                else "",
                 "summary": str(job.get("latest_summary") or "") if job else "",
                 "items": self._build_timeline_items(job),
             },

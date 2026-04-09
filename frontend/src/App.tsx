@@ -287,15 +287,15 @@ export default function App() {
 
   const refreshViewportPosition = () => {
     const scrollRoot = document.documentElement;
-    const distanceFromBottom =
-      scrollRoot.scrollHeight - (window.scrollY + window.innerHeight);
+    const distanceFromBottom = scrollRoot.scrollHeight - (window.scrollY + window.innerHeight);
     userIsNearBottomRef.current = distanceFromBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
   };
 
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const storedProfileId = window.localStorage.getItem(PROFILE_STORAGE_KEY) ?? crypto.randomUUID();
+        const storedProfileId =
+          window.localStorage.getItem(PROFILE_STORAGE_KEY) ?? crypto.randomUUID();
         const [session, preflight, capabilities] = await Promise.all([
           createSession(storedProfileId),
           fetchPreflight(),
@@ -436,7 +436,8 @@ export default function App() {
     return "希望条件や気になる物件、契約条項を入力してください…";
   }, [responseState]);
 
-  const isResearchBusy = responseState === "research_queued" || responseState === "research_running";
+  const isResearchBusy =
+    responseState === "research_queued" || responseState === "research_running";
   const backgroundImage = useMemo(() => {
     if (messages.length === 0) {
       return DEFAULT_BACKGROUND_IMAGE;
@@ -517,7 +518,9 @@ export default function App() {
     setInput("");
     setError("");
     setLoading(true);
-    setStatus(responseState === "awaiting_contract_text" ? "契約条項を確認中..." : "条件を整理中...");
+    setStatus(
+      responseState === "awaiting_contract_text" ? "契約条項を確認中..." : "条件を整理中..."
+    );
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -585,7 +588,9 @@ export default function App() {
     }
     setLoading(true);
     setError("");
-    setStatus(action.action_type === "approve_research_plan" ? "調査ジョブを登録中..." : "操作を実行中...");
+    setStatus(
+      action.action_type === "approve_research_plan" ? "調査ジョブを登録中..." : "操作を実行中..."
+    );
 
     try {
       const response = await runAction(sessionId, action.action_type, action.payload ?? {});
@@ -763,7 +768,10 @@ export default function App() {
                 return {
                   ...item,
                   free_text: value,
-                  selected_example: normalizedValue && examples.includes(normalizedValue) ? normalizedValue : undefined,
+                  selected_example:
+                    normalizedValue && examples.includes(normalizedValue)
+                      ? normalizedValue
+                      : undefined,
                 };
               }),
             },
@@ -782,7 +790,9 @@ export default function App() {
       return;
     }
 
-    const items = Array.isArray(block.content.items) ? (block.content.items as QuestionEntry[]) : [];
+    const items = Array.isArray(block.content.items)
+      ? (block.content.items as QuestionEntry[])
+      : [];
     const selectedAnswers = items
       .map((item) => {
         const answer = (item.free_text ?? item.selected_example ?? "").trim();
@@ -845,7 +855,9 @@ export default function App() {
             return block;
           }
 
-          const items = Array.isArray(block.content.items) ? (block.content.items as CardEntry[]) : [];
+          const items = Array.isArray(block.content.items)
+            ? (block.content.items as CardEntry[])
+            : [];
 
           return {
             ...block,
@@ -906,7 +918,10 @@ export default function App() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-x-clip text-ink" style={{ paddingBottom: inputBarHeight }}>
+    <div
+      className="relative min-h-screen overflow-x-clip text-ink"
+      style={{ paddingBottom: inputBarHeight }}
+    >
       <div className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 pb-8 pt-6 sm:px-6">
         {/* ===== Header ===== */}
         <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
@@ -1005,7 +1020,11 @@ export default function App() {
                   }`}
                   aria-hidden="true"
                 >
-                  {isUser ? <UserAvatarIcon className="h-5 w-5" /> : <HouseLogoIcon className="h-5 w-5" />}
+                  {isUser ? (
+                    <UserAvatarIcon className="h-5 w-5" />
+                  ) : (
+                    <HouseLogoIcon className="h-5 w-5" />
+                  )}
                 </div>
 
                 <div
@@ -1015,7 +1034,9 @@ export default function App() {
                       : "rounded-tl-md border-white/80 bg-white/92 backdrop-blur-xl"
                   }`}
                 >
-                  <p className={`whitespace-pre-wrap text-[15px] leading-7 ${isUser ? "font-medium text-slate-950" : "text-ink"}`}>
+                  <p
+                    className={`whitespace-pre-wrap text-[15px] leading-7 ${isUser ? "font-medium text-slate-950" : "text-ink"}`}
+                  >
                     {message.text}
                   </p>
                   {message.blocks && message.blocks.length > 0 && (
@@ -1129,7 +1150,9 @@ export default function App() {
                           >
                             <div>
                               <p className="text-sm font-semibold text-ink">{route.label}</p>
-                              <p className="mt-1 text-xs leading-5 text-inkMuted">{route.description}</p>
+                              <p className="mt-1 text-xs leading-5 text-inkMuted">
+                                {route.description}
+                              </p>
                             </div>
 
                             <div className="space-y-1">
@@ -1142,7 +1165,9 @@ export default function App() {
                                   disabled={!llmEditable || llmSaving}
                                   onMouseDown={(e) => {
                                     e.stopPropagation();
-                                    setOpenModelDropdown(openModelDropdown === route.key ? null : route.key);
+                                    setOpenModelDropdown(
+                                      openModelDropdown === route.key ? null : route.key
+                                    );
                                   }}
                                   className="flex w-full items-center justify-between gap-2 rounded-xl border border-sky-100 bg-white px-3 py-2 text-left text-sm text-ink shadow-sm transition hover:border-sky-300 hover:shadow focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                                 >
@@ -1154,7 +1179,11 @@ export default function App() {
                                     stroke="currentColor"
                                     strokeWidth={2}
                                   >
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M19 9l-7 7-7-7"
+                                    />
                                   </svg>
                                 </button>
 
@@ -1179,9 +1208,15 @@ export default function App() {
                                               : "text-ink"
                                           }`}
                                         >
-                                          <span className={`flex h-4 w-4 flex-shrink-0 items-center justify-center ${isSelected ? "text-accent" : ""}`}>
+                                          <span
+                                            className={`flex h-4 w-4 flex-shrink-0 items-center justify-center ${isSelected ? "text-accent" : ""}`}
+                                          >
                                             {isSelected && (
-                                              <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                                              <svg
+                                                viewBox="0 0 16 16"
+                                                fill="currentColor"
+                                                className="h-3.5 w-3.5"
+                                              >
                                                 <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
                                               </svg>
                                             )}
@@ -1252,7 +1287,9 @@ export default function App() {
                     <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-inkSubtle">
                       LLM
                     </span>
-                    <span className="font-medium">{llmConfig ? formatPresetLabel(llmConfig.preset) : "Loading"}</span>
+                    <span className="font-medium">
+                      {llmConfig ? formatPresetLabel(llmConfig.preset) : "Loading"}
+                    </span>
                     <span className="text-slate-400">
                       <ChevronIcon open={llmEditorOpen} />
                     </span>

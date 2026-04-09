@@ -151,7 +151,8 @@ def test_search_normalize_inserts_resolved_image_into_final_data():
     result = run_search_and_normalize(
         query="江東区 賃貸 12万円",
         search_results=items,
-        detail_fetcher=lambda url: """
+        detail_fetcher=lambda url: (
+            """
         <article data-kind="property-detail">
           <h1 data-field="building_name">東雲ベイテラス</h1>
           <p data-field="property_id">koto-shinonome-bay</p>
@@ -161,7 +162,8 @@ def test_search_normalize_inserts_resolved_image_into_final_data():
           <p data-field="area_m2">42.1</p>
           <p data-field="rent">118000</p>
         </article>
-        """,
+        """
+        ),
         image_resolver=lambda item, prop, detail_html: "https://example.com/images/shinonome.jpg",
     )
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 import json
 import time
-from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from app.db import Database
 
@@ -43,15 +44,16 @@ def build_cost_estimator(
                 except (TypeError, ValueError):
                     continue
 
-    def estimate(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
+    def estimate(
+        provider: str, model: str, prompt_tokens: int, completion_tokens: int
+    ) -> float | None:
         provider_prices = pricing_map.get(provider, {})
         price = provider_prices.get(model) or provider_prices.get("*")
         if price is None:
             return None
-        estimated = (
-            (prompt_tokens / 1_000_000) * price.prompt_per_1m_tokens_usd
-            + (completion_tokens / 1_000_000) * price.completion_per_1m_tokens_usd
-        )
+        estimated = (prompt_tokens / 1_000_000) * price.prompt_per_1m_tokens_usd + (
+            completion_tokens / 1_000_000
+        ) * price.completion_per_1m_tokens_usd
         return round(estimated, 8)
 
     return estimate

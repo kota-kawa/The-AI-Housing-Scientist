@@ -165,10 +165,7 @@ class OrchestratorCoreMixin:
             for property_id, reaction in self._get_property_reactions(task_memory).items()
             if reaction == "exclude"
         }
-        return [
-            item for item in ranked_properties
-            if item["property_id_norm"] not in excluded_ids
-        ]
+        return [item for item in ranked_properties if item["property_id_norm"] not in excluded_ids]
 
     def _sync_profile_after_search(
         self,
@@ -220,7 +217,11 @@ class OrchestratorCoreMixin:
             strategy_context=strategy_context,
         )
         merged_user_memory = merge_learned_preferences(
-            {key: value for key, value in profile["user_memory"].items() if key != "learned_preferences"},
+            {
+                key: value
+                for key, value in profile["user_memory"].items()
+                if key != "learned_preferences"
+            },
             updated_profile_memory.get("learned_preferences", {}) or {},
         )
         self.db.update_profile(profile_id, merged_user_memory, updated_profile_memory)

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import json
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -82,11 +82,11 @@ def _rewrite_query_for_brave(adapter: LLMAdapter, query: str) -> str:
         return query
 
 
-def _summarize_result_snippets(adapter: LLMAdapter, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _summarize_result_snippets(
+    adapter: LLMAdapter, results: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     items_with_snippets = [
-        (i, item)
-        for i, item in enumerate(results)
-        if item.get("extra_snippets")
+        (i, item) for i, item in enumerate(results) if item.get("extra_snippets")
     ]
     if not items_with_snippets:
         return results
@@ -115,7 +115,9 @@ def _summarize_result_snippets(adapter: LLMAdapter, results: list[dict[str, Any]
             {
                 "result_index": i,
                 "title": str(item.get("title") or ""),
-                "snippets": [str(s).strip() for s in (item.get("extra_snippets") or [])[:6] if str(s).strip()],
+                "snippets": [
+                    str(s).strip() for s in (item.get("extra_snippets") or [])[:6] if str(s).strip()
+                ],
             }
             for i, item in items_with_snippets
         ],
@@ -146,7 +148,7 @@ def _summarize_result_snippets(adapter: LLMAdapter, results: list[dict[str, Any]
             summary_by_index[idx] = summary
 
     updated = [dict(item) for item in results]
-    for i, item in items_with_snippets:
+    for i, _item in items_with_snippets:
         if i in summary_by_index:
             updated[i]["snippet_summary"] = summary_by_index[i]
     return updated

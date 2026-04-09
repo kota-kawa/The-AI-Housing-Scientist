@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 from collections import Counter
+import json
 from typing import Any
 
 from app.llm.base import LLMAdapter
-
 
 MAX_SEARCH_HISTORY = 12
 MAX_REACTION_HISTORY = 30
@@ -87,9 +86,7 @@ def update_profile_memory_with_search(
             "searched_at": searched_at,
             "query": query,
             "user_memory": {
-                key: value
-                for key, value in user_memory.items()
-                if key != "learned_preferences"
+                key: value for key, value in user_memory.items() if key != "learned_preferences"
             },
             "search_outcome": search_outcome or {},
         }
@@ -205,9 +202,7 @@ def infer_strategy_memory(
         elif entry.get("reaction") == "exclude":
             avoided_counter.update(path_tags)
 
-    preferred_strategy_tags = [
-        tag for tag, count in preferred_counter.most_common(4) if count >= 1
-    ]
+    preferred_strategy_tags = [tag for tag, count in preferred_counter.most_common(4) if count >= 1]
     avoided_strategy_tags = [
         tag
         for tag, count in avoided_counter.most_common(4)
@@ -217,9 +212,7 @@ def infer_strategy_memory(
         "episodes": episodes[-8:],
         "preferred_strategy_tags": preferred_strategy_tags,
         "avoided_strategy_tags": avoided_strategy_tags,
-        "issue_recurrence": {
-            label: count for label, count in issue_counter.most_common(5)
-        },
+        "issue_recurrence": dict(issue_counter.most_common(5)),
         "last_successful_path": last_successful_path[:6],
     }
 
@@ -251,8 +244,12 @@ def _infer_preferences_with_llm(
                 "query": entry.get("query", ""),
                 "target_area": str((entry.get("user_memory") or {}).get("target_area") or ""),
                 "budget_max": int((entry.get("user_memory") or {}).get("budget_max") or 0),
-                "layout_preference": str((entry.get("user_memory") or {}).get("layout_preference") or ""),
-                "station_walk_max": int((entry.get("user_memory") or {}).get("station_walk_max") or 0),
+                "layout_preference": str(
+                    (entry.get("user_memory") or {}).get("layout_preference") or ""
+                ),
+                "station_walk_max": int(
+                    (entry.get("user_memory") or {}).get("station_walk_max") or 0
+                ),
             }
             for entry in search_history
         ],
@@ -320,7 +317,9 @@ def infer_learned_preferences(
 
     for entry in reaction_history:
         target_counter = (
-            liked_feature_counter if entry.get("reaction") == "favorite" else excluded_feature_counter
+            liked_feature_counter
+            if entry.get("reaction") == "favorite"
+            else excluded_feature_counter
         )
         area = str(entry.get("area_name") or "").strip()
         if area:
@@ -350,7 +349,9 @@ def infer_learned_preferences(
     result: dict[str, Any] = {
         "frequent_area": frequent_area,
         "stable_preferences": stable_preferences,
-        "liked_features": [label for label, count in liked_feature_counter.most_common(3) if count >= 1],
+        "liked_features": [
+            label for label, count in liked_feature_counter.most_common(3) if count >= 1
+        ],
         "excluded_features": [
             label for label, count in excluded_feature_counter.most_common(3) if count >= 1
         ],

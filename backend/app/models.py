@@ -46,9 +46,7 @@ class RankedProperty(BaseModel):
 
 
 class RiskItem(BaseModel):
-    risk_type: Literal[
-        "renewal_fee", "early_termination", "notice_period", "guarantor", "other"
-    ]
+    risk_type: Literal["renewal_fee", "early_termination", "notice_period", "guarantor", "other"]
     severity: Literal["high", "medium", "low"]
     evidence: str
     recommendation: str

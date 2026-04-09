@@ -39,7 +39,9 @@ class AgentManagerSummaryMixin:
     ) -> str:
         user_memory = self.approved_plan.get("user_memory_snapshot", self.user_memory)
         condition_summary = self._build_condition_summary(user_memory)
-        summarized_candidates = list((branch_result_summary or {}).get(PROPERTY_CANDIDATES_KEY, []) or [])
+        summarized_candidates = list(
+            (branch_result_summary or {}).get(PROPERTY_CANDIDATES_KEY, []) or []
+        )
 
         if not ranked_properties:
             top_candidate = summarized_candidates[0] if summarized_candidates else {}
@@ -49,9 +51,7 @@ class AgentManagerSummaryMixin:
                 else "今回の条件で調査しましたが、問い合わせに進める候補は十分に揃いませんでした。"
             )
             detail_hit_count = int(search_summary.get("detail_hit_count") or 0)
-            follow_up = (
-                f"詳細ページを確認できた候補は{detail_hit_count}件にとどまっているため、条件を少し広げて再調査するのが安全です。"
-            )
+            follow_up = f"詳細ページを確認できた候補は{detail_hit_count}件にとどまっているため、条件を少し広げて再調査するのが安全です。"
             if top_candidate:
                 follow_up = (
                     f"圧縮要約では{top_candidate.get('building_name', '有望候補')}が残っていますが、"
@@ -79,7 +79,9 @@ class AgentManagerSummaryMixin:
         top_detail = "、".join(top_detail_parts)
 
         detail_coverage = float(offline_evaluation.get("detail_coverage") or 0.0)
-        top_reason = str(top_ranked.get("why_selected") or "").strip() or "条件との整合が高い候補です。"
+        top_reason = (
+            str(top_ranked.get("why_selected") or "").strip() or "条件との整合が高い候補です。"
+        )
         caution = str(top_ranked.get("why_not_selected") or "").strip()
         action = "まずは問い合わせに進める候補です。"
         if detail_coverage < 0.5 or not source_items:
@@ -98,7 +100,11 @@ class AgentManagerSummaryMixin:
         branch_result_summary: dict[str, Any] | None = None,
     ) -> list[str]:
         by_id = {item["property_id_norm"]: item for item in normalized_properties}
-        top_property = by_id.get(str(ranked_properties[0]["property_id_norm"]), {}) if ranked_properties else {}
+        top_property = (
+            by_id.get(str(ranked_properties[0]["property_id_norm"]), {})
+            if ranked_properties
+            else {}
+        )
 
         items: list[str] = []
         if source_items:
@@ -175,7 +181,9 @@ class AgentManagerSummaryMixin:
                 "detail_coverage": float(item.get("detail_coverage") or 0.0),
                 "structured_ratio": float(item.get("structured_ratio") or 0.0),
                 "normalized_count": int(item.get("normalized_count") or 0),
-                "issues": [str(issue).strip() for issue in item.get("issues", [])[:2] if str(issue).strip()],
+                "issues": [
+                    str(issue).strip() for issue in item.get("issues", [])[:2] if str(issue).strip()
+                ],
             }
             for item in (branch_summaries or [])
             if str(item.get("branch_id") or "") != str(selected_branch.get("branch_id") or "")

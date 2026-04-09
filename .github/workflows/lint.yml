@@ -1,0 +1,62 @@
+name: Code Quality
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Python: Ruff lint + format check
+  # ─────────────────────────────────────────────
+  python-lint:
+    name: Python Lint & Format (Ruff)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Ruff lint check
+        run: ruff check backend/app backend/tests
+
+      - name: Ruff format check
+        run: ruff format --check backend/app backend/tests
+
+  # ─────────────────────────────────────────────
+  # TypeScript: ESLint + Prettier
+  # ─────────────────────────────────────────────
+  typescript-lint:
+    name: TypeScript Lint (ESLint) & Format (Prettier)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier format check
+        run: npm run format:check
