@@ -205,3 +205,52 @@ def test_select_best_branch_penalizes_deep_recovery_chain_on_tie_break():
 
     assert selected is not None
     assert selected["branch_id"] == "stable"
+
+
+def test_select_best_branch_sends_missing_metrics_to_the_end():
+    complete = {
+        "branch_id": "complete",
+        "node_key": "complete",
+        "label": "complete",
+        "status": "completed",
+        "branch_score": 80.0,
+        "frontier_score": 75.0,
+        "detail_coverage": 0.7,
+        "avg_top3_score": 82.0,
+        "normalized_count": 3,
+        "top_issue_class": "healthy",
+        "parent_key": "",
+    }
+    missing = {
+        "branch_id": "missing",
+        "node_key": "missing",
+        "label": "missing",
+        "status": "completed",
+        "branch_score": None,
+        "frontier_score": 99.0,
+        "detail_coverage": None,
+        "avg_top3_score": 99.0,
+        "normalized_count": None,
+        "top_issue_class": "healthy",
+        "parent_key": "",
+    }
+
+    selected = select_best_branch([missing, complete])
+
+    assert selected is not None
+    assert selected["branch_id"] == "complete"
+
+
+def test_evaluate_final_result_treats_missing_metrics_as_low_readiness():
+    result = evaluate_final_result(
+        selected_branch_summary={
+            "detail_coverage": None,
+            "structured_ratio": None,
+        },
+        visible_ranked_properties=[{"property_id_norm": "p1"}],
+        search_summary={},
+    )
+
+    assert result["readiness"] == "low"
+    assert "詳細ページ補完率を上げる取得戦略を優先する" in result["recommendations"]
+    assert "家賃・徒歩・間取りの欠損ペナルティを強める" in result["recommendations"]

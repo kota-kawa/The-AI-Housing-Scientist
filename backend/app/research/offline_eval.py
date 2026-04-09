@@ -7,12 +7,51 @@ from typing import Any
 
 from app.llm.base import LLMAdapter
 from app.research.journal import ResearchIntent
+from app.research.metric import MetricValue
 
 REPEATED_ISSUE_MIN_BRANCH_SCORE_IMPROVEMENT = 8.0
 REPEATED_ISSUE_HARD_BRANCH_SCORE_IMPROVEMENT = 12.0
 REPEATED_ISSUE_MIN_DETAIL_COVERAGE_IMPROVEMENT = 0.12
 REPEATED_ISSUE_MIN_AVG_TOP3_IMPROVEMENT = 6.0
 REPEATED_ISSUE_MIN_NORMALIZED_COUNT_IMPROVEMENT = 2
+
+
+def _metric_value(
+    value: Any,
+    *,
+    maximize: bool = True,
+    name: str | None = None,
+) -> MetricValue:
+    return MetricValue.from_raw(value, maximize=maximize, name=name)
+
+
+def _summary_metric(
+    summary: dict[str, Any] | None,
+    key: str,
+    *,
+    maximize: bool = True,
+) -> MetricValue:
+    return _metric_value(
+        summary.get(key) if summary else None,
+        maximize=maximize,
+        name=key,
+    )
+
+
+def _metric_gain(
+    item: dict[str, Any],
+    parent: dict[str, Any],
+    key: str,
+) -> float | None:
+    item_metric = _summary_metric(item, key)
+    parent_metric = _summary_metric(parent, key)
+    if item_metric.is_worst or parent_metric.is_worst:
+        return None
+    item_value = item_metric.as_float()
+    parent_value = parent_metric.as_float()
+    if item_value is None or parent_value is None:
+        return None
+    return item_value - parent_value
 
 
 def _structured_property_ratio(normalized_properties: list[dict[str, Any]]) -> float:
@@ -205,13 +244,13 @@ def evaluate_branch(
 
 def branch_selection_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     return (
-        float(item.get("branch_score") or 0.0),
-        float(item.get("frontier_score") or 0.0),
-        -int(item.get("debug_depth") or 0),
-        float(item.get("detail_coverage") or 0.0),
-        float(item.get("avg_top3_score") or 0.0),
-        int(item.get("normalized_count") or 0),
-        item.get("label", ""),
+        _summary_metric(item, "branch_score"),
+        _summary_metric(item, "frontier_score"),
+        _summary_metric(item, "debug_depth", maximize=False),
+        _summary_metric(item, "detail_coverage"),
+        _summary_metric(item, "avg_top3_score"),
+        _summary_metric(item, "normalized_count"),
+        str(item.get("label") or ""),
     )
 
 
@@ -219,20 +258,18 @@ def has_material_improvement_over_parent(
     item: dict[str, Any],
     parent: dict[str, Any],
 ) -> bool:
-    branch_gain = float(item.get("branch_score") or 0.0) - float(parent.get("branch_score") or 0.0)
-    detail_gain = float(item.get("detail_coverage") or 0.0) - float(parent.get("detail_coverage") or 0.0)
-    avg_top3_gain = float(item.get("avg_top3_score") or 0.0) - float(
-        parent.get("avg_top3_score") or 0.0
-    )
-    normalized_gain = int(item.get("normalized_count") or 0) - int(parent.get("normalized_count") or 0)
-    if branch_gain >= REPEATED_ISSUE_HARD_BRANCH_SCORE_IMPROVEMENT:
+    branch_gain = _metric_gain(item, parent, "branch_score")
+    detail_gain = _metric_gain(item, parent, "detail_coverage")
+    avg_top3_gain = _metric_gain(item, parent, "avg_top3_score")
+    normalized_gain = _metric_gain(item, parent, "normalized_count")
+    if branch_gain is not None and branch_gain >= REPEATED_ISSUE_HARD_BRANCH_SCORE_IMPROVEMENT:
         return True
-    if branch_gain < REPEATED_ISSUE_MIN_BRANCH_SCORE_IMPROVEMENT:
+    if branch_gain is None or branch_gain < REPEATED_ISSUE_MIN_BRANCH_SCORE_IMPROVEMENT:
         return False
     return (
-        detail_gain >= REPEATED_ISSUE_MIN_DETAIL_COVERAGE_IMPROVEMENT
-        or avg_top3_gain >= REPEATED_ISSUE_MIN_AVG_TOP3_IMPROVEMENT
-        or normalized_gain >= REPEATED_ISSUE_MIN_NORMALIZED_COUNT_IMPROVEMENT
+        (detail_gain is not None and detail_gain >= REPEATED_ISSUE_MIN_DETAIL_COVERAGE_IMPROVEMENT)
+        or (avg_top3_gain is not None and avg_top3_gain >= REPEATED_ISSUE_MIN_AVG_TOP3_IMPROVEMENT)
+        or (normalized_gain is not None and normalized_gain >= REPEATED_ISSUE_MIN_NORMALIZED_COUNT_IMPROVEMENT)
     )
 
 
@@ -317,21 +354,27 @@ def evaluate_final_result(
     search_summary: dict[str, Any],
 ) -> dict[str, Any]:
     visible_count = len(visible_ranked_properties)
-    detail_coverage = float(selected_branch_summary.get("detail_coverage") or 0.0) if selected_branch_summary else 0.0
-    structured_ratio = float(selected_branch_summary.get("structured_ratio") or 0.0) if selected_branch_summary else 0.0
+    detail_coverage_metric = _summary_metric(selected_branch_summary, "detail_coverage")
+    structured_ratio_metric = _summary_metric(selected_branch_summary, "structured_ratio")
+    detail_coverage = detail_coverage_metric.as_float() or 0.0
+    structured_ratio = structured_ratio_metric.as_float() or 0.0
 
     readiness = "low"
-    if visible_count >= 3 and detail_coverage >= 0.5 and structured_ratio >= 0.6:
+    if (
+        visible_count >= 3
+        and detail_coverage_metric >= _metric_value(0.5, name="detail_coverage")
+        and structured_ratio_metric >= _metric_value(0.6, name="structured_ratio")
+    ):
         readiness = "high"
-    elif visible_count >= 1 and detail_coverage >= 0.3:
+    elif visible_count >= 1 and detail_coverage_metric >= _metric_value(0.3, name="detail_coverage"):
         readiness = "medium"
 
     recommendations: list[str] = []
     if readiness == "low":
         recommendations.append("条件の優先順位を確認して branch search を再実行する")
-    if detail_coverage < 0.5:
+    if detail_coverage_metric < _metric_value(0.5, name="detail_coverage"):
         recommendations.append("詳細ページ補完率を上げる取得戦略を優先する")
-    if structured_ratio < 0.6:
+    if structured_ratio_metric < _metric_value(0.6, name="structured_ratio"):
         recommendations.append("家賃・徒歩・間取りの欠損ペナルティを強める")
     if not recommendations:
         recommendations.append("上位候補の契約条件確認へ進む")
