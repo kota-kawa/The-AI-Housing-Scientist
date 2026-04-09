@@ -9,6 +9,7 @@ type Props = {
   onCompareToggle?: (itemIndex: number) => void;
   onChecklistToggle?: (itemIndex: number) => void;
   onQuestionExecute?: () => void;
+  onQuestionInputChange?: (itemIndex: number, value: string) => void;
   onQuestionSuggestionToggle?: (itemIndex: number, prompt: string) => void;
   onActionExecute?: (action: ActionDescriptor) => void;
 };
@@ -493,6 +494,19 @@ function toPercentLabel(value: number | null, digits: number = 0): string {
     return "";
   }
   return `${(value * 100).toFixed(digits)}%`;
+}
+
+function getQuestionInputPlaceholder(label: string): string {
+  if (label.includes("徒歩")) {
+    return "例: 徒歩12分まで、バス便でも可";
+  }
+  if (label.includes("エリア") || label.includes("駅")) {
+    return "例: 中野駅周辺、東横線沿線、勤務先まで30分圏内";
+  }
+  if (label.includes("家賃")) {
+    return "例: 管理費込みで13万円以内";
+  }
+  return "選択肢にない条件があれば自由に入力";
 }
 
 function average(values: number[]): number {
@@ -1712,6 +1726,7 @@ export default function StructuredBlock({
   onCompareToggle,
   onChecklistToggle,
   onQuestionExecute,
+  onQuestionInputChange,
   onQuestionSuggestionToggle,
   onActionExecute,
 }: Props) {
@@ -2022,7 +2037,10 @@ export default function StructuredBlock({
   if (block.type === "question") {
     const items = (block.content.items as Array<Record<string, unknown>>) ?? [];
     const intro = toDisplayText(block.content.intro);
-    const selectedCount = items.filter((item) => toDisplayText(item.selected_example)).length;
+    const selectedCount = items.filter((item) => {
+      const answer = toDisplayText(item.free_text) || toDisplayText(item.selected_example);
+      return Boolean(answer.trim());
+    }).length;
     const tone = TONES.question;
     return (
       <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
@@ -2036,6 +2054,8 @@ export default function StructuredBlock({
               ? item.examples.map((example) => toDisplayText(example)).filter(Boolean)
               : [];
             const selectedExample = toDisplayText(item.selected_example);
+            const freeText = toDisplayText(item.free_text);
+            const answerValue = freeText || selectedExample;
 
             return (
               <div
@@ -2052,11 +2072,11 @@ export default function StructuredBlock({
                       <button
                         key={example}
                         type="button"
-                        aria-pressed={selectedExample === example}
+                        aria-pressed={answerValue.trim() === example}
                         disabled={disabled}
                         onClick={() => onQuestionSuggestionToggle?.(idx, example)}
                         className={`rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-55 ${
-                          selectedExample === example
+                          answerValue.trim() === example
                             ? "border-emerald-700 bg-emerald-700 text-white shadow-sm"
                             : "border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100"
                         }`}
@@ -2066,6 +2086,19 @@ export default function StructuredBlock({
                     ))}
                   </div>
                 )}
+                <div className="mt-3">
+                  <label className="mb-1 block text-[11px] font-semibold text-emerald-700">
+                    選択肢にない場合は自由入力
+                  </label>
+                  <textarea
+                    value={answerValue}
+                    disabled={disabled}
+                    rows={2}
+                    onChange={(event) => onQuestionInputChange?.(idx, event.target.value)}
+                    placeholder={getQuestionInputPlaceholder(label)}
+                    className="min-h-[72px] w-full resize-y rounded-2xl border border-emerald-200 bg-emerald-50/45 px-3 py-2 text-sm leading-6 text-ink outline-none transition placeholder:text-emerald-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:opacity-55"
+                  />
+                </div>
               </div>
             );
           })}
@@ -2073,7 +2106,7 @@ export default function StructuredBlock({
             <p className="text-xs font-medium text-emerald-800">
               {selectedCount > 0
                 ? `${selectedCount}件選択中です。内容を確認して実行してください。`
-                : "候補を選択すると、ここからまとめて送信できます。"}
+                : "候補選択または自由入力をすると、ここからまとめて送信できます。"}
             </p>
             <button
               type="button"

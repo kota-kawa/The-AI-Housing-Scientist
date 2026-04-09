@@ -39,6 +39,7 @@ type QuestionEntry = {
   question?: string;
   examples?: string[];
   selected_example?: string;
+  free_text?: string;
 };
 
 type CardEntry = {
@@ -709,9 +710,60 @@ export default function App() {
                 if (currentItemIndex !== itemIndex) {
                   return item;
                 }
+                const currentAnswer = (item.free_text ?? item.selected_example ?? "").trim();
+                const nextSelected = currentAnswer === example ? undefined : example;
                 return {
                   ...item,
-                  selected_example: item.selected_example === example ? undefined : example,
+                  selected_example: nextSelected,
+                  free_text: nextSelected ?? "",
+                };
+              }),
+            },
+          };
+        });
+
+        return { ...message, blocks: nextBlocks };
+      })
+    );
+  };
+
+  const handleQuestionInputChange = (
+    messageId: string,
+    blockIndex: number,
+    itemIndex: number,
+    value: string
+  ) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (message.id !== messageId || !message.blocks) {
+          return message;
+        }
+
+        const nextBlocks = message.blocks.map((block, currentBlockIndex) => {
+          if (currentBlockIndex !== blockIndex || block.type !== "question") {
+            return block;
+          }
+
+          const items = Array.isArray(block.content.items)
+            ? (block.content.items as QuestionEntry[])
+            : [];
+
+          return {
+            ...block,
+            content: {
+              ...block.content,
+              items: items.map((item, currentItemIndex) => {
+                if (currentItemIndex !== itemIndex) {
+                  return item;
+                }
+
+                const examples = Array.isArray(item.examples) ? item.examples : [];
+                const normalizedValue = value.trim();
+
+                return {
+                  ...item,
+                  free_text: value,
+                  selected_example: normalizedValue && examples.includes(normalizedValue) ? normalizedValue : undefined,
                 };
               }),
             },
@@ -732,7 +784,14 @@ export default function App() {
 
     const items = Array.isArray(block.content.items) ? (block.content.items as QuestionEntry[]) : [];
     const selectedAnswers = items
-      .map((item) => item.selected_example?.trim())
+      .map((item) => {
+        const answer = (item.free_text ?? item.selected_example ?? "").trim();
+        if (!answer) {
+          return "";
+        }
+        const label = item.label?.trim();
+        return label ? `${label}は${answer}` : answer;
+      })
       .filter((item): item is string => Boolean(item));
 
     if (selectedAnswers.length === 0) {
@@ -975,6 +1034,9 @@ export default function App() {
                             handleChecklistToggle(message.id, idx, itemIndex)
                           }
                           onQuestionExecute={() => handleQuestionExecute(message.id, idx)}
+                          onQuestionInputChange={(itemIndex, value) =>
+                            handleQuestionInputChange(message.id, idx, itemIndex, value)
+                          }
                           onQuestionSuggestionToggle={(itemIndex, example) =>
                             handleQuestionSuggestionToggle(message.id, idx, itemIndex, example)
                           }
