@@ -90,6 +90,8 @@ class FakeResearchSummaryAdapter(LLMAdapter):
                 ],
                 "summary": "3本の探索分岐を維持します。",
             }
+        if "reviews" in properties:
+            return {"reviews": []}
         if "assessments" in properties:
             return {"assessments": []}
         raise AssertionError(f"unexpected schema keys: {list(properties.keys())}")

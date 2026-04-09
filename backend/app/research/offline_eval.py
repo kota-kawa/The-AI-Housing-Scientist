@@ -92,7 +92,12 @@ def evaluate_branch(
 ) -> dict[str, Any]:
     normalized_count = len(normalized_properties)
     detail_hit_count = int(search_summary.get("detail_hit_count", 0) or 0)
-    detail_coverage = round(detail_hit_count / normalized_count, 3) if normalized_count else 0.0
+    integrity_input_count = int(search_summary.get("integrity_input_count", normalized_count) or 0)
+    integrity_dropped_count = int(search_summary.get("integrity_dropped_count", 0) or 0)
+    integrity_drop_ratio = float(search_summary.get("integrity_drop_ratio", 0.0) or 0.0)
+    detail_denominator = integrity_input_count or normalized_count
+    detail_coverage = round(detail_hit_count / detail_denominator, 3) if detail_denominator else 0.0
+    detail_coverage = min(detail_coverage, 1.0)
     structured_ratio = _structured_property_ratio(normalized_properties)
     avg_top3_score = 0.0
     top_score = 0.0
@@ -119,6 +124,7 @@ def evaluate_branch(
     score += _score_from_range(avg_top3_score, min_value=35.0, max_value=95.0) * 25.0
     score += _score_from_range(source_diversity, min_value=1, max_value=3) * 10.0
     score -= duplicate_ratio * 5.0
+    score -= integrity_drop_ratio * 10.0
 
     issues: list[str] = []
     recommendations: list[str] = []
@@ -140,6 +146,9 @@ def evaluate_branch(
     if source_diversity <= 1:
         issues.append("情報源の多様性が低い")
         recommendations.append("Brave と catalog の両系統で候補を確保する")
+    if integrity_dropped_count > 0 and integrity_drop_ratio >= 0.4:
+        issues.append("データ整合性レビューで除外候補が多い")
+        recommendations.append("募集終了表記や数値矛盾の多いソースは優先度を下げる")
 
     summary = (
         f"{label}: score={round(score, 2)}, "
@@ -168,6 +177,9 @@ def evaluate_branch(
         "detail_coverage": detail_coverage,
         "duplicate_group_count": len(duplicate_groups),
         "duplicate_ratio": duplicate_ratio,
+        "integrity_input_count": integrity_input_count,
+        "integrity_dropped_count": integrity_dropped_count,
+        "integrity_drop_ratio": integrity_drop_ratio,
         "structured_ratio": structured_ratio,
         "top_score": top_score,
         "avg_top3_score": avg_top3_score,

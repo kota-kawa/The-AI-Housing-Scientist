@@ -6,6 +6,7 @@ from typing import Any, Callable
 from app.research.journal import ResearchNode
 from app.research.state_machine import ResearchStageDefinition, ResearchStateMachine
 from app.research.tools import CallableResearchTool, ToolContext, ToolSpec, Toolbox
+from app.stages.integrity_review import run_integrity_review
 from app.stages.ranking import run_ranking
 from app.stages.search_normalize import run_search_and_normalize
 
@@ -151,6 +152,39 @@ class AgentManagerToolingMixin:
                         },
                     ),
                     self._tool_normalize,
+                ),
+                CallableResearchTool(
+                    ToolSpec(
+                        name="integrity_review",
+                        description="Review listing integrity and drop stale or contradictory candidates before ranking.",
+                        input_schema={
+                            "type": "object",
+                            "properties": {
+                                "normalized_properties": {"type": "array"},
+                                "raw_results": {"type": "array"},
+                                "detail_html_map": {"type": "object"},
+                            },
+                            "required": ["normalized_properties", "raw_results", "detail_html_map"],
+                            "additionalProperties": False,
+                        },
+                        output_schema={
+                            "type": "object",
+                            "properties": {
+                                "normalized_properties": {"type": "array"},
+                                "integrity_reviews": {"type": "array"},
+                                "dropped_property_ids": {"type": "array", "items": {"type": "string"}},
+                                "summary": {"type": "object"},
+                            },
+                            "required": [
+                                "normalized_properties",
+                                "integrity_reviews",
+                                "dropped_property_ids",
+                                "summary",
+                            ],
+                            "additionalProperties": True,
+                        },
+                    ),
+                    self._tool_integrity_review,
                 ),
                 CallableResearchTool(
                     ToolSpec(
@@ -498,5 +532,20 @@ class AgentManagerToolingMixin:
             normalized_properties=normalized_properties,
             user_memory=self._active_user_memory(),
             ranking_profile=ranking_profile,
+            adapter=self.research_adapter,
+        )
+
+    def _tool_integrity_review(
+        self,
+        *,
+        context: ToolContext,
+        normalized_properties: list[dict[str, Any]],
+        raw_results: list[dict[str, Any]],
+        detail_html_map: dict[str, str],
+    ) -> dict[str, Any]:
+        return run_integrity_review(
+            normalized_properties=normalized_properties,
+            raw_results=raw_results,
+            detail_html_map=detail_html_map,
             adapter=self.research_adapter,
         )

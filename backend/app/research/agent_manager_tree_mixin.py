@@ -775,6 +775,8 @@ class AgentManagerTreeMixin:
             return "enrich"
         if not artifacts.normalize:
             return "normalize_dedupe"
+        if not artifacts.integrity:
+            return "integrity_review"
         if not artifacts.rank:
             return "rank"
         return "tree_search"
@@ -832,10 +834,18 @@ class AgentManagerTreeMixin:
                 detail_html_map=enrich_result.get("detail_html_map", {}),
             )
             artifacts.normalize = normalize_result
+            integrity_result = self.toolbox.run(
+                "integrity_review",
+                self.context,
+                normalized_properties=normalize_result.get("normalized_properties", []),
+                raw_results=retrieve_result.get("raw_results", []),
+                detail_html_map=enrich_result.get("detail_html_map", {}),
+            )
+            artifacts.integrity = integrity_result
             ranking_result = self.toolbox.run(
                 "rank",
                 self.context,
-                normalized_properties=normalize_result.get("normalized_properties", []),
+                normalized_properties=integrity_result.get("normalized_properties", []),
                 ranking_profile=plan.ranking_profile,
             )
             artifacts.rank = ranking_result
@@ -843,13 +853,14 @@ class AgentManagerTreeMixin:
                 retrieve_result.get("summary", {})
                 | enrich_result.get("summary", {})
                 | normalize_result.get("summary", {})
+                | integrity_result.get("summary", {})
             )
             summary = evaluate_branch(
                 branch_id=plan.node_key,
                 label=plan.label,
                 queries=plan.queries,
                 raw_results=retrieve_result.get("raw_results", []),
-                normalized_properties=normalize_result.get("normalized_properties", []),
+                normalized_properties=integrity_result.get("normalized_properties", []),
                 ranked_properties=ranking_result.get("ranked_properties", []),
                 duplicate_groups=normalize_result.get("duplicate_groups", []),
                 search_summary=search_summary,
@@ -895,10 +906,11 @@ class AgentManagerTreeMixin:
                     "retrieve_summary": retrieve_result.get("summary", {}),
                     "enrich_summary": enrich_result.get("summary", {}),
                     "normalize_summary": normalize_result.get("summary", {}),
+                    "integrity_summary": integrity_result.get("summary", {}),
                     "ranked_property_count": len(ranking_result.get("ranked_properties", [])),
                     "summary": summary.get("summary", ""),
                 },
-                reasoning="候補探索ノードを実行し、収集・補完・正規化・順位付けをまとめて評価する。",
+                reasoning="候補探索ノードを実行し、収集・補完・正規化・整合性レビュー・順位付けをまとめて評価する。",
                 duration_ms=duration_ms,
                 parent_node_id=plan.parent_node_id,
                 branch_id=plan.node_key,
@@ -1005,7 +1017,7 @@ class AgentManagerTreeMixin:
         if summary.get("status") == "failed":
             if failure_stage == "retrieve" or "検索結果が取得できていない" in joined_issues:
                 operators.extend(["source_diversify", "relax_for_coverage"])
-            if failure_stage in {"enrich", "normalize_dedupe"} or "詳細ページ補完率が低い" in joined_issues:
+            if failure_stage in {"enrich", "normalize_dedupe", "integrity_review"} or "詳細ページ補完率が低い" in joined_issues:
                 operators.extend(["detail_first", "schema_first"])
             if failure_stage == "rank" or "上位候補の条件一致度が低い" in joined_issues:
                 operators.extend(["tighten_match", "explore_adjacent"])
@@ -1153,6 +1165,8 @@ class AgentManagerTreeMixin:
                 search_summary |= artifacts.enrich.get("summary", {})
             if artifacts.normalize:
                 search_summary |= artifacts.normalize.get("summary", {})
+            if artifacts.integrity:
+                search_summary |= artifacts.integrity.get("summary", {})
             branch_nodes.append(
                 {
                     "branch_id": artifacts.plan.node_key,
@@ -1165,7 +1179,10 @@ class AgentManagerTreeMixin:
                     "search_summary": search_summary,
                     "raw_results": artifacts.retrieve.get("raw_results", []),
                     "detail_html_map": artifacts.enrich.get("detail_html_map", {}),
-                    "normalized_properties": artifacts.normalize.get("normalized_properties", []),
+                    "normalized_properties": (
+                        artifacts.integrity.get("normalized_properties", [])
+                        or artifacts.normalize.get("normalized_properties", [])
+                    ),
                     "duplicate_groups": artifacts.normalize.get("duplicate_groups", []),
                     "ranked_properties": artifacts.rank.get("ranked_properties", []),
                 }
@@ -1187,7 +1204,9 @@ class AgentManagerTreeMixin:
                     adapter=self.research_adapter,
                 )
             branch_result_summary = self._cache_copy(cache[path_keys])
-            artifacts.normalize["branch_result_summary"] = branch_result_summary
+            artifacts.normalize["branch_result_summary"] = self._cache_copy(branch_result_summary)
+            if artifacts.integrity:
+                artifacts.integrity["branch_result_summary"] = self._cache_copy(branch_result_summary)
             artifacts.summary["branch_result_summary"] = self._cache_copy(branch_result_summary)
 
     def _build_search_tree_summary(self, state: ResearchExecutionState) -> dict[str, Any]:

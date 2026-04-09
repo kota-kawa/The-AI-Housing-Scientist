@@ -155,11 +155,14 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     assert task_memory["offline_evaluation"]["readiness"] in {"low", "medium", "high"}
     assert task_memory["failure_summary"]["recommendations"]
     assert task_memory["last_research_summary"]
+    assert isinstance(task_memory["last_integrity_reviews"], list)
+    assert isinstance(task_memory["last_dropped_property_ids"], list)
     assert isinstance(task_memory["last_branch_result_summary"], dict)
     assert str(task_memory["last_final_report"]).startswith("# ")
 
     audit_stages = [event["stage"] for event in db.list_audit_events(session_id)]
     assert "search_normalize" in audit_stages
+    assert "integrity_review" in audit_stages
     assert "ranking" in audit_stages
     assert "offline_evaluator" in audit_stages
     assert "final_report" in audit_stages

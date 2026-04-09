@@ -29,6 +29,7 @@ class SearchNodeArtifacts:
     retrieve: dict[str, Any] = field(default_factory=dict)
     enrich: dict[str, Any] = field(default_factory=dict)
     normalize: dict[str, Any] = field(default_factory=dict)
+    integrity: dict[str, Any] = field(default_factory=dict)
     rank: dict[str, Any] = field(default_factory=dict)
     summary: dict[str, Any] = field(default_factory=dict)
     status: str = "queued"
@@ -75,6 +76,8 @@ class ResearchExecutionResult:
     normalized_properties: list[dict[str, Any]]
     ranked_properties: list[dict[str, Any]]
     duplicate_groups: list[dict[str, Any]]
+    integrity_reviews: list[dict[str, Any]]
+    dropped_property_ids: list[str]
     raw_results: list[dict[str, Any]]
     source_items: list[dict[str, Any]]
     search_summary: dict[str, Any]

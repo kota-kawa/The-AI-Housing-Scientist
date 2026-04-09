@@ -10,20 +10,27 @@ class AgentManagerExecutionMixin:
         selected_artifacts = self._selected_artifacts(state)
         selected_rank = selected_artifacts.rank if selected_artifacts else {}
         selected_normalize = selected_artifacts.normalize if selected_artifacts else {}
+        selected_integrity = selected_artifacts.integrity if selected_artifacts else {}
         selected_retrieve = selected_artifacts.retrieve if selected_artifacts else {}
         selected_enrich = selected_artifacts.enrich if selected_artifacts else {}
         selected_branch_result_summary = (
-            selected_normalize.get("branch_result_summary", {})
+            selected_integrity.get("branch_result_summary", {})
+            or selected_normalize.get("branch_result_summary", {})
             or state.selected_branch_summary.get("branch_result_summary", {})
+        )
+        selected_properties = (
+            selected_integrity.get("normalized_properties", [])
+            or selected_normalize.get("normalized_properties", [])
         )
 
         state.source_items = self.collect_source_items(
             ranked_properties=selected_rank.get("ranked_properties", []),
-            normalized_properties=selected_normalize.get("normalized_properties", []),
+            normalized_properties=selected_properties,
             raw_results=selected_retrieve.get("raw_results", []),
         )
         state.search_summary = (
             selected_normalize.get("summary", {})
+            | selected_integrity.get("summary", {})
             | selected_retrieve.get("summary", {})
             | selected_enrich.get("summary", {})
         )
@@ -39,7 +46,7 @@ class AgentManagerExecutionMixin:
         state.offline_evaluation["search_tree_summary"] = state.search_tree_summary
         state.research_summary = self._build_fallback_research_summary(
             ranked_properties=selected_rank.get("ranked_properties", []),
-            normalized_properties=selected_normalize.get("normalized_properties", []),
+            normalized_properties=selected_properties,
             search_summary=state.search_summary,
             source_items=state.source_items,
             offline_evaluation=state.offline_evaluation,
@@ -49,7 +56,7 @@ class AgentManagerExecutionMixin:
             try:
                 llm_summary = self._build_llm_research_summary(
                     ranked_properties=selected_rank.get("ranked_properties", []),
-                    normalized_properties=selected_normalize.get("normalized_properties", []),
+                    normalized_properties=selected_properties,
                     search_summary=state.search_summary,
                     source_items=state.source_items,
                     offline_evaluation=state.offline_evaluation,
@@ -76,6 +83,16 @@ class AgentManagerExecutionMixin:
             },
             selected_normalize,
             "動的 tree search の最良ノードから正規化結果を採用",
+        )
+        self.db.add_audit_event(
+            self.session_id,
+            "integrity_review",
+            {
+                "selected_branch_id": state.selected_branch_summary["branch_id"],
+                "selected_path": state.selected_path,
+            },
+            selected_integrity,
+            "古い掲載や矛盾のある候補をランキング前に除外",
         )
         self.db.add_audit_event(
             self.session_id,
@@ -124,10 +141,16 @@ class AgentManagerExecutionMixin:
         selected_artifacts = self._selected_artifacts(state)
         selected_rank = selected_artifacts.rank if selected_artifacts else {}
         selected_normalize = selected_artifacts.normalize if selected_artifacts else {}
+        selected_integrity = selected_artifacts.integrity if selected_artifacts else {}
         selected_retrieve = selected_artifacts.retrieve if selected_artifacts else {}
         selected_branch_result_summary = (
-            selected_normalize.get("branch_result_summary", {})
+            selected_integrity.get("branch_result_summary", {})
+            or selected_normalize.get("branch_result_summary", {})
             or state.selected_branch_summary.get("branch_result_summary", {})
+        )
+        selected_properties = (
+            selected_integrity.get("normalized_properties", [])
+            or selected_normalize.get("normalized_properties", [])
         )
 
         return ResearchExecutionResult(
@@ -136,9 +159,11 @@ class AgentManagerExecutionMixin:
             branch_summaries=state.branch_summaries,
             branch_result_summary=selected_branch_result_summary,
             final_report_markdown="",
-            normalized_properties=selected_normalize.get("normalized_properties", []),
+            normalized_properties=selected_properties,
             ranked_properties=selected_rank.get("ranked_properties", []),
             duplicate_groups=selected_normalize.get("duplicate_groups", []),
+            integrity_reviews=selected_integrity.get("integrity_reviews", []),
+            dropped_property_ids=selected_integrity.get("dropped_property_ids", []),
             raw_results=selected_retrieve.get("raw_results", []),
             source_items=state.source_items,
             search_summary=state.search_summary,
