@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 import sqlite3
@@ -8,8 +8,6 @@ from typing import Any
 import uuid
 
 from app.catalog import CATALOG_SEED, build_catalog_detail_url, build_catalog_image_url
-
-UTC = timezone.utc
 
 
 def utc_now_iso() -> str:
