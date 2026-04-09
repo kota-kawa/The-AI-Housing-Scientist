@@ -54,7 +54,34 @@ class ResearchJournal:
         return None
 
     def selected_branch_nodes(self) -> list[ResearchNode]:
-        return [node for node in self.nodes if node.selected]
+        selected_nodes = [node for node in self.nodes if node.selected]
+        if not selected_nodes:
+            return []
+
+        selected_branch_ids: list[str] = []
+        for node in selected_nodes:
+            branch_id = str(node.branch_id or "").strip()
+            if branch_id and branch_id not in selected_branch_ids:
+                selected_branch_ids.append(branch_id)
+
+            selected_branch = node.output_payload.get("selected_branch", {}) or {}
+            branch_id = str(selected_branch.get("branch_id") or "").strip()
+            if branch_id and branch_id not in selected_branch_ids:
+                selected_branch_ids.append(branch_id)
+
+            for item in node.output_payload.get("selected_path", []) or []:
+                branch_id = str(item.get("branch_id") or "").strip()
+                if branch_id and branch_id not in selected_branch_ids:
+                    selected_branch_ids.append(branch_id)
+
+        if not selected_branch_ids:
+            return selected_nodes
+
+        return [
+            node
+            for node in self.nodes
+            if node.selected or str(node.branch_id or "").strip() in selected_branch_ids
+        ]
 
     def latest_stage_node(self, stage: str) -> ResearchNode | None:
         candidates = [node for node in self.stage_nodes if node.stage == stage]

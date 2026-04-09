@@ -71,6 +71,7 @@ class ResearchExecutionResult:
     selected_branch_id: str
     branch_summaries: list[dict[str, Any]]
     branch_result_summary: dict[str, Any]
+    final_report_markdown: str
     normalized_properties: list[dict[str, Any]]
     ranked_properties: list[dict[str, Any]]
     duplicate_groups: list[dict[str, Any]]

@@ -156,15 +156,18 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     assert task_memory["failure_summary"]["recommendations"]
     assert task_memory["last_research_summary"]
     assert isinstance(task_memory["last_branch_result_summary"], dict)
+    assert str(task_memory["last_final_report"]).startswith("# ")
 
     audit_stages = [event["stage"] for event in db.list_audit_events(session_id)]
     assert "search_normalize" in audit_stages
     assert "ranking" in audit_stages
     assert "offline_evaluator" in audit_stages
+    assert "final_report" in audit_stages
 
     research_state = orchestrator.get_research_state(session_id)
     assert research_state.response is not None
     block_titles = [block.title for block in research_state.response.blocks]
+    assert "最終レポート" in block_titles
     assert "探索分岐の比較" in block_titles
     assert "オフライン評価" in block_titles
     tree_block = next((block for block in research_state.response.blocks if block.type == "tree"), None)

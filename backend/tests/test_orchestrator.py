@@ -33,11 +33,30 @@ def build_settings(database_path: str) -> Settings:
 
 
 class FakeResearchSummaryAdapter(LLMAdapter):
-    def __init__(self, summary: str):
+    def __init__(self, summary: str, final_report: str | None = None):
         self.summary = summary
+        self.final_report = final_report or (
+            "# 最終レポート\n\n"
+            "## 探索経路\n"
+            "1. 条件を固定して探索を開始しました。\n\n"
+            "## 候補比較表\n"
+            "| 物件 | 家賃 | 間取り | 駅徒歩 | 面積 | 根拠 |\n"
+            "| --- | --- | --- | --- | --- | --- |\n"
+            "| サンプル候補 | 要確認 | 要確認 | 要確認 | 要確認 | 要約レポートです。 |\n\n"
+            "## リスク\n"
+            "- 詳細条件は再確認が必要です。\n\n"
+            "## 推奨物件と根拠\n"
+            "サンプル候補を暫定候補とします。\n\n"
+            "## 追加調査の提案\n"
+            "- 掲載条件の最新性を確認してください。"
+        )
         self.last_text_user = ""
+        self.last_report_user = ""
 
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
+        if "Write a final markdown report" in user:
+            self.last_report_user = user
+            return self.final_report
         self.last_text_user = user
         return self.summary
 
@@ -265,6 +284,7 @@ def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
     assert research_state.response.status == "research_completed"
     assert any(block.type == "cards" for block in research_state.response.blocks)
     assert any(block.type == "tree" for block in research_state.response.blocks)
+    assert any(block.title == "最終レポート" for block in research_state.response.blocks)
 
     user_memory, task_memory = db.get_memories(session_id)
     selected_property_id = task_memory["last_ranked_properties"][0]["property_id_norm"]
@@ -528,9 +548,14 @@ def test_research_completed_response_prefers_llm_summary(tmp_path: Path):
         block for block in research_state.response.blocks if block.title == "調査サマリー"
     )
     assert summary_block.content["body"] == summary
+    report_block = next(
+        block for block in research_state.response.blocks if block.title == "最終レポート"
+    )
+    assert report_block.content["body"].startswith("# 最終レポート")
 
     _, task_memory = db.get_memories(session_id)
     assert task_memory["last_research_summary"] == summary
+    assert task_memory["last_final_report"].startswith("# 最終レポート")
 
 
 def test_research_summary_prompt_includes_branch_tradeoffs_and_followups(tmp_path: Path):
@@ -565,6 +590,8 @@ def test_research_summary_prompt_includes_branch_tradeoffs_and_followups(tmp_pat
     assert payload["alternative_branches"]
     assert payload["failure_summary"]["recommendations"]
     assert payload["confirmation_items"]
+    assert "候補比較表" in adapter.last_report_user
+    assert "selected_path" in adapter.last_report_user
 
 
 def test_fresh_start_session_skips_profile_resume_prompt(tmp_path: Path):

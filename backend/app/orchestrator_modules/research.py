@@ -8,7 +8,7 @@ from app.llm_config import route_config_for
 from app.models import ChatMessageResponse, ResearchStateResponse, UIBlock
 from app.research import HousingResearchAgentManager
 from app.services import BraveSearchClient
-from app.stages import run_risk_check
+from app.stages import run_final_report, run_risk_check
 from app.stages.planner import run_planner
 
 
@@ -330,6 +330,14 @@ class OrchestratorResearchMixin:
             tree_min_best_score_gap=self.settings.research_tree_min_best_score_gap,
         )
         execution_result = manager.execute()
+        final_report_result = run_final_report(
+            stage_nodes=manager.journal.stage_nodes,
+            selected_branch_nodes=manager.journal.selected_branch_nodes(),
+            adapter=research_adapter,
+        )
+        execution_result.final_report_markdown = str(
+            final_report_result.get("report_markdown") or ""
+        ).strip()
 
         session = self.db.get_session(session_id)
         profile_id = session["profile_id"] if session is not None else ""
@@ -357,6 +365,7 @@ class OrchestratorResearchMixin:
         task_memory["last_ranked_properties"] = execution_result.ranked_properties
         task_memory["last_duplicate_groups"] = execution_result.duplicate_groups
         task_memory["last_branch_result_summary"] = execution_result.branch_result_summary
+        task_memory["last_final_report"] = execution_result.final_report_markdown
         task_memory["last_search_summary"] = execution_result.search_summary
         task_memory["last_source_items"] = execution_result.source_items
         task_memory["last_research_summary"] = execution_result.research_summary
@@ -382,6 +391,16 @@ class OrchestratorResearchMixin:
         ).get("strategy_memory", {})
         self.db.set_pending_action(session_id, None)
         self.db.update_memories(session_id, updated_user_memory, task_memory)
+        self.db.add_audit_event(
+            session_id,
+            "final_report",
+            {
+                "selected_branch_id": execution_result.selected_branch_id,
+                "selected_path": execution_result.selected_path,
+            },
+            final_report_result,
+            "探索 journal と選択済み分岐を走査して最終レポートを生成",
+        )
 
         self.db.update_research_job(
             job_id,
@@ -409,6 +428,7 @@ class OrchestratorResearchMixin:
             next_action="select_property",
             blocks=self._build_research_result_blocks(
                 research_summary=execution_result.research_summary,
+                final_report_markdown=execution_result.final_report_markdown,
                 ranked_properties=visible_ranked_properties,
                 normalized_properties=execution_result.normalized_properties,
                 search_summary=execution_result.search_summary,

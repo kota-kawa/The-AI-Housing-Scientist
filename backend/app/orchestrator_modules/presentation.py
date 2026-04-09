@@ -206,6 +206,7 @@ class OrchestratorPresentationMixin:
         self,
         *,
         research_summary: str,
+        final_report_markdown: str = "",
         ranked_properties: list[dict[str, Any]],
         normalized_properties: list[dict[str, Any]],
         search_summary: dict[str, Any],
@@ -232,6 +233,15 @@ class OrchestratorPresentationMixin:
                 },
             )
         )
+
+        if str(final_report_markdown).strip():
+            blocks.append(
+                UIBlock(
+                    type="text",
+                    title="最終レポート",
+                    content={"body": str(final_report_markdown).strip()},
+                )
+            )
 
         blocks.extend(
             self._build_search_blocks(

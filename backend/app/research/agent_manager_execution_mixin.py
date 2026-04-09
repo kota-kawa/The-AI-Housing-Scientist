@@ -135,6 +135,7 @@ class AgentManagerExecutionMixin:
             selected_branch_id=str(state.selected_branch_summary.get("branch_id") or "none"),
             branch_summaries=state.branch_summaries,
             branch_result_summary=selected_branch_result_summary,
+            final_report_markdown="",
             normalized_properties=selected_normalize.get("normalized_properties", []),
             ranked_properties=selected_rank.get("ranked_properties", []),
             duplicate_groups=selected_normalize.get("duplicate_groups", []),

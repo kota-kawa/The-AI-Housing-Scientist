@@ -350,6 +350,7 @@ class OrchestratorActionsMixin:
                 next_action="select_property",
                 blocks=self._build_research_result_blocks(
                     research_summary=task_memory.get("last_research_summary", ""),
+                    final_report_markdown=task_memory.get("last_final_report", ""),
                     ranked_properties=visible_ranked_properties,
                     normalized_properties=normalized_properties,
                     search_summary=task_memory.get("last_search_summary", {}),
