@@ -29,6 +29,12 @@ class OpenAICompatibleAdapter(LLMAdapter):
         self.max_retries = max_retries
         self._last_usage: LLMUsage | None = None
 
+    def _should_hide_reasoning(self) -> bool:
+        return (
+            self.provider_name == "groq"
+            and str(self.model).strip().lower() == "qwen/qwen3-32b"
+        )
+
     @property
     def _headers(self) -> dict[str, str]:
         return {
@@ -73,6 +79,8 @@ class OpenAICompatibleAdapter(LLMAdapter):
             "messages": messages,
             "temperature": temperature,
         }
+        if self._should_hide_reasoning():
+            payload["reasoning_format"] = "hidden"
         if response_format is not None:
             payload["response_format"] = response_format
 
