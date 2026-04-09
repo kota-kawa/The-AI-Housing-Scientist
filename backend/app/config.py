@@ -41,7 +41,7 @@ class Settings:
     research_tree_children_per_expansion: int = 2
     research_tree_prune_score: int = 35
     research_tree_stability_patience: int = 2
-    research_tree_min_nodes_before_stable_stop: int = 5
+    research_tree_min_nodes_before_stable_stop: int = 8
     research_tree_min_best_score_gap: int = 5
 
 
@@ -141,7 +141,7 @@ def load_settings() -> Settings:
         research_tree_stability_patience=_env_int("RESEARCH_TREE_STABILITY_PATIENCE", 2),
         research_tree_min_nodes_before_stable_stop=_env_int(
             "RESEARCH_TREE_MIN_NODES_BEFORE_STABLE_STOP",
-            5,
+            8,
         ),
         research_tree_min_best_score_gap=_env_int("RESEARCH_TREE_MIN_BEST_SCORE_GAP", 5),
     )

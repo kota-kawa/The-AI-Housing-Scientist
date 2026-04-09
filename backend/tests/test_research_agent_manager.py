@@ -673,6 +673,177 @@ def test_tree_search_waits_for_min_nodes_before_stable_stop(tmp_path: Path, monk
     assert state.termination_reason == "stable_high_readiness"
 
 
+def test_initial_operator_count_scales_with_task_complexity(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {
+        "user_memory_snapshot": {
+            "budget_max": None,
+            "must_conditions": ["バストイレ別", "独立洗面台", "2階以上", "南向き"],
+            "nice_to_have": ["宅配ボックス", "オートロック", "角部屋"],
+            "learned_preferences": {},
+        },
+        "retry_context": {
+            "top_issues": ["検索結果が取得できていない"],
+        },
+    }
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+
+    assert manager._initial_operator_count() == 5
+    assert len(manager._initial_operators()) == 5
+
+
+def test_initial_operator_count_stays_small_for_simple_tasks(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {
+        "user_memory_snapshot": {
+            "budget_max": 120000,
+            "must_conditions": [],
+            "nice_to_have": [],
+            "learned_preferences": {},
+        }
+    }
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+
+    assert manager._initial_operator_count() == 2
+    assert len(manager._initial_operators()) == 2
+
+
+def test_children_budget_for_summary_adapts_to_quality(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+        tree_children_per_expansion=2,
+    )
+
+    assert manager._children_budget_for({"branch_score": 82.0, "readiness": "high"}) == 1
+    assert manager._children_budget_for({"branch_score": 45.0, "readiness": "low"}) == 3
+    assert manager._children_budget_for({"branch_score": 62.0, "readiness": "medium"}) == 2
+
+
+def test_recovery_operators_respect_adaptive_children_budget(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+        tree_children_per_expansion=2,
+    )
+    plan = SearchNodePlan(
+        node_key="parent",
+        label="parent",
+        description="parent",
+        queries=["query"],
+        ranking_profile={},
+        strategy_tags=[],
+        depth=1,
+    )
+
+    operators = manager._recovery_operators_for_summary(
+        plan=plan,
+        summary={
+            "status": "failed",
+            "branch_score": 42.0,
+            "readiness": "low",
+            "failure_stage": "retrieve",
+            "issues": [
+                "検索結果が取得できていない",
+                "上位候補の条件一致度が低い",
+            ],
+            "prune_reasons": [],
+        },
+    )
+
+    assert operators == ["source_diversify", "relax_for_coverage", "tighten_match"]
+
+
 def test_tree_search_expands_recovery_nodes_after_initial_failures(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)

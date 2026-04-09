@@ -356,9 +356,20 @@ class AgentManagerTreeMixin:
         for operator in ordered:
             if operator and operator not in deduped:
                 deduped.append(operator)
+        count = self._initial_operator_count()
         if deduped:
-            return deduped[:3]
-        return catalog[:3]
+            return deduped[:count]
+        return catalog[:count]
+
+    def _initial_operator_count(self) -> int:
+        user_memory = self._active_user_memory()
+        retry = self._retry_context()
+        score = 0
+        score += min(3, len(user_memory.get("must_conditions", []) or []))
+        score += min(2, len(user_memory.get("nice_to_have", []) or []))
+        score += 2 if retry.get("top_issues") else 0
+        score += 1 if not user_memory.get("budget_max") else 0
+        return max(2, min(5, 2 + score // 2))
 
     def _candidate_node_input_payload(self, plan: SearchNodePlan) -> dict[str, Any]:
         return {
@@ -982,7 +993,7 @@ class AgentManagerTreeMixin:
         if parent_artifacts and parent_artifacts.rank.get("ranking_profile"):
             base_profile = dict(parent_artifacts.rank.get("ranking_profile", {}))
         children: list[SearchNodePlan] = []
-        for operator in resolved_operators[: self.tree_children_per_expansion]:
+        for operator in resolved_operators[: self._children_budget_for(summary)]:
             children.append(
                 self._make_node_plan(
                     state,
@@ -997,6 +1008,15 @@ class AgentManagerTreeMixin:
                 )
             )
         return children
+
+    def _children_budget_for(self, summary: dict[str, Any]) -> int:
+        score = float(summary.get("branch_score") or 0.0)
+        readiness = str(summary.get("readiness") or "").strip().lower()
+        if readiness == "high" and score >= 75:
+            return 1
+        if score < 50:
+            return 3
+        return self.tree_children_per_expansion
 
     def _recovery_operators_for_summary(
         self,
@@ -1048,7 +1068,7 @@ class AgentManagerTreeMixin:
         for operator in preferred:
             if operator not in deduped:
                 deduped.append(operator)
-        return deduped[: self.tree_children_per_expansion]
+        return deduped[: self._children_budget_for(summary)]
 
     def _next_candidates_after_summary(
         self,

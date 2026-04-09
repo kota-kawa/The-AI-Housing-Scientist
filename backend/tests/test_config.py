@@ -15,3 +15,4 @@ def test_load_settings_alias_and_crlf(monkeypatch):
     assert settings.openai_api_key == "openai-key"
     assert settings.brave_search_api_key == "brave-key"
     assert settings.model_strict_mode is True
+    assert settings.research_tree_min_nodes_before_stable_stop == 8

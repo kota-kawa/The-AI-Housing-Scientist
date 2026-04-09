@@ -52,7 +52,7 @@ class HousingResearchAgentManager(
         tree_children_per_expansion: int = 2,
         tree_prune_score: int = 35,
         tree_stability_patience: int = 2,
-        tree_min_nodes_before_stable_stop: int = 5,
+        tree_min_nodes_before_stable_stop: int = 8,
         tree_min_best_score_gap: float = 5.0,
     ):
         self.db = db
