@@ -41,7 +41,10 @@ def test_planner_prompt_examples_golden_cases_cover_core_slot_patterns():
     assert explicit["user_memory"]["target_area"] == "町田"
     assert explicit["user_memory"]["budget_max"] == 100000
     assert explicit["user_memory"]["must_conditions"] == ["RC造"]
-    assert len(explicit["seed_queries"]) >= 3
+    assert len(explicit["seed_queries"]) >= 5
+    assert any(any(area in query for area in ["相模原", "南町田"]) for query in explicit["seed_queries"])
+    assert any("小田急線" in query for query in explicit["seed_queries"])
+    assert any("11万円以下" in query for query in explicit["seed_queries"])
 
     merged = examples["memory_merge_with_must_and_nice_conditions"]["output"]
     assert merged["user_memory"]["target_area"] == "中野"
@@ -50,6 +53,9 @@ def test_planner_prompt_examples_golden_cases_cover_core_slot_patterns():
     assert merged["user_memory"]["layout_preference"] == "1LDK"
     assert merged["user_memory"]["must_conditions"] == ["2階以上"]
     assert merged["user_memory"]["nice_to_have"] == ["独立洗面台"]
+    assert any("東中野" in query for query in merged["seed_queries"])
+    assert any("中央線" in query for query in merged["seed_queries"])
+    assert any("15万円" in query for query in merged["seed_queries"])
 
 
 def test_ranking_prompt_examples_golden_cases_cover_reasoning_levels():

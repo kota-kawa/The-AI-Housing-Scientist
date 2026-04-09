@@ -516,6 +516,41 @@ def test_orchestrator_uses_llm_plan_presentation_for_plan_copy(tmp_path: Path):
     assert plan_block.content["open_questions"] == ["駅から徒歩何分くらいまで許容できるか"]
 
 
+def test_build_research_queries_adds_nearby_line_and_relaxed_variants(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+
+    queries = orchestrator._build_research_queries(
+        {
+            "target_area": "町田",
+            "budget_max": 100000,
+            "station_walk_max": 10,
+            "layout_preference": None,
+            "move_in_date": None,
+            "must_conditions": ["RC造"],
+            "nice_to_have": [],
+        },
+        seed_queries=[
+            "町田 賃貸 10万円以下 RC造",
+            "町田で家賃10万円以下のRC造賃貸",
+            "町田 RC造 賃貸 10万円",
+            "町田 鉄筋コンクリート 賃貸 10万円以下",
+        ],
+    )
+
+    assert len(queries) <= 8
+    assert queries[0] == "町田 賃貸 10万円以下 RC造"
+    assert any(any(area in query for area in ["相模原", "橋本", "南町田"]) for query in queries)
+    assert any("小田急線" in query or "横浜線" in query for query in queries)
+    assert any("11万円以下" in query for query in queries)
+    assert any(
+        "町田" in query and "RC造" not in query and "鉄筋コンクリート" not in query
+        for query in queries
+    )
+
+
 def test_research_completed_response_prefers_llm_summary(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)

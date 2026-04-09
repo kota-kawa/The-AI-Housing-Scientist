@@ -11,59 +11,158 @@ from app.services import BraveSearchClient
 from app.stages import run_final_report, run_risk_check
 from app.stages.planner import run_planner
 
+MAX_RESEARCH_QUERIES = 8
+AREA_NEARBY_HINTS: dict[str, tuple[str, ...]] = {
+    "町田": ("相模原", "橋本", "南町田"),
+    "中野": ("東中野", "高円寺", "新井薬師前"),
+    "江東区": ("門前仲町", "木場", "豊洲"),
+    "渋谷": ("恵比寿", "代官山", "表参道"),
+    "吉祥寺": ("三鷹", "西荻窪", "武蔵境"),
+}
+AREA_LINE_HINTS: dict[str, tuple[str, ...]] = {
+    "町田": ("小田急線", "横浜線"),
+    "中野": ("中央線", "東西線"),
+    "江東区": ("東西線", "有楽町線"),
+    "渋谷": ("山手線", "半蔵門線"),
+    "吉祥寺": ("中央線", "井の頭線"),
+}
+
+
+def _normalize_query_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _format_budget_query(budget: int) -> str:
+    if budget <= 0:
+        return ""
+    amount = budget / 10000
+    if budget % 10000 == 0:
+        return f"{int(amount)}万円以下"
+    return f"{amount:.1f}".rstrip("0").rstrip(".") + "万円以下"
+
+
+def _relaxed_budget_query(budget: int) -> str:
+    if budget <= 0:
+        return ""
+    return _format_budget_query(budget + 10000)
+
+
+def _lookup_area_hints(area: str, hint_map: dict[str, tuple[str, ...]]) -> list[str]:
+    normalized = _normalize_query_text(area)
+    if not normalized:
+        return []
+    for key, values in hint_map.items():
+        if normalized == key or key in normalized or normalized in key:
+            return list(values)
+    return []
+
+
+def _compose_query(*parts: str) -> str:
+    return " ".join(part for part in (_normalize_query_text(item) for item in parts) if part)
+
 
 class OrchestratorResearchMixin:
     def _build_research_queries(self, user_memory: dict[str, Any], seed_queries: list[str]) -> list[str]:
-        area = str(user_memory.get("target_area") or "").strip()
+        area = _normalize_query_text(user_memory.get("target_area"))
         layout = str(user_memory.get("layout_preference") or "").strip()
         budget = int(user_memory.get("budget_max") or 0)
         walk = int(user_memory.get("station_walk_max") or 0)
         must_conditions = [
-            str(item).strip()
+            _normalize_query_text(item)
             for item in user_memory.get("must_conditions", []) or []
-            if str(item).strip()
+            if _normalize_query_text(item)
         ]
         nice_to_have = [
-            str(item).strip()
+            _normalize_query_text(item)
             for item in user_memory.get("nice_to_have", []) or []
-            if str(item).strip()
+            if _normalize_query_text(item)
         ]
+        budget_token = _format_budget_query(budget)
+        relaxed_budget_token = _relaxed_budget_query(budget)
+        walk_token = f"徒歩{walk}分" if walk else ""
+        core_must = " ".join(must_conditions[:2]).strip()
+        core_nice = " ".join(nice_to_have[:2]).strip()
+        nearby_areas = _lookup_area_hints(area, AREA_NEARBY_HINTS)
+        line_hints = _lookup_area_hints(area, AREA_LINE_HINTS)
 
-        candidates = [
-            " ".join(str(item).split()).strip()
+        normalized_seed_queries = [
+            _normalize_query_text(item)
             for item in seed_queries
-            if " ".join(str(item).split()).strip()
+            if _normalize_query_text(item)
         ]
+        strict_candidates: list[str] = []
+        nearby_candidates: list[str] = []
+        line_candidates: list[str] = []
+        relaxed_candidates: list[str] = []
+        signal_candidates: list[str] = []
+
         if area:
-            tokens = [area, "賃貸"]
-            if layout:
-                tokens.append(layout)
-            if budget:
-                tokens.append(f"{int(budget / 10000)}万円")
-            candidates.append(" ".join(tokens))
-
+            strict_candidates.append(
+                _compose_query(area, "賃貸", budget_token, layout, walk_token, core_must, core_nice)
+            )
         if area or layout:
-            tokens = [token for token in [area, layout, "住みやすい", "賃貸"] if token]
-            candidates.append(" ".join(tokens))
-
+            signal_candidates.append(_compose_query(area, layout, "住みやすい", "賃貸", core_nice))
         if walk:
-            tokens = [token for token in [area, "駅近", f"徒歩{walk}分", "賃貸"] if token]
-            candidates.append(" ".join(tokens))
-
+            signal_candidates.append(_compose_query(area, "駅近", walk_token, "賃貸", layout))
         if must_conditions:
-            tokens = [token for token in [area, layout, " ".join(must_conditions[:2]), "賃貸"] if token]
-            candidates.append(" ".join(tokens))
-
+            strict_candidates.append(_compose_query(area, layout, core_must, "賃貸", budget_token))
+            relaxed_candidates.append(_compose_query(area, "賃貸", budget_token, layout, walk_token, core_nice))
         if nice_to_have:
-            tokens = [token for token in [area, " ".join(nice_to_have[:2]), "賃貸"] if token]
-            candidates.append(" ".join(tokens))
+            signal_candidates.append(_compose_query(area, layout, core_nice, "賃貸", budget_token))
+        if budget:
+            relaxed_candidates.append(
+                _compose_query(area, "賃貸", relaxed_budget_token, layout, walk_token, core_must)
+            )
+
+        if area:
+            if nearby_areas:
+                for nearby in nearby_areas[:2]:
+                    nearby_candidates.append(
+                        _compose_query(nearby, "賃貸", budget_token, layout, core_must or core_nice)
+                    )
+            else:
+                nearby_candidates.append(
+                    _compose_query(f"{area}周辺", "賃貸", budget_token, layout, core_must or core_nice)
+                )
+
+            if line_hints:
+                for line in line_hints[:2]:
+                    line_candidates.append(
+                        _compose_query(line, area, "賃貸", budget_token, layout, core_must)
+                    )
+            else:
+                line_candidates.append(_compose_query(area, "沿線", "賃貸", budget_token, layout))
+
+        candidates: list[str] = []
+        candidates.extend(normalized_seed_queries[:2])
+        if strict_candidates:
+            candidates.append(strict_candidates[0])
+        if nearby_candidates:
+            candidates.append(nearby_candidates[0])
+        if line_candidates:
+            candidates.append(line_candidates[0])
+        if relaxed_candidates:
+            candidates.append(relaxed_candidates[0])
+        if len(relaxed_candidates) > 1:
+            candidates.append(relaxed_candidates[1])
+
+        prioritized_buckets = [
+            normalized_seed_queries[2:],
+            strict_candidates[1:],
+            nearby_candidates[1:],
+            line_candidates[1:],
+            relaxed_candidates[2:],
+            signal_candidates,
+        ]
+        for bucket in prioritized_buckets:
+            candidates.extend(bucket)
 
         deduped: list[str] = []
         for item in candidates:
-            text = " ".join(part for part in str(item).split() if part).strip()
+            text = _normalize_query_text(item)
             if text and text not in deduped:
                 deduped.append(text)
-        return deduped[:5]
+        return deduped[:MAX_RESEARCH_QUERIES]
 
     def _collect_research_source_items(
         self,

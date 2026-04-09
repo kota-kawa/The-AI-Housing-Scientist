@@ -324,7 +324,9 @@ def _llm_parse(
             "follow_up_questions の examples は候補の例示であり、網羅的な選択肢として扱わない",
             "examples は user_message や memory にない特定の地域・予算・条件へ誘導しない",
             "examples は固定候補に見えにくいよう、粒度や表現を少し分散させてよい",
-            "next_action が search_and_compare のときは seed_queries を 3〜5 件返す",
+            "next_action が search_and_compare のときは seed_queries を 5〜8 件返す",
+            "seed_queries には、同一エリアの言い換えだけでなく、近隣エリアや沿線違いの探索クエリを 1〜2 本含める",
+            "seed_queries には、必須条件を外した比較用クエリや予算を少し緩めた確認用クエリを少なくとも 1 本含める",
             "next_action が missing_slots_question のときは seed_queries を空にしてよい",
             "research_plan はユーザー条件に即して summary / goal / strategy / rationale を返す",
             "condition_reasons は各条件が今回の検索で重要な理由を 1 文ずつ返し、該当しない key は空文字にする",
@@ -332,7 +334,8 @@ def _llm_parse(
             "『できれば』『あったらいい』『理想』『〜だとうれしい』は nice_to_have",
             "地名や駅名は『町田』『三軒茶屋』『武蔵小杉』のように接尾辞がなくても target_area に入れる",
             "RC / SRC / 鉄筋コンクリート / 鉄骨 / 木造 など建物構造も条件として扱う",
-            "与えられたメッセージや memory にない制約・設備・地域・予算は発明しない",
+            "ユーザー条件の探索幅を確認する目的に限り、近隣エリア・沿線・比較用の軽い条件緩和は seed_queries に含めてよい",
+            "与えられたメッセージや memory にない制約・設備は発明しない",
         ],
         "examples_instruction": (
             "examples は input から output を作る完全な few-shot 見本です。"
@@ -388,7 +391,7 @@ def _parse_planner_output(payload: dict[str, Any], *, default_user_memory: dict[
     if next_action not in NEXT_ACTION_VALUES:
         next_action = "guidance"
 
-    seed_queries = _dedupe_texts(list(payload.get("seed_queries") or []), limit=5)
+    seed_queries = _dedupe_texts(list(payload.get("seed_queries") or []), limit=8)
     research_plan = _sanitize_research_plan(payload.get("research_plan"))
     condition_reasons = _sanitize_condition_reasons(payload.get("condition_reasons"))
 

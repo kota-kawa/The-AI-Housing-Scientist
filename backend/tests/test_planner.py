@@ -305,6 +305,22 @@ def test_planner_uses_llm_generated_questions_queries_and_plan():
     assert result["condition_reasons"]["must_conditions"] == "ペット可は候補数が限られるので最優先で見ます。"
 
 
+def test_planner_keeps_up_to_eight_seed_queries():
+    adapter = FakePlannerAdapter(
+        make_planner_payload(
+            seed_queries=[f"query-{index}" for index in range(10)],
+        )
+    )
+
+    result = run_planner(
+        message="江東区で家賃12万円以下の1LDKを探したい",
+        user_memory={},
+        adapter=adapter,
+    )
+
+    assert result["seed_queries"] == [f"query-{index}" for index in range(8)]
+
+
 def test_planner_uses_llm_intent_for_natural_search_request_without_structured_slots():
     adapter = FakePlannerAdapter(
         make_planner_payload(
@@ -429,4 +445,6 @@ def test_planner_injects_two_prompt_examples_into_llm_payload():
     assert any(
         "非網羅" in rule or "固定候補" in rule for rule in payload["decision_rules"]
     )
+    assert any("近隣エリア" in rule or "沿線違い" in rule for rule in payload["decision_rules"])
+    assert any("必須条件を外した比較用" in rule for rule in payload["decision_rules"])
     assert "固定してはいけません" in payload["examples_instruction"]
