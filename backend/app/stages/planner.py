@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from app.llm.base import LLMAdapter
+from app.stages.prompt_examples import PromptExamplesError, sample_prompt_examples
 
 FOLLOW_UP_SLOT_ORDER = [
     "target_area",
@@ -295,6 +296,7 @@ def _llm_parse(
     profile_memory: dict[str, Any] | None,
     adapter: LLMAdapter,
 ) -> dict[str, Any]:
+    planner_examples = sample_prompt_examples("planner_examples.json", count=2)
     prompt_payload = {
         "user_message": message,
         "current_user_memory": user_memory,
@@ -328,36 +330,12 @@ def _llm_parse(
             "RC / SRC / 鉄筋コンクリート / 鉄骨 / 木造 など建物構造も条件として扱う",
             "与えられたメッセージや memory にない制約・設備・地域・予算は発明しない",
         ],
-        "examples": [
-            {
-                "user_message": "おすすめの賃貸を探したい",
-                "expected_shape": {
-                    "intent": "search",
-                    "next_action": "missing_slots_question",
-                    "missing_slots": ["target_area", "budget_max", "station_walk_max"],
-                },
-            },
-            {
-                "user_message": "家賃15万円以内、駅徒歩10分以内の1LDKを比較したい",
-                "expected_shape": {
-                    "intent": "search",
-                    "next_action": "search_and_compare",
-                    "missing_slots": [],
-                },
-            },
-            {
-                "user_message": "町田に10万円以下でRCの物件に住みたい",
-                "expected_shape": {
-                    "intent": "search",
-                    "user_memory": {
-                        "target_area": "町田",
-                        "budget_max": 100000,
-                        "must_conditions": ["RC造"],
-                    },
-                    "next_action": "search_and_compare",
-                },
-            },
-        ],
+        "examples_instruction": (
+            "examples は input から output を作る完全な few-shot 見本です。"
+            "slot 抽出、memory 統合、missing_slots、follow_up_questions、seed_queries、"
+            "research_plan、condition_reasons の粒度を合わせてください。"
+        ),
+        "examples": planner_examples,
     }
     return adapter.generate_structured(
         system=(
@@ -444,6 +422,8 @@ def run_planner(
 
     try:
         payload = _llm_parse(message, user_memory, profile_memory, adapter)
+    except PromptExamplesError:
+        raise
     except Exception:
         return _empty_planner_result(user_memory)
 

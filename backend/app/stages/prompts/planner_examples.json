@@ -1,0 +1,189 @@
+[
+  {
+    "case_id": "generic_search_needs_core_slots",
+    "input": {
+      "user_message": "おすすめの賃貸を探したい",
+      "current_user_memory": {},
+      "learned_preferences": {},
+      "profile_history_summary": {
+        "recent_searches": [],
+        "recent_reactions": []
+      }
+    },
+    "output": {
+      "intent": "search",
+      "user_memory": {
+        "budget_max": null,
+        "target_area": null,
+        "station_walk_max": null,
+        "move_in_date": null,
+        "layout_preference": null,
+        "must_conditions": [],
+        "nice_to_have": []
+      },
+      "missing_slots": [
+        "target_area",
+        "budget_max",
+        "station_walk_max"
+      ],
+      "follow_up_questions": [
+        {
+          "slot": "target_area",
+          "label": "希望エリア",
+          "question": "どのエリアや駅を中心に探したいですか？",
+          "examples": ["中野", "横浜駅周辺", "江東区"]
+        },
+        {
+          "slot": "budget_max",
+          "label": "家賃上限",
+          "question": "家賃の上限はどれくらいを想定していますか？",
+          "examples": ["10万円まで", "12万円以内", "15万円まで"]
+        },
+        {
+          "slot": "station_walk_max",
+          "label": "駅徒歩",
+          "question": "駅から徒歩何分以内を優先したいですか？",
+          "examples": ["徒歩5分以内", "徒歩10分まで", "駅近だとうれしい"]
+        }
+      ],
+      "next_action": "missing_slots_question",
+      "seed_queries": [],
+      "research_plan": {
+        "summary": "まずは検索の軸になるエリア、予算、駅距離を固めます。",
+        "goal": "候補比較に進める最低限の条件を揃えることです。",
+        "strategy": [
+          "エリアか沿線を確認して検索範囲を決めます。",
+          "予算上限を確認して明確に外れる候補を減らします。",
+          "駅距離の許容範囲を確認して通勤負担を調整します。"
+        ],
+        "rationale": "条件が広すぎる段階で候補を集めると比較軸がぶれやすいためです。"
+      },
+      "condition_reasons": {
+        "budget_max": "予算が未確定だと候補の絞り込み幅が大きすぎるためです。",
+        "target_area": "生活圏が決まらないと検索範囲を適切に切れないためです。",
+        "station_walk_max": "駅距離の許容幅で候補数が大きく変わるためです。",
+        "move_in_date": "",
+        "layout_preference": "",
+        "must_conditions": "",
+        "nice_to_have": ""
+      }
+    }
+  },
+  {
+    "case_id": "explicit_area_budget_and_structure",
+    "input": {
+      "user_message": "町田に10万円以下でRCの物件に住みたい",
+      "current_user_memory": {},
+      "learned_preferences": {},
+      "profile_history_summary": {
+        "recent_searches": [],
+        "recent_reactions": []
+      }
+    },
+    "output": {
+      "intent": "search",
+      "user_memory": {
+        "budget_max": 100000,
+        "target_area": "町田",
+        "station_walk_max": null,
+        "move_in_date": null,
+        "layout_preference": null,
+        "must_conditions": ["RC造"],
+        "nice_to_have": []
+      },
+      "missing_slots": [],
+      "follow_up_questions": [],
+      "next_action": "search_and_compare",
+      "seed_queries": [
+        "町田 賃貸 10万円以下 RC造",
+        "町田で家賃10万円以下のRC造賃貸",
+        "町田 RC造 賃貸 10万円",
+        "町田 鉄筋コンクリート 賃貸 10万円以下"
+      ],
+      "research_plan": {
+        "summary": "町田で予算内のRC造物件を優先して候補を集めます。",
+        "goal": "構造条件を満たす候補を比較できる状態にすることです。",
+        "strategy": [
+          "町田エリアを軸にRC造の候補を広めに収集します。",
+          "予算超過を早めに外して比較対象を整理します。",
+          "詳細ページで構造表記と募集状況を確認します。"
+        ],
+        "rationale": "RC造は候補数が絞られやすいため、最初に構造一致を優先して母集団を作る方が効率的です。"
+      },
+      "condition_reasons": {
+        "budget_max": "予算超過を早めに外して比較対象を安定させるためです。",
+        "target_area": "町田に絞る希望が明確なので検索の中心条件になります。",
+        "station_walk_max": "",
+        "move_in_date": "",
+        "layout_preference": "",
+        "must_conditions": "RC造は譲れない条件なので最優先で見ます。",
+        "nice_to_have": ""
+      }
+    }
+  },
+  {
+    "case_id": "memory_merge_with_must_and_nice_conditions",
+    "input": {
+      "user_message": "前と同じく中野で探したいけど、家賃は14万円まで。できれば独立洗面台、絶対2階以上",
+      "current_user_memory": {
+        "budget_max": 130000,
+        "target_area": "中野",
+        "station_walk_max": 10,
+        "move_in_date": null,
+        "layout_preference": "1LDK",
+        "must_conditions": [],
+        "nice_to_have": []
+      },
+      "learned_preferences": {},
+      "profile_history_summary": {
+        "recent_searches": [
+          {
+            "query": "中野 賃貸 13万円 1LDK",
+            "summary": "中野 / 家賃13万円以下 / 1LDK / 徒歩10分以内"
+          }
+        ],
+        "recent_reactions": []
+      }
+    },
+    "output": {
+      "intent": "search",
+      "user_memory": {
+        "budget_max": 140000,
+        "target_area": "中野",
+        "station_walk_max": 10,
+        "move_in_date": null,
+        "layout_preference": "1LDK",
+        "must_conditions": ["2階以上"],
+        "nice_to_have": ["独立洗面台"]
+      },
+      "missing_slots": [],
+      "follow_up_questions": [],
+      "next_action": "search_and_compare",
+      "seed_queries": [
+        "中野 賃貸 14万円 1LDK 2階以上",
+        "中野で家賃14万円以下の1LDK 独立洗面台 2階以上",
+        "中野 1LDK 賃貸 14万円 独立洗面台",
+        "中野 駅徒歩10分 1LDK 2階以上 賃貸"
+      ],
+      "research_plan": {
+        "summary": "中野で予算更新後の条件に合う1LDKを再比較します。",
+        "goal": "以前の探索条件を維持しつつ、2階以上を満たす候補を上位化することです。",
+        "strategy": [
+          "中野かつ1LDK、徒歩10分以内の候補をベースに再収集します。",
+          "2階以上を満たす候補を優先し、独立洗面台は加点条件として比較します。",
+          "家賃14万円以内で収まるかを詳細ページで確認します。"
+        ],
+        "rationale": "既存条件は活かしつつ、新しい必須条件と予算更新だけを反映する方が検索の一貫性を保てるためです。"
+      },
+      "condition_reasons": {
+        "budget_max": "上限が更新されたので予算フィルタも最新値に合わせる必要があります。",
+        "target_area": "前回と同じ中野を希望しているため引き続き検索の中心です。",
+        "station_walk_max": "既存の徒歩条件を維持すると通勤負担の基準がぶれません。",
+        "move_in_date": "",
+        "layout_preference": "既存の1LDK希望を保つことで比較対象の粒度を揃えられます。",
+        "must_conditions": "2階以上は明確な必須条件として候補選別に使います。",
+        "nice_to_have": "独立洗面台はあれば優先度を上げる比較軸として使います。"
+      }
+    }
+  }
+]

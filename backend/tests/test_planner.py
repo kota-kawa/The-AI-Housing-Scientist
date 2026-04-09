@@ -1,3 +1,5 @@
+import json
+
 from app.llm.base import LLMAdapter
 from app.stages.planner import run_planner
 
@@ -407,3 +409,20 @@ def test_planner_uses_llm_condition_reasons_as_is_without_default_backfill():
         "must_conditions": "",
         "nice_to_have": "",
     }
+
+
+def test_planner_injects_two_prompt_examples_into_llm_payload():
+    adapter = FakePlannerAdapter(make_planner_payload())
+
+    run_planner(
+        message="中野で部屋を探したい",
+        user_memory={},
+        adapter=adapter,
+    )
+
+    payload = json.loads(adapter.last_user)
+    assert payload["examples_instruction"]
+    assert len(payload["examples"]) == 2
+    assert all("case_id" in item for item in payload["examples"])
+    assert all("input" in item for item in payload["examples"])
+    assert all("output" in item for item in payload["examples"])

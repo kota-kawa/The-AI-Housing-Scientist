@@ -1,3 +1,5 @@
+import json
+
 from app.llm.base import LLMAdapter
 from app.stages.ranking import run_ranking
 
@@ -6,6 +8,7 @@ class FakeRankingAdapter(LLMAdapter):
     def __init__(self, payload: dict):
         self.payload = payload
         self.calls = 0
+        self.last_user = ""
 
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
         raise AssertionError("generate_text should not be called in ranking")
@@ -19,6 +22,7 @@ class FakeRankingAdapter(LLMAdapter):
         temperature: float = 0.2,
     ) -> dict:
         self.calls += 1
+        self.last_user = user
         return self.payload
 
     def list_models(self) -> list[str]:
@@ -148,3 +152,38 @@ def test_run_ranking_llm_adds_semantic_nice_to_have_bonus_and_reasoning():
     assert ranked[1]["why_not_selected"] == "在宅ワーク向けと判断できる材料がなく、決め手はやや弱めです。"
     assert result["nice_to_have_assessments"]["p1"][0]["match_level"] == "strong"
     assert result["llm_reasoning_applied"] is True
+
+
+def test_run_ranking_injects_two_prompt_examples_into_llm_payload():
+    adapter = FakeRankingAdapter({"assessments": []})
+
+    run_ranking(
+        normalized_properties=[
+            {
+                "property_id_norm": "p1",
+                "building_name": "中野ワークレジデンス",
+                "address": "東京都中野区",
+                "area_name": "中野区",
+                "nearest_station": "中野駅",
+                "station_walk_min": 5,
+                "layout": "1LDK",
+                "area_m2": 32.0,
+                "rent": 118000,
+                "notes": "在宅ワーク向けの個室スペースあり。",
+                "features": ["在宅ワーク向け", "独立洗面台"],
+            }
+        ],
+        user_memory={
+            "budget_max": 120000,
+            "station_walk_max": 7,
+            "layout_preference": "1LDK",
+            "nice_to_have": ["在宅ワーク向け"],
+        },
+        adapter=adapter,
+    )
+
+    payload = json.loads(adapter.last_user)
+    assert len(payload["examples"]) == 2
+    assert all("case_id" in item for item in payload["examples"])
+    assert all("input" in item for item in payload["examples"])
+    assert all("output" in item for item in payload["examples"])

@@ -28,6 +28,7 @@ from app.models import (
 )
 from app.orchestrator import HousingOrchestrator
 from app.preflight import run_preflight
+from app.stages.prompt_examples import validate_required_prompt_examples
 
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ def _research_worker(stop_event: threading.Event, orchestrator: HousingOrchestra
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = load_settings()
+    validate_required_prompt_examples()
     db = Database(settings.database_path)
     db.init()
 

@@ -1,0 +1,132 @@
+[
+  {
+    "case_id": "strong_remote_work_match",
+    "input": {
+      "user_preferences": {
+        "budget_max": 130000,
+        "station_walk_max": 7,
+        "layout_preference": "1LDK",
+        "must_conditions": [],
+        "nice_to_have": ["在宅ワーク向け"]
+      },
+      "property": {
+        "property_id_norm": "remote-strong",
+        "building_name": "目黒リモートハウス",
+        "address": "東京都目黒区下目黒1-1-1",
+        "area_name": "目黒区",
+        "nearest_station": "目黒駅",
+        "station_walk_min": 6,
+        "rent": 129000,
+        "layout": "1LDK",
+        "area_m2": 31.0,
+        "features": ["高速回線", "宅配ボックス"],
+        "notes": "オンライン会議向けのカウンタースペースあり。",
+        "rule_based_positives": [
+          "家賃129,000円が上限130,000円以内",
+          "駅徒歩6分で条件内",
+          "間取り1LDKが希望一致"
+        ],
+        "rule_based_negatives": []
+      }
+    },
+    "output": {
+      "property_id_norm": "remote-strong",
+      "why_selected": "予算、駅距離、間取りの基本条件を満たしつつ、高速回線と作業スペースの記載があるため、在宅ワークを想定しやすい候補です。",
+      "why_not_selected": "在宅ワークとの相性は高そうですが、居室の広さや防音性は内見時に確認したいです。",
+      "nice_to_have_assessments": [
+        {
+          "condition": "在宅ワーク向け",
+          "match_level": "strong",
+          "evidence": "高速回線とオンライン会議向けのカウンタースペース"
+        }
+      ]
+    }
+  },
+  {
+    "case_id": "partial_pet_match",
+    "input": {
+      "user_preferences": {
+        "budget_max": 150000,
+        "station_walk_max": 10,
+        "layout_preference": "1LDK",
+        "must_conditions": [],
+        "nice_to_have": ["ペット可"]
+      },
+      "property": {
+        "property_id_norm": "pet-partial",
+        "building_name": "世田谷コンフォート",
+        "address": "東京都世田谷区三軒茶屋2-2-2",
+        "area_name": "世田谷区",
+        "nearest_station": "三軒茶屋駅",
+        "station_walk_min": 11,
+        "rent": 145000,
+        "layout": "1LDK",
+        "area_m2": 33.5,
+        "features": ["オートロック", "宅配ボックス"],
+        "notes": "小型犬相談可。",
+        "rule_based_positives": [
+          "家賃145,000円が上限150,000円以内",
+          "間取り1LDKが希望一致"
+        ],
+        "rule_based_negatives": [
+          "駅徒歩11分で条件超過"
+        ]
+      }
+    },
+    "output": {
+      "property_id_norm": "pet-partial",
+      "why_selected": "予算内で1LDKを確保でき、小型犬相談可の明記があるため、ペットと暮らしたい希望には一定の相性があります。",
+      "why_not_selected": "ペット可でも条件付きの可能性があり、駅距離も希望より長いため、詳細条件の確認が必要です。",
+      "nice_to_have_assessments": [
+        {
+          "condition": "ペット可",
+          "match_level": "partial",
+          "evidence": "小型犬相談可"
+        }
+      ]
+    }
+  },
+  {
+    "case_id": "none_match_for_independent_sink",
+    "input": {
+      "user_preferences": {
+        "budget_max": 120000,
+        "station_walk_max": 7,
+        "layout_preference": "1LDK",
+        "must_conditions": [],
+        "nice_to_have": ["独立洗面台"]
+      },
+      "property": {
+        "property_id_norm": "sink-none",
+        "building_name": "中野スタンダード",
+        "address": "東京都中野区中野3-3-3",
+        "area_name": "中野区",
+        "nearest_station": "中野駅",
+        "station_walk_min": 5,
+        "rent": 118000,
+        "layout": "1LDK",
+        "area_m2": 32.0,
+        "features": ["温水洗浄便座", "宅配ボックス"],
+        "notes": "収納が多い物件です。",
+        "rule_based_positives": [
+          "家賃118,000円が上限120,000円以内",
+          "駅徒歩5分で条件内",
+          "間取り1LDKが希望一致"
+        ],
+        "rule_based_negatives": []
+      }
+    },
+    "output": {
+      "property_id_norm": "sink-none",
+      "why_selected": "予算、駅距離、間取りの基本条件は揃っており、日常の使い勝手は大きく崩れない候補です。",
+      "why_not_selected": "独立洗面台を示す記載がなく、設備面の決め手は弱いため、優先度は上げにくい候補です。",
+      "nice_to_have_assessments": [
+        {
+          "condition": "独立洗面台",
+          "match_level": "none",
+          "evidence": ""
+        }
+      ]
+    }
+  }
+]

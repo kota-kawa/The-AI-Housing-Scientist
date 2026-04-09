@@ -5,6 +5,7 @@ from typing import Any
 
 from app.llm.base import LLMAdapter
 from app.models import RankedProperty
+from app.stages.prompt_examples import PromptExamplesError, sample_prompt_examples
 
 
 DEFAULT_RANKING_PROFILE = {
@@ -232,6 +233,7 @@ def _build_llm_ranking_enhancements(
     adapter: LLMAdapter,
 ) -> dict[str, dict[str, Any]]:
     nice_to_have = _collect_nice_to_have(user_memory)
+    ranking_examples = sample_prompt_examples("ranking_examples.json", count=2)
     properties_payload = [
         {
             "property_id_norm": prop.get("property_id_norm"),
@@ -319,7 +321,10 @@ def _build_llm_ranking_enhancements(
             "why_selected は 1-2文の自然な日本語で、主な魅力を具体的に述べる",
             "why_not_selected は 1-2文の自然な日本語で、懸念点や未確認点を具体的に述べる",
             "与えられていない設備・条件は推測しない",
+            "examples の input.property は properties の1件、output は assessments の1件に対応する",
+            "examples は比較根拠の書き方の見本として扱い、同じ慎重さで理由を書く",
         ],
+        "examples": ranking_examples,
     }
     result = adapter.generate_structured(
         system=(
@@ -385,6 +390,8 @@ def run_ranking(
                 rule_results_by_id=rule_results_by_id,
                 adapter=adapter,
             )
+        except PromptExamplesError:
+            raise
         except Exception:
             llm_enhancements = {}
 
