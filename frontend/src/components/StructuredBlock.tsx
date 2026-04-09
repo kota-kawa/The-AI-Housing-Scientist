@@ -464,7 +464,6 @@ type TreeLayoutEdge = {
   running: boolean;
   queued: boolean;
   failed: boolean;
-  pruned: boolean;
 };
 
 function toDisplayText(value: unknown): string {
@@ -801,7 +800,7 @@ function treeStatusMeta(status: string) {
   if (status === "pruned") {
     return {
       label: "剪定",
-      fill: "#fdba74",
+      fill: "#ffffff",
       stroke: "#c2410c",
       edge: "#fdba74",
       halo: "#ffedd5",
@@ -942,7 +941,6 @@ function buildTreeDiagramLayout(nodes: TreeNodeItem[]): {
       running: node.status === "running",
       queued: node.status === "queued",
       failed: node.status === "failed",
-      pruned: node.kind === "pruned" || node.status === "pruned",
     });
   }
 
@@ -1082,7 +1080,7 @@ function TreeDiagram({
   focusKind: string;
   focusBranch: TreeFocusBranch | null;
 }) {
-  const visibleNodes = nodes;
+  const visibleNodes = nodes.filter((node) => node.kind !== "pruned");
   const pruneSummaryByParent = buildTreePruneSummary(nodes);
   const layout = buildTreeDiagramLayout(visibleNodes);
   const selectedCount = visibleNodes.filter((node) => node.is_selected).length;
@@ -1125,7 +1123,7 @@ function TreeDiagram({
           <TreeLegendItem color="#10b981" accent="#047857" label="完了" count={stats.executed_node_count} />
           <TreeLegendItem color="#e0f2fe" accent="#0284c7" label="待機" count={stats.frontier_remaining} />
           <TreeLegendItem
-            color="#fff7ed"
+            color="#ffffff"
             accent="#c2410c"
             label="剪定"
             count={stats.pruned_node_count}
@@ -1138,7 +1136,6 @@ function TreeDiagram({
 
       <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500">
         <TreeEdgeLegendItem color="#0284c7" label="青の点線: 待機中の枝" dashed="4 5" />
-        <TreeEdgeLegendItem color="#f59e0b" label="橙の破線: 剪定された枝" dashed="3 4" />
       </div>
 
       <div className="overflow-x-auto rounded-[30px] border border-teal-200/80 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.18),rgba(255,255,255,0.96)_52%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(236,253,245,0.88))] p-3 shadow-soft">
@@ -1185,8 +1182,6 @@ function TreeDiagram({
                 ? "#0ea5e9"
                 : edge.failed
                   ? "#fb7185"
-                  : edge.pruned
-                    ? "#f59e0b"
                   : edge.highlighted
                       ? "#0f766e"
                       : edge.queued
@@ -1197,24 +1192,18 @@ function TreeDiagram({
                   <path
                     d={edge.path}
                     fill="none"
-                    stroke={
-                      edge.highlighted || edge.running
-                        ? "rgba(45,212,191,0.16)"
-                        : edge.pruned
-                          ? "rgba(251,146,60,0.10)"
-                          : "rgba(148,163,184,0.12)"
-                    }
-                    strokeWidth={edge.highlighted || edge.running ? 12 : edge.pruned ? 7 : 8}
+                    stroke={edge.highlighted || edge.running ? "rgba(45,212,191,0.16)" : "rgba(148,163,184,0.12)"}
+                    strokeWidth={edge.highlighted || edge.running ? 12 : 8}
                     strokeLinecap="round"
                   />
                   <path
                     d={edge.path}
                     fill="none"
                     stroke={highlightStroke}
-                    strokeWidth={edge.highlighted || edge.running ? 3.5 : edge.pruned ? 2.2 : 2.4}
+                    strokeWidth={edge.highlighted || edge.running ? 3.5 : 2.4}
                     strokeLinecap="round"
-                    strokeDasharray={edge.pruned ? "3 4" : edge.queued ? "4 5" : undefined}
-                    opacity={edge.failed ? 0.72 : edge.pruned ? 0.68 : 0.92}
+                    strokeDasharray={edge.queued ? "4 5" : undefined}
+                    opacity={edge.failed ? 0.72 : 0.92}
                   />
                 </g>
               );
@@ -1318,43 +1307,6 @@ function TreeDiagram({
                           <line x1={8} y1={-8} x2={-8} y2={8} stroke="#881337" strokeWidth="3" strokeLinecap="round" />
                         </>
                       )}
-                    </>
-                  )}
-
-                  {node.kind === "pruned" && (
-                    <>
-                      <circle
-                        cx="0"
-                        cy="0"
-                        r={node.radius + 7}
-                        fill="none"
-                        stroke="rgba(245,158,11,0.18)"
-                        strokeWidth="3.2"
-                      />
-                      <circle
-                        cx="0"
-                        cy="0"
-                        r={node.radius}
-                        fill="rgba(255,247,237,0.86)"
-                        stroke="#c2410c"
-                        strokeWidth="2.2"
-                        strokeDasharray="3 3"
-                      />
-                      <path
-                        d="M -7.5 7.5 L 7.5 -7.5"
-                        fill="none"
-                        stroke="#9a3412"
-                        strokeWidth="2.6"
-                        strokeLinecap="round"
-                      />
-                      <path
-                        d="M -2.8 9.2 L 9.2 -2.8"
-                        fill="none"
-                        stroke="#fb923c"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        opacity="0.72"
-                      />
                     </>
                   )}
 
@@ -1987,7 +1939,7 @@ export default function StructuredBlock({
 
     return (
       <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
-        <SectionHeader block={block} count={nodes.length} />
+        <SectionHeader block={block} count={nodes.filter((node) => node.kind !== "pruned").length} />
         <div className="px-4 py-3.5">
           <TreeDiagram
             nodes={nodes}
