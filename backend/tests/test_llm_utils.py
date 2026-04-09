@@ -1,10 +1,10 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from app.llm.utils import build_current_date_context, with_current_date_context
 
 
 def test_build_current_date_context_formats_tokyo_date_and_weekday():
-    source = datetime(2026, 4, 9, 3, 15, tzinfo=UTC)
+    source = datetime(2026, 4, 9, 3, 15, tzinfo=timezone.utc)
 
     result = build_current_date_context(source)
 
@@ -12,7 +12,7 @@ def test_build_current_date_context_formats_tokyo_date_and_weekday():
 
 
 def test_with_current_date_context_appends_context_to_system_prompt():
-    source = datetime(2026, 4, 9, 12, 0, tzinfo=UTC)
+    source = datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc)
 
     result = with_current_date_context("system prompt", source)
 

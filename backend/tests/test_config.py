@@ -2,6 +2,11 @@ from app.config import load_settings
 
 
 def test_load_settings_alias_and_crlf(monkeypatch):
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("DATABASE_PATH", raising=False)
+    monkeypatch.delenv("MODEL_STRICT_MODE", raising=False)
+    monkeypatch.delenv("RUN_PREFLIGHT_ON_STARTUP", raising=False)
+    monkeypatch.delenv("PREFLIGHT_FAIL_FAST", raising=False)
     monkeypatch.setenv("Gemini_API_KEY", "dummy-gemini\r")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "openai-key\r")

@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any
 
 import jsonschema
+from jsonschema import ValidationError
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,10 @@ class Toolbox:
     def _validate(self, schema: dict[str, Any], payload: Any, *, label: str) -> None:
         if not schema:
             return
-        jsonschema.validate(self._normalize_for_validation(payload), schema)
+        try:
+            jsonschema.validate(self._normalize_for_validation(payload), schema)
+        except ValidationError as exc:
+            raise ValueError(f"{label} schema validation failed: {exc.message}") from exc
 
     def get(self, name: str) -> BaseResearchTool:
         if name not in self._tools:
