@@ -7,6 +7,7 @@
 :root {
   color: #0b1220;
   background: #eff9ff;
+  --app-background-image: url("/housing-scientist.png");
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -20,7 +21,7 @@ body {
 }
 
 body {
-  background: url("/housing-scientist.png") center / cover no-repeat fixed;
+  background: var(--app-background-image) center / cover no-repeat fixed;
   font-family: "Noto Sans JP", "Sora", sans-serif;
   font-feature-settings: "palt" 1;
   letter-spacing: 0.01em;

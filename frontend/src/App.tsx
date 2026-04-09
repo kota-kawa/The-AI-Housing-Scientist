@@ -47,6 +47,17 @@ type CardEntry = {
 };
 
 const PROFILE_STORAGE_KEY = "housing_scientist_profile_id";
+const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 120;
+const DEFAULT_BACKGROUND_IMAGE = 'url("/housing-scientist.png")';
+const SEARCH_BACKGROUND_IMAGE = 'url("/search.png")';
+const COMPLETE_BACKGROUND_IMAGE = 'url("/complete.png")';
+const COMPLETE_BACKGROUND_STATES = new Set([
+  "research_completed",
+  "search_results_ready",
+  "inquiry_draft_ready",
+  "awaiting_contract_text",
+  "risk_check_completed",
+]);
 
 const SAMPLE_PROMPTS: string[] = [
   "江東区で家賃12万円以下、駅徒歩7分以内の1LDKを探しています",
@@ -249,6 +260,36 @@ export default function App() {
   const [openModelDropdown, setOpenModelDropdown] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const previousMessageCountRef = useRef<number>(0);
+  const userIsNearBottomRef = useRef<boolean>(true);
+  const forceAutoScrollRef = useRef<boolean>(false);
+  const [inputBarHeight, setInputBarHeight] = useState<number>(160);
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const observer = new ResizeObserver(() => {
+      setInputBarHeight(form.offsetHeight + 16);
+    });
+    observer.observe(form);
+    return () => observer.disconnect();
+  }, []);
+
+  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  };
+
+  const refreshViewportPosition = () => {
+    const scrollRoot = document.documentElement;
+    const distanceFromBottom =
+      scrollRoot.scrollHeight - (window.scrollY + window.innerHeight);
+    userIsNearBottomRef.current = distanceFromBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
+  };
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -301,15 +342,31 @@ export default function App() {
   }, [openModelDropdown]);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "end",
-      });
-    });
+    refreshViewportPosition();
+    const handleViewportChange = () => refreshViewportPosition();
+    window.addEventListener("scroll", handleViewportChange, { passive: true });
+    window.addEventListener("resize", handleViewportChange);
+    return () => {
+      window.removeEventListener("scroll", handleViewportChange);
+      window.removeEventListener("resize", handleViewportChange);
+    };
+  }, []);
 
-    return () => window.cancelAnimationFrame(frame);
-  }, [messages, loading]);
+  useEffect(() => {
+    const hasNewMessage = messages.length > previousMessageCountRef.current;
+    previousMessageCountRef.current = messages.length;
+
+    const shouldAutoScroll =
+      forceAutoScrollRef.current || (userIsNearBottomRef.current && (hasNewMessage || loading));
+
+    if (!shouldAutoScroll) {
+      return;
+    }
+
+    const cancelScroll = scrollToBottom(forceAutoScrollRef.current ? "auto" : "smooth");
+    forceAutoScrollRef.current = false;
+    return cancelScroll;
+  }, [loading, messages.length]);
 
   useEffect(() => {
     if (!sessionId || !activeResearchMessageId) {
@@ -379,6 +436,18 @@ export default function App() {
   }, [responseState]);
 
   const isResearchBusy = responseState === "research_queued" || responseState === "research_running";
+  const backgroundImage = useMemo(() => {
+    if (messages.length === 0) {
+      return DEFAULT_BACKGROUND_IMAGE;
+    }
+    if (isResearchBusy) {
+      return SEARCH_BACKGROUND_IMAGE;
+    }
+    if (COMPLETE_BACKGROUND_STATES.has(responseState)) {
+      return COMPLETE_BACKGROUND_IMAGE;
+    }
+    return DEFAULT_BACKGROUND_IMAGE;
+  }, [isResearchBusy, messages.length, responseState]);
 
   const pendingAction = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -411,6 +480,13 @@ export default function App() {
 
   const llmEditable = Boolean(llmConfig?.editable) && !isResearchBusy;
 
+  useEffect(() => {
+    document.body.style.setProperty("--app-background-image", backgroundImage);
+    return () => {
+      document.body.style.setProperty("--app-background-image", DEFAULT_BACKGROUND_IMAGE);
+    };
+  }, [backgroundImage]);
+
   const llmSummary = useMemo(() => {
     if (!llmConfig || !llmCapabilities) {
       return "設定を読み込み中";
@@ -422,6 +498,7 @@ export default function App() {
 
   const appendAssistantResponse = (payload: ChatMessageResponse) => {
     const assistantMessage = toAssistantMessage(payload);
+    forceAutoScrollRef.current = true;
     setMessages((prev) => [...prev, assistantMessage]);
     if (payload.status === "research_queued" || payload.status === "research_running") {
       setActiveResearchMessageId(assistantMessage.id);
@@ -446,6 +523,7 @@ export default function App() {
       role: "user",
       text: userText,
     };
+    forceAutoScrollRef.current = true;
     setMessages((prev) => [...prev, userMessage]);
 
     try {
@@ -573,6 +651,7 @@ export default function App() {
     setStatus("新しいセッションを準備中...");
     setLlmEditorOpen(false);
     setActiveResearchMessageId("");
+    forceAutoScrollRef.current = true;
 
     try {
       const profileId = window.localStorage.getItem(PROFILE_STORAGE_KEY) ?? undefined;
@@ -768,7 +847,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-x-clip pb-48 text-ink">
+    <div className="relative min-h-screen overflow-x-clip text-ink" style={{ paddingBottom: inputBarHeight }}>
       <div className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 pb-8 pt-6 sm:px-6">
         {/* ===== Header ===== */}
         <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
@@ -926,6 +1005,7 @@ export default function App() {
 
       {/* ===== Floating input bar ===== */}
       <form
+        ref={formRef}
         onSubmit={onSubmit}
         className="fixed inset-x-0 bottom-0 z-20 px-4 pb-[calc(env(safe-area-inset-bottom)+14px)] pt-6 sm:px-6"
       >
