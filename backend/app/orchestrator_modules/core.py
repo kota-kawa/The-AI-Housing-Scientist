@@ -21,7 +21,7 @@ from app.profile_memory import (
     update_profile_memory_with_reaction,
     update_profile_memory_with_search,
 )
-from app.services import PropertyCatalogService
+from app.services import PropertyCatalogService, PropertyImageResolver
 
 from .shared import _generate_llm_resume_body
 
@@ -34,6 +34,10 @@ class OrchestratorCoreMixin:
         self.settings = settings
         self.db = db
         self.catalog = PropertyCatalogService(db)
+        self.property_images = PropertyImageResolver(
+            brave_api_key=settings.brave_search_api_key,
+            timeout_seconds=settings.llm_timeout_seconds,
+        )
         self._model_cache: dict[str, list[str]] = {}
         self._llm_observer = DatabaseLLMObserver(
             db,

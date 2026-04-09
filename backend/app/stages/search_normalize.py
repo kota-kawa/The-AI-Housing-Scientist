@@ -411,6 +411,7 @@ def _build_fallback_property(
         building_name=building_name,
         building_name_norm=_normalize_building_name(building_name),
         detail_url=item.get("url", ""),
+        image_url=str(item.get("image_url") or ""),
         address=address or "住所要確認",
         address_norm=_normalize_address(address),
         area_name=_extract_area_name(address),
@@ -487,6 +488,7 @@ def _build_detail_property(
     notes = _extract_html_field(detail_html, "notes") or item.get("description", "") or "詳細ページから抽出"
     contract_text = _extract_html_field(detail_html, "contract_text")
     features = _extract_html_json_field(detail_html, "features")
+    image_url = _extract_html_field(detail_html, "image_url")
 
     prop = PropertyNormalized(
         property_id_norm=property_id_norm,
@@ -494,6 +496,7 @@ def _build_detail_property(
         building_name=building_name or "物件名不明",
         building_name_norm=_normalize_building_name(building_name or "物件名不明"),
         detail_url=item.get("url", ""),
+        image_url=image_url,
         address=address,
         address_norm=_normalize_address(address),
         area_name=area_name,
@@ -744,6 +747,7 @@ def run_search_and_normalize(
     search_results: list[dict[str, Any]],
     detail_fetcher: Callable[[str], str | None] | None = None,
     adapter: LLMAdapter | None = None,
+    image_resolver: Callable[[dict[str, Any], dict[str, Any], str], str] | None = None,
 ) -> dict[str, Any]:
     properties: list[PropertyNormalized] = []
     detail_parsed_count = 0
@@ -774,6 +778,16 @@ def run_search_and_normalize(
             else:
                 skipped_count += 1
                 continue
+
+        if image_resolver is not None and not str(prop.image_url or "").strip():
+            try:
+                resolved_image = str(
+                    image_resolver(item, prop.model_dump(), detail_html or "")
+                ).strip()
+            except Exception:
+                resolved_image = ""
+            if resolved_image:
+                prop.image_url = resolved_image
 
         properties.append(prop)
 

@@ -47,6 +47,7 @@ class HousingResearchAgentManager(
         collect_search_results: Callable[..., tuple[list[dict[str, Any]], dict[str, Any]]],
         fetch_detail_html: Callable[[str], str | None],
         collect_source_items: Callable[..., list[dict[str, Any]]],
+        resolve_property_image: Callable[..., str] | None = None,
         tree_max_nodes: int = 12,
         tree_max_depth: int = 4,
         tree_batch_size: int = 3,
@@ -68,6 +69,7 @@ class HousingResearchAgentManager(
         self.collect_search_results = collect_search_results
         self.fetch_detail_html = fetch_detail_html
         self.collect_source_items = collect_source_items
+        self.resolve_property_image = resolve_property_image
         self.tree_max_nodes = max(4, tree_max_nodes)
         self.tree_max_depth = max(1, tree_max_depth)
         self.tree_batch_size = max(1, min(5, tree_batch_size))

@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from app.catalog import render_property_detail_html, rewrite_catalog_notes
+from app.catalog import build_catalog_image_url, render_property_detail_html, rewrite_catalog_notes
 from app.db import Database
 from app.llm.base import LLMAdapter
 from app.stages.search_normalize import _split_address_levels
@@ -404,6 +404,7 @@ class PropertyCatalogService:
                         f"{item['area_m2']}㎡ 徒歩{item['station_walk_min']}分"
                     ),
                     "url": item["detail_url"],
+                    "image_url": item.get("image_url") or build_catalog_image_url(item["property_id"]),
                     "description": (
                         f"{item['address']} / 賃料{item['rent']:,}円 管理費{item['management_fee']:,}円 / "
                         f"{item['nearest_station']} 徒歩{item['station_walk_min']}分"

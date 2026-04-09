@@ -598,6 +598,16 @@ class AgentManagerToolingMixin:
             search_results=raw_results,
             detail_fetcher=lambda url: detail_html_map.get(url),
             adapter=self.research_adapter,
+            image_resolver=(
+                lambda item, prop, detail_html="": self.resolve_property_image(
+                    search_result=item,
+                    property_data=prop,
+                    detail_html=detail_html,
+                    adapter=self.research_adapter,
+                )
+            )
+            if self.resolve_property_image is not None
+            else None,
         )
 
     def _tool_rank(

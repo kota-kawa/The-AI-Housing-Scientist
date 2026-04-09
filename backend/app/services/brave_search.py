@@ -217,3 +217,69 @@ class BraveSearchClient:
             normalized = _summarize_result_snippets(adapter, normalized)
 
         return normalized
+
+
+class BraveImageSearchClient:
+    def __init__(
+        self,
+        api_key: str,
+        timeout_seconds: int = 20,
+        *,
+        rate_per_second: float = 2.0,
+        burst_size: int = 3,
+    ):
+        self.api_key = api_key.strip()
+        self.timeout_seconds = timeout_seconds
+        self.rate_per_second = max(0.1, float(rate_per_second))
+        self.burst_size = max(1, int(burst_size))
+        self.base_url = "https://api.search.brave.com/res/v1/images/search"
+
+    def search(
+        self,
+        query: str,
+        count: int = 8,
+    ) -> list[dict[str, Any]]:
+        if not self.api_key:
+            raise RuntimeError("BRAVE_SEARCH_API key is missing")
+
+        headers = {
+            "Accept": "application/json",
+            "X-Subscription-Token": self.api_key,
+        }
+        params = {
+            "q": query,
+            "count": max(1, min(count, 20)),
+            "country": "JP",
+            "search_lang": "ja",
+            "safesearch": "strict",
+            "spellcheck": True,
+        }
+
+        _get_brave_token_bucket(
+            api_key=self.api_key,
+            rate_per_second=self.rate_per_second,
+            burst_size=self.burst_size,
+        ).acquire()
+
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.get(self.base_url, headers=headers, params=params)
+            response.raise_for_status()
+            payload = response.json()
+
+        normalized: list[dict[str, Any]] = []
+        for item in payload.get("results", []) or []:
+            thumbnail = item.get("thumbnail", {}) or {}
+            properties = item.get("properties", {}) or {}
+            normalized.append(
+                {
+                    "title": str(item.get("title") or ""),
+                    "page_url": str(item.get("url") or ""),
+                    "source": str(item.get("source") or ""),
+                    "image_url": str(properties.get("url") or ""),
+                    "thumbnail_url": str(thumbnail.get("src") or ""),
+                    "width": int(properties.get("width") or thumbnail.get("width") or 0),
+                    "height": int(properties.get("height") or thumbnail.get("height") or 0),
+                    "confidence": str(item.get("confidence") or ""),
+                }
+            )
+        return normalized

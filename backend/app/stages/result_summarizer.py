@@ -128,6 +128,7 @@ def _build_candidate_snapshot(
     return {
         "property_id_norm": str(prop.get("property_id_norm") or ""),
         "building_name": _compact_text(prop.get("building_name") or "候補物件", max_chars=80),
+        "image_url": str(prop.get("image_url") or ""),
         "address": _compact_text(prop.get("address") or "", max_chars=120),
         "rent": int(prop.get("rent") or 0),
         "layout": _compact_text(prop.get("layout") or "", max_chars=24),
@@ -273,6 +274,7 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
                 if _candidate_sort_key(candidate) > _candidate_sort_key(existing):
                     for field in [
                         "building_name",
+                        "image_url",
                         "address",
                         "rent",
                         "layout",
@@ -325,6 +327,7 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
                 {
                     "property_id_norm": "",
                     "building_name": str(item.get("title") or "検索候補"),
+                    "image_url": str(item.get("image_url") or ""),
                     "address": "",
                     "rent": 0,
                     "layout": "",
@@ -391,6 +394,7 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
         {
             "property_id_norm": str(item.get("property_id_norm") or ""),
             "building_name": str(item.get("building_name") or "候補物件"),
+            "image_url": str(item.get("image_url") or ""),
             "address": str(item.get("address") or ""),
             "rent": int(item.get("rent") or 0),
             "layout": str(item.get("layout") or ""),
@@ -432,6 +436,7 @@ def _result_summary_schema() -> dict[str, Any]:
                     "properties": {
                         "property_id_norm": {"type": "string"},
                         "building_name": {"type": "string"},
+                        "image_url": {"type": "string"},
                         "address": {"type": "string"},
                         "rent": {"type": "integer", "minimum": 0},
                         "layout": {"type": "string"},
@@ -447,6 +452,7 @@ def _result_summary_schema() -> dict[str, Any]:
                     "required": [
                         "property_id_norm",
                         "building_name",
+                        "image_url",
                         "address",
                         "rent",
                         "layout",

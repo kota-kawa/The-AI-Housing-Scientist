@@ -137,6 +137,38 @@ def test_search_normalize_extracts_base_rent_without_confusing_management_fee():
     assert prop["rent"] == 118000
 
 
+def test_search_normalize_inserts_resolved_image_into_final_data():
+    items = [
+        {
+            "title": "東雲ベイテラス | Mock Housing",
+            "description": "江東区東雲の1LDK",
+            "url": "https://mock-housing.local/properties/koto-shinonome-bay",
+            "extra_snippets": [],
+            "source_name": "mock_catalog",
+        }
+    ]
+
+    result = run_search_and_normalize(
+        query="江東区 賃貸 12万円",
+        search_results=items,
+        detail_fetcher=lambda url: """
+        <article data-kind="property-detail">
+          <h1 data-field="building_name">東雲ベイテラス</h1>
+          <p data-field="property_id">koto-shinonome-bay</p>
+          <p data-field="address">東京都江東区東雲1-4-8</p>
+          <p data-field="nearest_station">豊洲駅</p>
+          <p data-field="layout">1LDK</p>
+          <p data-field="area_m2">42.1</p>
+          <p data-field="rent">118000</p>
+        </article>
+        """,
+        image_resolver=lambda item, prop, detail_html: "https://example.com/images/shinonome.jpg",
+    )
+
+    prop = result["normalized_properties"][0]
+    assert prop["image_url"] == "https://example.com/images/shinonome.jpg"
+
+
 def test_search_normalize_llm_supplements_natural_detail_html():
     adapter = FakeNormalizeAdapter(
         {

@@ -6,10 +6,27 @@ from typing import Any
 
 
 CATALOG_URL_PREFIX = "https://mock-housing.local/properties/"
+MOCK_PROPERTY_IMAGE_URLS = {
+    "koto-shinonome-bay": "https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&w=1200&q=80",
+    "koto-monzen-river": "https://images.unsplash.com/photo-1494526585095-c41746248156?auto=format&fit=crop&w=1200&q=80",
+    "koto-ariake-park": "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80",
+    "koto-toyosu-breeze": "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1200&q=80",
+    "sumida-ryogoku-east": "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80",
+    "shinjuku-west-garden": "https://images.unsplash.com/photo-1464146072230-91cabc968266?auto=format&fit=crop&w=1200&q=80",
+    "kichijoji-north-loft": "https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=1200&q=80",
+    "yokohama-bay-front": "https://images.unsplash.com/photo-1493809842364-78817add7ffb?auto=format&fit=crop&w=1200&q=80",
+    "nakano-work-suite": "https://images.unsplash.com/photo-1507089947368-19c1da9775ae?auto=format&fit=crop&w=1200&q=80",
+    "meguro-pet-garden": "https://images.unsplash.com/photo-1502005097973-6a7082348e28?auto=format&fit=crop&w=1200&q=80",
+    "shinagawa-south-court": "https://images.unsplash.com/photo-1505692952047-1a78307da8f2?auto=format&fit=crop&w=1200&q=80",
+}
 
 
 def build_catalog_detail_url(property_id: str) -> str:
     return f"{CATALOG_URL_PREFIX}{property_id}"
+
+
+def build_catalog_image_url(property_id: str) -> str:
+    return MOCK_PROPERTY_IMAGE_URLS.get(str(property_id or "").strip(), "")
 
 
 CATALOG_SEED: list[dict[str, Any]] = [
@@ -272,18 +289,23 @@ def rewrite_catalog_notes(catalog: list[dict[str, Any]], adapter: Any) -> list[d
 
 
 def render_property_detail_html(property_row: dict[str, Any]) -> str:
+    image_url = str(property_row.get("image_url") or build_catalog_image_url(str(property_row.get("property_id") or "")))
+    payload = dict(property_row)
+    payload["image_url"] = image_url
     features_json = json.dumps(property_row.get("features", []), ensure_ascii=False)
-    safe = {key: html.escape(str(value)) for key, value in property_row.items()}
+    safe = {key: html.escape(str(value)) for key, value in payload.items()}
     return f"""
     <html lang="ja">
       <head>
         <title>{safe["building_name"]} | Mock Housing</title>
         <meta name="description" content="{safe["building_name"]}の詳細情報" />
+        <meta property="og:image" content="{safe["image_url"]}" />
       </head>
       <body>
         <article data-kind="property-detail">
           <h1 data-field="building_name">{safe["building_name"]}</h1>
           <p data-field="property_id">{safe["property_id"]}</p>
+          <p data-field="image_url">{safe["image_url"]}</p>
           <p data-field="address">{safe["address"]}</p>
           <p data-field="area_name">{safe["area_name"]}</p>
           <p data-field="nearest_station">{safe["nearest_station"]}</p>
@@ -297,6 +319,7 @@ def render_property_detail_html(property_row: dict[str, Any]) -> str:
           <p data-field="key_money">{safe["key_money"]}</p>
           <p data-field="available_date">{safe["available_date"]}</p>
           <p data-field="agency_name">{safe["agency_name"]}</p>
+          <img src="{safe["image_url"]}" alt="{safe["building_name"]} の物件写真" />
           <section data-field="notes">{safe["notes"]}</section>
           <section data-field="contract_text">{safe["contract_text"]}</section>
           <script type="application/json" data-field="features">{html.escape(features_json)}</script>

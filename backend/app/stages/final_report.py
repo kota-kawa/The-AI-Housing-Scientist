@@ -249,6 +249,7 @@ def _build_fallback_report(
         )
 
     top_candidate = candidates[0] if candidates else {}
+    top_candidate_image_url = str(top_candidate.get("image_url") or "").strip()
     if top_candidate:
         top_name = str(top_candidate.get("building_name") or "候補物件")
         top_reason = str(top_candidate.get("reason") or "条件一致度が高い候補です。")
@@ -277,6 +278,7 @@ def _build_fallback_report(
             "",
             "## 推奨物件と根拠",
             recommendation_text,
+            f"![{top_name}]({top_candidate_image_url})" if top_candidate_image_url else "",
             "",
             "## 追加調査の提案",
             *follow_up_lines,

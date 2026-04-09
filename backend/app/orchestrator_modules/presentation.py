@@ -28,6 +28,7 @@ class OrchestratorPresentationMixin:
             card = {
                 "id": item["property_id_norm"],
                 "title": prop.get("building_name", "候補物件"),
+                "image_url": prop.get("image_url", ""),
                 "score": item["score"],
                 "rent": prop.get("rent", 0),
                 "station_walk_min": prop.get("station_walk_min", 0),
@@ -112,6 +113,7 @@ class OrchestratorPresentationMixin:
                         type="cards",
                         title="推薦候補",
                         content={
+                            "compare_enabled": True,
                             "items": self._build_property_cards(
                                 ranked_properties=ranked_properties,
                                 normalized_properties=normalized_properties,
@@ -239,7 +241,10 @@ class OrchestratorPresentationMixin:
                 UIBlock(
                     type="text",
                     title="最終レポート",
-                    content={"body": str(final_report_markdown).strip()},
+                    content={
+                        "body": str(final_report_markdown).strip(),
+                        "format": "markdown",
+                    },
                 )
             )
 
@@ -360,6 +365,24 @@ class OrchestratorPresentationMixin:
                 )
             )
 
+        if ranked_properties:
+            blocks.append(
+                UIBlock(
+                    type="cards",
+                    title="結果の物件画像",
+                    content={
+                        "compare_enabled": False,
+                        "items": self._build_property_cards(
+                            ranked_properties=ranked_properties[:1],
+                            normalized_properties=normalized_properties,
+                            selectable=True,
+                            property_reactions=self._get_property_reactions(task_memory),
+                            max_items=1,
+                        ),
+                    },
+                )
+            )
+
         return blocks
 
     def _build_inquiry_blocks(
@@ -378,6 +401,7 @@ class OrchestratorPresentationMixin:
                 type="cards",
                 title="選択中の物件",
                 content={
+                    "compare_enabled": False,
                     "items": self._build_property_cards(
                         ranked_properties=selected_ranked or ranked_properties[:1],
                         normalized_properties=normalized_properties,
@@ -485,6 +509,7 @@ class OrchestratorPresentationMixin:
                 type="cards",
                 title="選択した比較候補",
                 content={
+                    "compare_enabled": True,
                     "items": self._build_property_cards(
                         ranked_properties=selected_ranked,
                         normalized_properties=normalized_properties,

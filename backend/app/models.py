@@ -12,6 +12,7 @@ class PropertyNormalized(BaseModel):
     building_name: str = ""
     building_name_norm: str
     detail_url: str = ""
+    image_url: str = ""
     address: str = ""
     address_norm: str
     area_name: str = ""

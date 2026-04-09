@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.catalog import CATALOG_SEED, build_catalog_detail_url
+from app.catalog import CATALOG_SEED, build_catalog_detail_url, build_catalog_image_url
 
 
 UTC = timezone.utc
@@ -138,6 +138,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS property_catalog (
                     property_id TEXT PRIMARY KEY,
                     detail_url TEXT NOT NULL UNIQUE,
+                    image_url TEXT NOT NULL DEFAULT '',
                     building_name TEXT NOT NULL,
                     address TEXT NOT NULL,
                     area_name TEXT NOT NULL,
@@ -198,6 +199,7 @@ class Database:
             self._ensure_column(conn, "llm_call_events", "completion_tokens", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "llm_call_events", "total_tokens", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "llm_call_events", "estimated_cost_usd", "REAL")
+            self._ensure_column(conn, "property_catalog", "image_url", "TEXT NOT NULL DEFAULT ''")
             self._seed_property_catalog(conn)
             conn.commit()
 
@@ -217,6 +219,7 @@ class Database:
         row = conn.execute("SELECT COUNT(*) AS count FROM property_catalog").fetchone()
         count = int(row["count"]) if row is not None else 0
         if count > 0:
+            self._backfill_property_catalog_image_urls(conn)
             return
 
         now = utc_now_iso()
@@ -226,6 +229,7 @@ class Database:
                 INSERT INTO property_catalog(
                     property_id,
                     detail_url,
+                    image_url,
                     building_name,
                     address,
                     area_name,
@@ -245,11 +249,12 @@ class Database:
                     features_json,
                     created_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item["property_id"],
                     build_catalog_detail_url(item["property_id"]),
+                    item.get("image_url") or build_catalog_image_url(item["property_id"]),
                     item["building_name"],
                     item["address"],
                     item["area_name"],
@@ -270,6 +275,22 @@ class Database:
                     now,
                     now,
                 ),
+            )
+
+    def _backfill_property_catalog_image_urls(self, conn: sqlite3.Connection) -> None:
+        for item in CATALOG_SEED:
+            image_url = str(item.get("image_url") or build_catalog_image_url(item.get("property_id")) or "").strip()
+            property_id = str(item.get("property_id") or "").strip()
+            if not image_url or not property_id:
+                continue
+            conn.execute(
+                """
+                UPDATE property_catalog
+                SET image_url = ?, updated_at = ?
+                WHERE property_id = ?
+                  AND COALESCE(image_url, '') = ''
+                """,
+                (image_url, utc_now_iso(), property_id),
             )
 
     def get_or_create_profile(self, profile_id: str | None = None) -> tuple[str, dict[str, Any]]:
@@ -527,6 +548,7 @@ class Database:
                 SELECT
                     property_id,
                     detail_url,
+                    image_url,
                     building_name,
                     address,
                     area_name,
@@ -557,6 +579,7 @@ class Database:
                 SELECT
                     property_id,
                     detail_url,
+                    image_url,
                     building_name,
                     address,
                     area_name,
@@ -597,6 +620,7 @@ class Database:
                 SELECT
                     property_id,
                     detail_url,
+                    image_url,
                     building_name,
                     address,
                     area_name,
@@ -627,6 +651,7 @@ class Database:
         return {
             "property_id": row["property_id"],
             "detail_url": row["detail_url"],
+            "image_url": row["image_url"] or build_catalog_image_url(row["property_id"]),
             "building_name": row["building_name"],
             "address": row["address"],
             "area_name": row["area_name"],

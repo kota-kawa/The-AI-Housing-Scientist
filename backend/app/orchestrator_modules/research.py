@@ -318,6 +318,7 @@ class OrchestratorResearchMixin:
             collect_search_results=self._collect_search_results,
             fetch_detail_html=self.catalog.fetch_detail_html,
             collect_source_items=self._collect_research_source_items,
+            resolve_property_image=self.property_images.resolve,
             tree_max_nodes=self.settings.research_tree_max_nodes,
             tree_max_depth=self.settings.research_tree_max_depth,
             tree_batch_size=self.settings.research_tree_batch_size,

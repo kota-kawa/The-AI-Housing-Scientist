@@ -1,5 +1,8 @@
 import type { ComponentType, SVGProps } from "react";
 
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 import type { ActionDescriptor, UIBlock } from "../lib/api";
 
 type Props = {
@@ -516,6 +519,160 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function hashText(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function escapeSvgText(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function splitTextForPlaceholder(value: string, maxLength: number = 14): string[] {
+  const normalized = value.trim();
+  if (!normalized) {
+    return ["Mock Housing"];
+  }
+  const chunks: string[] = [];
+  for (let index = 0; index < normalized.length; index += maxLength) {
+    chunks.push(normalized.slice(index, index + maxLength));
+  }
+  return chunks.slice(0, 2);
+}
+
+function buildPropertyPlaceholderImage({
+  title,
+  layout,
+  station,
+}: {
+  title: string;
+  layout: string;
+  station: string;
+}): string {
+  const seed = hashText(`${title}|${layout}|${station}`);
+  const hue = seed % 360;
+  const accent = (hue + 42) % 360;
+  const titleLines = splitTextForPlaceholder(title);
+  const subtitle = [layout, station].filter(Boolean).join(" / ") || "おすすめ物件";
+  const subtitleLabel = escapeSvgText(subtitle);
+  const titleMarkup = titleLines
+    .map((line, index) => {
+      const dy = index === 0 ? "0" : "28";
+      return `<tspan x="56" dy="${dy}">${escapeSvgText(line)}</tspan>`;
+    })
+    .join("");
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-label="${escapeSvgText(title)}">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="hsl(${hue} 74% 92%)" />
+          <stop offset="100%" stop-color="hsl(${accent} 78% 82%)" />
+        </linearGradient>
+        <linearGradient id="tower" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="hsl(${hue} 34% 34%)" />
+          <stop offset="100%" stop-color="hsl(${accent} 38% 20%)" />
+        </linearGradient>
+      </defs>
+      <rect width="1200" height="720" fill="url(#bg)" />
+      <circle cx="1060" cy="124" r="72" fill="rgba(255,255,255,0.44)" />
+      <path d="M0 580C132 534 220 552 332 590C458 632 554 644 688 600C808 562 914 530 1200 590V720H0Z" fill="rgba(255,255,255,0.36)" />
+      <rect x="112" y="220" width="240" height="328" rx="18" fill="url(#tower)" opacity="0.9" />
+      <rect x="308" y="168" width="292" height="384" rx="22" fill="url(#tower)" />
+      <rect x="548" y="248" width="188" height="300" rx="18" fill="url(#tower)" opacity="0.92" />
+      <rect x="704" y="296" width="150" height="252" rx="16" fill="url(#tower)" opacity="0.82" />
+      <g fill="rgba(255,255,255,0.76)">
+        <rect x="170" y="270" width="32" height="38" rx="6" />
+        <rect x="222" y="270" width="32" height="38" rx="6" />
+        <rect x="170" y="332" width="32" height="38" rx="6" />
+        <rect x="222" y="332" width="32" height="38" rx="6" />
+        <rect x="366" y="226" width="34" height="40" rx="6" />
+        <rect x="420" y="226" width="34" height="40" rx="6" />
+        <rect x="474" y="226" width="34" height="40" rx="6" />
+        <rect x="366" y="288" width="34" height="40" rx="6" />
+        <rect x="420" y="288" width="34" height="40" rx="6" />
+        <rect x="474" y="288" width="34" height="40" rx="6" />
+        <rect x="604" y="294" width="30" height="34" rx="6" />
+        <rect x="652" y="294" width="30" height="34" rx="6" />
+        <rect x="604" y="348" width="30" height="34" rx="6" />
+        <rect x="652" y="348" width="30" height="34" rx="6" />
+        <rect x="750" y="340" width="28" height="32" rx="6" />
+        <rect x="796" y="340" width="28" height="32" rx="6" />
+      </g>
+      <rect x="56" y="64" width="560" height="154" rx="28" fill="rgba(255,255,255,0.74)" />
+      <text x="56" y="132" fill="#0f172a" font-family="'Hiragino Sans','Noto Sans JP',sans-serif" font-size="52" font-weight="700">${titleMarkup}</text>
+      <text x="56" y="190" fill="#334155" font-family="'Hiragino Sans','Noto Sans JP',sans-serif" font-size="28" font-weight="500">${subtitleLabel}</text>
+    </svg>
+  `.trim();
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function resolvePropertyImage(item: Record<string, unknown>): string {
+  const imageUrl = toDisplayText(item.image_url).trim();
+  if (imageUrl) {
+    return imageUrl;
+  }
+  return buildPropertyPlaceholderImage({
+    title: toDisplayText(item.title) || "候補物件",
+    layout: toDisplayText(item.layout),
+    station: toDisplayText(item.station),
+  });
+}
+
+function MarkdownBody({ body }: { body: string }) {
+  return (
+    <div className="markdown-body text-[14px] leading-7 text-ink">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <h1 className="mt-1 text-xl font-semibold text-slate-950 first:mt-0">{children}</h1>,
+          h2: ({ children }) => (
+            <h2 className="mt-6 border-b border-slate-200 pb-2 text-lg font-semibold text-slate-900 first:mt-0">
+              {children}
+            </h2>
+          ),
+          h3: ({ children }) => <h3 className="mt-5 text-base font-semibold text-slate-900">{children}</h3>,
+          p: ({ children }) => <p className="mt-3 text-[14px] leading-7 text-ink first:mt-0">{children}</p>,
+          ul: ({ children }) => <ul className="mt-3 list-disc space-y-1 pl-5 text-[14px] text-ink">{children}</ul>,
+          ol: ({ children }) => <ol className="mt-3 list-decimal space-y-1 pl-5 text-[14px] text-ink">{children}</ol>,
+          li: ({ children }) => <li className="leading-7">{children}</li>,
+          strong: ({ children }) => <strong className="font-semibold text-slate-950">{children}</strong>,
+          blockquote: ({ children }) => (
+            <blockquote className="mt-4 rounded-r-2xl border-l-4 border-sky-300 bg-sky-50/70 px-4 py-3 text-slate-700">
+              {children}
+            </blockquote>
+          ),
+          code: ({ children }) =>
+            String(children).includes("\n") ? (
+              <code className="block text-[13px] leading-6 text-slate-50">{children}</code>
+            ) : (
+              <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] text-slate-800">{children}</code>
+            ),
+          pre: ({ children }) => <pre className="mt-4 overflow-x-auto">{children}</pre>,
+          hr: () => <hr className="my-6 border-slate-200" />,
+          table: ({ children }) => (
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="min-w-full border-collapse text-left text-[13px]">{children}</table>
+            </div>
+          ),
+          thead: ({ children }) => <thead className="bg-slate-50 text-slate-700">{children}</thead>,
+          th: ({ children }) => <th className="border-b border-slate-200 px-3 py-2 font-semibold">{children}</th>,
+          td: ({ children }) => <td className="border-b border-slate-100 px-3 py-2 align-top text-slate-700">{children}</td>,
+        }}
+      >
+        {body}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 function buildTreePruneSummary(nodes: TreeNodeItem[]): Map<number, TreePruneSummary> {
   const summaryByParent = new Map<number, TreePruneSummary>();
   for (const node of nodes) {
@@ -582,12 +739,14 @@ function PropertyCard({
   item,
   index,
   disabled = false,
+  compareEnabled = true,
   onCompareToggle,
   onActionExecute,
 }: {
   item: Record<string, unknown>;
   index: number;
   disabled?: boolean;
+  compareEnabled?: boolean;
   onCompareToggle?: () => void;
   onActionExecute?: (action: ActionDescriptor) => void;
 }) {
@@ -610,6 +769,7 @@ function PropertyCard({
     : [];
   const compareSelected = Boolean(item.compare_selected);
   const reactionState = toDisplayText(item.reaction_state);
+  const imageUrl = resolvePropertyImage(item);
   const reactionLabel =
     reactionState === "favorite" ? "気になる" : reactionState === "exclude" ? "除外済み" : "";
   const reactionTone =
@@ -621,6 +781,30 @@ function PropertyCard({
 
   return (
     <article className="group relative overflow-hidden rounded-2xl border border-hairline bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-cardHover">
+      <div className="relative mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-100">
+        <img
+          src={imageUrl}
+          alt={`${title} の物件画像`}
+          loading="lazy"
+          className="h-44 w-full object-cover transition duration-500 group-hover:scale-[1.02]"
+        />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-slate-950/55 to-transparent" />
+        <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-[11px] font-medium tracking-[0.12em] text-white/80">
+              RESULT PROPERTY
+            </p>
+            <p className="truncate text-sm font-semibold text-white">{title}</p>
+          </div>
+          {score && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/88 px-2 py-1 text-[11px] font-semibold text-sky-800 shadow-sm">
+              <StarIcon className="h-3 w-3" />
+              {score}
+            </span>
+          )}
+        </div>
+      </div>
+
       <header className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h4 className="font-display text-[13px] font-semibold leading-snug text-ink line-clamp-2">
@@ -634,12 +818,6 @@ function PropertyCard({
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
-          {score && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-1 text-[11px] font-semibold text-sky-700">
-              <StarIcon className="h-3 w-3" />
-              {score}
-            </span>
-          )}
           {reactionLabel && (
             <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${reactionTone}`}>
               {reactionLabel}
@@ -739,18 +917,20 @@ function PropertyCard({
       )}
 
       <div className="mt-4 space-y-2">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onCompareToggle}
-          className={`inline-flex w-full items-center justify-center rounded-xl border px-3 py-2 text-sm font-medium transition ${
-            compareSelected
-              ? "border-sky-700 bg-sky-700 text-white"
-              : "border-sky-200 bg-sky-50 text-sky-800 hover:border-sky-300 hover:bg-sky-100"
-          } disabled:cursor-not-allowed disabled:opacity-60`}
-        >
-          {compareSelected ? "比較対象から外す" : "比較に追加する"}
-        </button>
+        {compareEnabled && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onCompareToggle}
+            className={`inline-flex w-full items-center justify-center rounded-xl border px-3 py-2 text-sm font-medium transition ${
+              compareSelected
+                ? "border-sky-700 bg-sky-700 text-white"
+                : "border-sky-200 bg-sky-50 text-sky-800 hover:border-sky-300 hover:bg-sky-100"
+            } disabled:cursor-not-allowed disabled:opacity-60`}
+          >
+            {compareSelected ? "比較対象から外す" : "比較に追加する"}
+          </button>
+        )}
 
         {action && (
           <button
@@ -1732,13 +1912,17 @@ export default function StructuredBlock({
 }: Props) {
   if (block.type === "text") {
     const tone = TONES.text;
+    const body = toDisplayText(block.content.body);
+    const format = toDisplayText(block.content.format).toLowerCase();
     return (
       <section className={`overflow-hidden rounded-2xl border ${tone.border} ${tone.surface} shadow-card`}>
         <SectionHeader block={block} />
         <div className="px-4 py-3.5">
-          <p className="whitespace-pre-wrap text-[14px] leading-7 text-ink">
-            {toDisplayText(block.content.body)}
-          </p>
+          {format === "markdown" ? (
+            <MarkdownBody body={body} />
+          ) : (
+            <p className="whitespace-pre-wrap text-[14px] leading-7 text-ink">{body}</p>
+          )}
         </div>
       </section>
     );
@@ -2124,6 +2308,7 @@ export default function StructuredBlock({
 
   if (block.type === "cards") {
     const items = (block.content.items as Array<Record<string, unknown>>) ?? [];
+    const compareEnabled = block.content.compare_enabled !== false;
     const selectedCount = items.filter((item) => Boolean(item.compare_selected)).length;
     const tone = TONES.cards;
     return (
@@ -2137,12 +2322,13 @@ export default function StructuredBlock({
                 item={item}
                 index={idx}
                 disabled={disabled}
+                compareEnabled={compareEnabled}
                 onCompareToggle={() => onCompareToggle?.(idx)}
                 onActionExecute={onActionExecute}
               />
             ))}
           </div>
-          {items.length > 0 && (
+          {compareEnabled && items.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-100 bg-cyan-50/70 px-3 py-3">
               <p className="text-xs font-medium text-cyan-900">
                 {selectedCount >= 2
