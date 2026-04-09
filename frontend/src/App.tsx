@@ -265,6 +265,7 @@ export default function App() {
   const previousMessageCountRef = useRef<number>(0);
   const userIsNearBottomRef = useRef<boolean>(true);
   const forceAutoScrollRef = useRef<boolean>(false);
+  const lastMessageRef = useRef<HTMLElement | null>(null);
   const [inputBarHeight, setInputBarHeight] = useState<number>(160);
 
   useEffect(() => {
@@ -279,6 +280,23 @@ export default function App() {
 
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
     const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  };
+
+  const scrollToLatest = (behavior: ScrollBehavior = "smooth") => {
+    const frame = window.requestAnimationFrame(() => {
+      const lastMsg = lastMessageRef.current;
+      if (lastMsg) {
+        const msgHeight = lastMsg.offsetHeight;
+        if (msgHeight > window.innerHeight * 0.8) {
+          const msgTop = lastMsg.getBoundingClientRect().top + window.scrollY;
+          window.scrollTo({ top: Math.max(0, msgTop - 16), behavior });
+          return;
+        }
+      }
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
     });
 
@@ -364,7 +382,8 @@ export default function App() {
       return;
     }
 
-    const cancelScroll = scrollToBottom(forceAutoScrollRef.current ? "auto" : "smooth");
+    const behavior = forceAutoScrollRef.current ? "auto" : "smooth";
+    const cancelScroll = hasNewMessage ? scrollToLatest(behavior) : scrollToBottom(behavior);
     forceAutoScrollRef.current = false;
     return cancelScroll;
   }, [loading, messages.length]);
@@ -1007,11 +1026,13 @@ export default function App() {
             </section>
           )}
 
-          {messages.map((message) => {
+          {messages.map((message, index) => {
             const isUser = message.role === "user";
+            const isLast = index === messages.length - 1;
             return (
               <article
                 key={message.id}
+                ref={isLast ? (el: HTMLElement | null) => { lastMessageRef.current = el; } : undefined}
                 className={`flex animate-rise items-start gap-3 ${isUser ? "flex-row-reverse" : ""}`}
               >
                 <div
