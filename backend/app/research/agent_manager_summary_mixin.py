@@ -3,6 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.stages.result_summarizer import (
+    COMMON_RISKS_KEY,
+    OPEN_QUESTIONS_KEY,
+    PROPERTY_CANDIDATES_KEY,
+)
+
 
 class AgentManagerSummaryMixin:
     def _build_condition_summary(self, user_memory: dict[str, Any]) -> str:
@@ -29,11 +35,14 @@ class AgentManagerSummaryMixin:
         search_summary: dict[str, Any],
         source_items: list[dict[str, Any]],
         offline_evaluation: dict[str, Any],
+        branch_result_summary: dict[str, Any] | None = None,
     ) -> str:
         user_memory = self.approved_plan.get("user_memory_snapshot", self.user_memory)
         condition_summary = self._build_condition_summary(user_memory)
+        summarized_candidates = list((branch_result_summary or {}).get(PROPERTY_CANDIDATES_KEY, []) or [])
 
         if not ranked_properties:
+            top_candidate = summarized_candidates[0] if summarized_candidates else {}
             lead = (
                 f"{condition_summary}の条件で調査しましたが、問い合わせに進める候補は十分に揃いませんでした。"
                 if condition_summary
@@ -43,6 +52,11 @@ class AgentManagerSummaryMixin:
             follow_up = (
                 f"詳細ページを確認できた候補は{detail_hit_count}件にとどまっているため、条件を少し広げて再調査するのが安全です。"
             )
+            if top_candidate:
+                follow_up = (
+                    f"圧縮要約では{top_candidate.get('building_name', '有望候補')}が残っていますが、"
+                    "未確認項目が多いため再調査または問い合わせ前提で扱うのが安全です。"
+                )
             return f"{lead}{follow_up}"
 
         by_id = {item["property_id_norm"]: item for item in normalized_properties}
@@ -81,6 +95,7 @@ class AgentManagerSummaryMixin:
         normalized_properties: list[dict[str, Any]],
         source_items: list[dict[str, Any]],
         failure_summary: dict[str, Any],
+        branch_result_summary: dict[str, Any] | None = None,
     ) -> list[str]:
         by_id = {item["property_id_norm"]: item for item in normalized_properties}
         top_property = by_id.get(str(ranked_properties[0]["property_id_norm"]), {}) if ranked_properties else {}
@@ -106,6 +121,10 @@ class AgentManagerSummaryMixin:
             text = str(recommendation).strip()
             if text and text not in items:
                 items.append(text)
+        for question in (branch_result_summary or {}).get(OPEN_QUESTIONS_KEY, []) or []:
+            text = str(question).strip()
+            if text and text not in items:
+                items.append(text)
         return items[:5]
 
     def _build_llm_research_summary(
@@ -116,6 +135,7 @@ class AgentManagerSummaryMixin:
         search_summary: dict[str, Any],
         source_items: list[dict[str, Any]],
         offline_evaluation: dict[str, Any],
+        branch_result_summary: dict[str, Any] | None = None,
         selected_branch_summary: dict[str, Any] | None = None,
         branch_summaries: list[dict[str, Any]] | None = None,
         failure_summary: dict[str, Any] | None = None,
@@ -197,6 +217,29 @@ class AgentManagerSummaryMixin:
                 for item in (selected_path or [])[:4]
             ],
             "search_tree_summary": search_tree_summary or {},
+            "branch_result_summary": {
+                "property_candidates": [
+                    {
+                        "building_name": str(item.get("building_name") or "候補物件"),
+                        "rent": int(item.get("rent") or 0),
+                        "layout": str(item.get("layout") or ""),
+                        "station_walk_min": int(item.get("station_walk_min") or 0),
+                        "area_m2": float(item.get("area_m2") or 0.0),
+                        "reason": str(item.get("reason") or ""),
+                    }
+                    for item in (branch_result_summary or {}).get(PROPERTY_CANDIDATES_KEY, [])[:3]
+                ],
+                "common_risks": [
+                    str(item).strip()
+                    for item in (branch_result_summary or {}).get(COMMON_RISKS_KEY, [])[:3]
+                    if str(item).strip()
+                ],
+                "open_questions": [
+                    str(item).strip()
+                    for item in (branch_result_summary or {}).get(OPEN_QUESTIONS_KEY, [])[:5]
+                    if str(item).strip()
+                ],
+            },
             "search_summary": {
                 "detail_hit_count": int(search_summary.get("detail_hit_count") or 0),
                 "normalized_count": int(search_summary.get("normalized_count") or 0),
@@ -231,6 +274,7 @@ class AgentManagerSummaryMixin:
                 normalized_properties=normalized_properties,
                 source_items=source_items,
                 failure_summary=failure_info,
+                branch_result_summary=branch_result_summary,
             ),
             "required_output_format": [
                 "結論: ...",

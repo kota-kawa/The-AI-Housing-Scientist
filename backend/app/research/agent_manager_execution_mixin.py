@@ -12,6 +12,10 @@ class AgentManagerExecutionMixin:
         selected_normalize = selected_artifacts.normalize if selected_artifacts else {}
         selected_retrieve = selected_artifacts.retrieve if selected_artifacts else {}
         selected_enrich = selected_artifacts.enrich if selected_artifacts else {}
+        selected_branch_result_summary = (
+            selected_normalize.get("branch_result_summary", {})
+            or state.selected_branch_summary.get("branch_result_summary", {})
+        )
 
         state.source_items = self.collect_source_items(
             ranked_properties=selected_rank.get("ranked_properties", []),
@@ -23,6 +27,8 @@ class AgentManagerExecutionMixin:
             | selected_retrieve.get("summary", {})
             | selected_enrich.get("summary", {})
         )
+        if selected_branch_result_summary:
+            state.search_summary["branch_result_summary"] = selected_branch_result_summary
         state.failure_summary = summarize_branch_failures(state.branch_summaries)
         state.offline_evaluation = evaluate_final_result(
             selected_branch_summary=state.selected_branch_summary,
@@ -37,6 +43,7 @@ class AgentManagerExecutionMixin:
             search_summary=state.search_summary,
             source_items=state.source_items,
             offline_evaluation=state.offline_evaluation,
+            branch_result_summary=selected_branch_result_summary,
         )
         if self.research_adapter is not None:
             try:
@@ -46,6 +53,7 @@ class AgentManagerExecutionMixin:
                     search_summary=state.search_summary,
                     source_items=state.source_items,
                     offline_evaluation=state.offline_evaluation,
+                    branch_result_summary=selected_branch_result_summary,
                     selected_branch_summary=state.selected_branch_summary,
                     branch_summaries=state.branch_summaries,
                     failure_summary=state.failure_summary,
@@ -117,11 +125,16 @@ class AgentManagerExecutionMixin:
         selected_rank = selected_artifacts.rank if selected_artifacts else {}
         selected_normalize = selected_artifacts.normalize if selected_artifacts else {}
         selected_retrieve = selected_artifacts.retrieve if selected_artifacts else {}
+        selected_branch_result_summary = (
+            selected_normalize.get("branch_result_summary", {})
+            or state.selected_branch_summary.get("branch_result_summary", {})
+        )
 
         return ResearchExecutionResult(
             query=state.query,
             selected_branch_id=str(state.selected_branch_summary.get("branch_id") or "none"),
             branch_summaries=state.branch_summaries,
+            branch_result_summary=selected_branch_result_summary,
             normalized_properties=selected_normalize.get("normalized_properties", []),
             ranked_properties=selected_rank.get("ranked_properties", []),
             duplicate_groups=selected_normalize.get("duplicate_groups", []),

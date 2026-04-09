@@ -356,6 +356,7 @@ class OrchestratorResearchMixin:
         task_memory["last_normalized_properties"] = execution_result.normalized_properties
         task_memory["last_ranked_properties"] = execution_result.ranked_properties
         task_memory["last_duplicate_groups"] = execution_result.duplicate_groups
+        task_memory["last_branch_result_summary"] = execution_result.branch_result_summary
         task_memory["last_search_summary"] = execution_result.search_summary
         task_memory["last_source_items"] = execution_result.source_items
         task_memory["last_research_summary"] = execution_result.research_summary

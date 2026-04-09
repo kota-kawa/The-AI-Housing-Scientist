@@ -155,6 +155,7 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     assert task_memory["offline_evaluation"]["readiness"] in {"low", "medium", "high"}
     assert task_memory["failure_summary"]["recommendations"]
     assert task_memory["last_research_summary"]
+    assert isinstance(task_memory["last_branch_result_summary"], dict)
 
     audit_stages = [event["stage"] for event in db.list_audit_events(session_id)]
     assert "search_normalize" in audit_stages
@@ -718,3 +719,174 @@ def test_tree_search_expands_recovery_nodes_after_initial_failures(tmp_path: Pat
     assert len(state.branch_summaries) == 5
     assert any(int(summary.get("depth") or 0) >= 2 for summary in state.branch_summaries)
     assert any(str(summary.get("parent_key") or "").strip() for summary in state.branch_summaries)
+
+
+def test_tree_search_attaches_branch_result_summary_before_final_selection(tmp_path: Path, monkeypatch):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+        tree_max_nodes=4,
+        tree_batch_size=1,
+    )
+    root_plan = SearchNodePlan(
+        node_key="node-1",
+        label="root-branch",
+        description="root",
+        queries=["query-1"],
+        ranking_profile={},
+        strategy_tags=["root"],
+        depth=1,
+    )
+    child_plan = SearchNodePlan(
+        node_key="node-2",
+        label="child-branch",
+        description="child",
+        queries=["query-2"],
+        ranking_profile={},
+        strategy_tags=["detail_first"],
+        depth=2,
+        parent_key="node-1",
+    )
+
+    monkeypatch.setattr(manager, "_initial_node_plans", lambda state: [root_plan])
+    monkeypatch.setattr(manager, "_refresh_best_node", lambda state, candidate_key: None)
+
+    def fake_next_candidates(state, *, plan, summary):
+        if plan.node_key == "node-1":
+            return [child_plan]
+        return []
+
+    monkeypatch.setattr(manager, "_next_candidates_after_summary", fake_next_candidates)
+    monkeypatch.setattr(
+        "app.research.agent_manager_tree_mixin.run_result_summarizer",
+        lambda **kwargs: {
+            "物件候補リスト": [
+                {
+                    "property_id_norm": "p1",
+                    "building_name": "東雲ベイテラス",
+                    "address": "東京都江東区東雲1-4-8",
+                    "rent": 118000,
+                    "layout": "1LDK",
+                    "station_walk_min": 6,
+                    "area_m2": 42.1,
+                    "detail_url": "https://example.com/p1",
+                    "score": 90.0,
+                    "reason": "条件一致度が高い",
+                    "evidence": ["家賃と駅徒歩が条件内"],
+                    "matched_queries": ["query-1", "query-2"],
+                    "source_nodes": ["root-branch", "child-branch"],
+                }
+            ],
+            "却下理由": [],
+            "共通リスク": ["管理費の内訳が未確認"],
+            "未解決の調査項目": ["東雲ベイテラス の管理費・初期費用内訳"],
+            "summary": {
+                "branch_node_count": 2,
+                "unique_candidate_count": 1,
+                "shortlisted_candidate_count": 1,
+                "rejection_count": 0,
+                "detail_page_hit_count": 1,
+            },
+        },
+    )
+
+    def fake_select_best_branch(branch_summaries):
+        assert len(branch_summaries) == 2
+        assert all("branch_result_summary" in summary for summary in branch_summaries)
+        return branch_summaries[-1]
+
+    monkeypatch.setattr(
+        "app.research.agent_manager_tree_mixin.select_best_branch",
+        fake_select_best_branch,
+    )
+
+    def fake_execute_candidate(state, *, plan):
+        artifacts = state.node_artifacts[plan.node_key]
+        artifacts.retrieve = {
+            "raw_results": [{"title": "東雲ベイテラス", "url": "https://example.com/p1"}],
+            "summary": {"detail_hit_count": 1},
+        }
+        artifacts.enrich = {
+            "detail_html_map": {"https://example.com/p1": "<p>東雲ベイテラス</p>"},
+            "summary": {"detail_hit_count": 1},
+        }
+        artifacts.normalize = {
+            "normalized_properties": [
+                {
+                    "property_id_norm": "p1",
+                    "building_name": "東雲ベイテラス",
+                    "address": "東京都江東区東雲1-4-8",
+                    "detail_url": "https://example.com/p1",
+                    "rent": 118000,
+                    "layout": "1LDK",
+                    "station_walk_min": 6,
+                    "area_m2": 42.1,
+                }
+            ],
+            "duplicate_groups": [],
+            "summary": {"normalized_count": 1, "detail_hit_count": 1},
+        }
+        artifacts.rank = {
+            "ranked_properties": [
+                {
+                    "property_id_norm": "p1",
+                    "score": 90.0 if plan.node_key == "node-2" else 82.0,
+                    "why_selected": "条件一致度が高い",
+                    "why_not_selected": "",
+                }
+            ]
+        }
+        summary = {
+            "branch_id": plan.node_key,
+            "node_key": plan.node_key,
+            "label": plan.label,
+            "status": "completed",
+            "depth": plan.depth,
+            "detail_coverage": 1.0,
+            "avg_top3_score": 90.0 if plan.node_key == "node-2" else 82.0,
+            "normalized_count": 1,
+            "branch_score": 90.0 if plan.node_key == "node-2" else 82.0,
+            "frontier_score": 90.0 if plan.node_key == "node-2" else 82.0,
+            "top_issue_class": "healthy",
+            "prune_reasons": [],
+            "parent_key": plan.parent_key or "",
+            "strategy_tags": plan.strategy_tags,
+        }
+        artifacts.summary = summary
+        artifacts.status = "completed"
+        artifacts.readiness = "medium"
+        state.branch_summaries.append(summary)
+        return summary
+
+    monkeypatch.setattr(manager, "_execute_candidate", fake_execute_candidate)
+
+    state = ResearchExecutionState(query="q", seed_queries=["q"])
+
+    assert manager._handle_tree_search(state) is None
+    assert state.selected_branch_summary["branch_id"] == "node-2"
+    assert state.selected_branch_summary["branch_result_summary"]["summary"]["branch_node_count"] == 2
+    selected_artifacts = manager._selected_artifacts(state)
+    assert selected_artifacts is not None
+    assert selected_artifacts.normalize["branch_result_summary"]["共通リスク"] == ["管理費の内訳が未確認"]

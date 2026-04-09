@@ -70,6 +70,7 @@ class ResearchExecutionResult:
     query: str
     selected_branch_id: str
     branch_summaries: list[dict[str, Any]]
+    branch_result_summary: dict[str, Any]
     normalized_properties: list[dict[str, Any]]
     ranked_properties: list[dict[str, Any]]
     duplicate_groups: list[dict[str, Any]]

@@ -13,6 +13,7 @@ from app.research.offline_eval import (
     is_branch_selection_eligible,
     select_best_branch,
 )
+from app.stages.result_summarizer import run_result_summarizer
 
 from .agent_manager_types import ResearchExecutionState, SearchNodeArtifacts, SearchNodePlan
 
@@ -1115,6 +1116,80 @@ class AgentManagerTreeMixin:
         path.reverse()
         return path
 
+    def _branch_path_artifacts(
+        self,
+        state: ResearchExecutionState,
+        *,
+        node_key: str,
+    ) -> list[SearchNodeArtifacts]:
+        path: list[SearchNodeArtifacts] = []
+        current_key = node_key
+        seen: set[str] = set()
+        while current_key and current_key not in seen:
+            seen.add(current_key)
+            artifacts = state.node_artifacts.get(current_key)
+            if artifacts is None:
+                break
+            path.append(artifacts)
+            current_key = artifacts.plan.parent_key or ""
+        path.reverse()
+        return path
+
+    def _branch_result_nodes(
+        self,
+        state: ResearchExecutionState,
+        *,
+        node_key: str,
+    ) -> list[dict[str, Any]]:
+        branch_nodes: list[dict[str, Any]] = []
+        for artifacts in self._branch_path_artifacts(state, node_key=node_key):
+            summary = artifacts.summary or {}
+            if summary.get("status") != "completed":
+                continue
+            search_summary = {}
+            if artifacts.retrieve:
+                search_summary |= artifacts.retrieve.get("summary", {})
+            if artifacts.enrich:
+                search_summary |= artifacts.enrich.get("summary", {})
+            if artifacts.normalize:
+                search_summary |= artifacts.normalize.get("summary", {})
+            branch_nodes.append(
+                {
+                    "branch_id": artifacts.plan.node_key,
+                    "node_key": artifacts.plan.node_key,
+                    "label": artifacts.plan.label,
+                    "depth": artifacts.plan.depth,
+                    "queries": artifacts.plan.queries,
+                    "strategy_tags": artifacts.plan.strategy_tags,
+                    "issues": list(summary.get("issues", []) or []),
+                    "search_summary": search_summary,
+                    "raw_results": artifacts.retrieve.get("raw_results", []),
+                    "detail_html_map": artifacts.enrich.get("detail_html_map", {}),
+                    "normalized_properties": artifacts.normalize.get("normalized_properties", []),
+                    "duplicate_groups": artifacts.normalize.get("duplicate_groups", []),
+                    "ranked_properties": artifacts.rank.get("ranked_properties", []),
+                }
+            )
+        return branch_nodes
+
+    def _attach_branch_result_summaries(self, state: ResearchExecutionState) -> None:
+        cache: dict[tuple[str, ...], dict[str, Any]] = {}
+        for artifacts in state.node_artifacts.values():
+            if artifacts.summary.get("status") != "completed":
+                continue
+            path_artifacts = self._branch_path_artifacts(state, node_key=artifacts.plan.node_key)
+            path_keys = tuple(item.plan.node_key for item in path_artifacts if item.summary.get("status") == "completed")
+            if not path_keys:
+                continue
+            if path_keys not in cache:
+                cache[path_keys] = run_result_summarizer(
+                    branch_nodes=self._branch_result_nodes(state, node_key=artifacts.plan.node_key),
+                    adapter=self.research_adapter,
+                )
+            branch_result_summary = self._cache_copy(cache[path_keys])
+            artifacts.normalize["branch_result_summary"] = branch_result_summary
+            artifacts.summary["branch_result_summary"] = self._cache_copy(branch_result_summary)
+
     def _build_search_tree_summary(self, state: ResearchExecutionState) -> dict[str, Any]:
         issue_counter: Counter[str] = Counter()
         max_depth = 0
@@ -1354,6 +1429,7 @@ class AgentManagerTreeMixin:
                     "frontier_exhausted" if not state.frontier else "node_budget_exhausted"
                 )
 
+            self._attach_branch_result_summaries(state)
             state.selected_branch_summary = (
                 state.selected_branch_summary
                 or select_best_branch(state.branch_summaries)
