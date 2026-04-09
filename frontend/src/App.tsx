@@ -1113,7 +1113,7 @@ export default function App() {
         onSubmit={onSubmit}
         className="fixed inset-x-0 bottom-0 z-20 px-4 pb-[calc(env(safe-area-inset-bottom)+14px)] pt-6 sm:px-6"
       >
-        <div className="mx-auto max-w-5xl rounded-[28px] border border-sky-100 bg-white p-3 shadow-floating sm:p-4">
+        <div className="mx-auto max-w-5xl">
           <div className="flex flex-col gap-3">
             {pendingAction && (
               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1136,7 +1136,7 @@ export default function App() {
               </div>
             )}
 
-            <div className="overflow-visible rounded-[26px] bg-sky-50 transition">
+            <div className="overflow-visible rounded-[26px] bg-sky-50 shadow-floating transition">
               {llmEditorOpen && llmDraft && llmCapabilities && (
                 <div className="border-b border-sky-100/90 px-4 pb-4 pt-4 sm:px-5">
                   <div className="rounded-[24px] border border-sky-100 bg-white p-4 shadow-card">
