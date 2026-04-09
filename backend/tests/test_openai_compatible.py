@@ -1,3 +1,5 @@
+import re
+
 from app.llm.openai_compatible import OpenAICompatibleAdapter
 
 
@@ -34,15 +36,17 @@ def test_generate_text_adds_hidden_reasoning_for_groq_qwen(monkeypatch):
     assert result == "ok"
     assert captured["method"] == "POST"
     assert captured["path"] == "/chat/completions"
-    assert captured["payload"] == {
-        "model": "qwen/qwen3-32b",
-        "messages": [
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "user"},
-        ],
-        "temperature": 0.2,
-        "reasoning_format": "hidden",
-    }
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["model"] == "qwen/qwen3-32b"
+    assert payload["messages"][1] == {"role": "user", "content": "user"}
+    assert payload["temperature"] == 0.2
+    assert payload["reasoning_format"] == "hidden"
+    system_message = payload["messages"][0]
+    assert isinstance(system_message, dict)
+    assert system_message["role"] == "system"
+    assert system_message["content"].startswith("system\n\n現在の日付は ")
+    assert re.search(r"\d{4}年\d{1,2}月\d{1,2}日（[月火水木金土日]）", system_message["content"])
 
 
 def test_generate_structured_adds_hidden_reasoning_for_groq_qwen(monkeypatch):
@@ -139,3 +143,8 @@ def test_generate_text_does_not_add_hidden_reasoning_for_other_models(monkeypatc
     payload = captured["payload"]
     assert isinstance(payload, dict)
     assert "reasoning_format" not in payload
+    system_message = payload["messages"][0]
+    assert isinstance(system_message, dict)
+    assert system_message["role"] == "system"
+    assert system_message["content"].startswith("system\n\n現在の日付は ")
+    assert re.search(r"\d{4}年\d{1,2}月\d{1,2}日（[月火水木金土日]）", system_message["content"])

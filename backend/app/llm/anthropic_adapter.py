@@ -6,7 +6,7 @@ import httpx
 import jsonschema
 
 from .base import LLMAdapter, LLMUsage
-from .utils import extract_json_object
+from .utils import extract_json_object, with_current_date_context
 
 
 class AnthropicAdapter(LLMAdapter):
@@ -82,6 +82,7 @@ class AnthropicAdapter(LLMAdapter):
         return "\n".join([t for t in texts if t])
 
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
+        system = with_current_date_context(system)
         return self._messages_create(system=system, user=user, temperature=temperature)
 
     def generate_structured(
@@ -92,6 +93,7 @@ class AnthropicAdapter(LLMAdapter):
         schema: dict[str, Any],
         temperature: float = 0.2,
     ) -> dict[str, Any]:
+        system = with_current_date_context(system)
         strict_user = (
             f"{user}\n\n"
             "Return only one JSON object that satisfies this JSON Schema:\n"

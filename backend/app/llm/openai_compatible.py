@@ -7,7 +7,7 @@ import httpx
 import jsonschema
 
 from .base import LLMAdapter, LLMUsage
-from .utils import extract_json_object, flatten_content
+from .utils import extract_json_object, flatten_content, with_current_date_context
 
 
 class OpenAICompatibleAdapter(LLMAdapter):
@@ -89,6 +89,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
         return response
 
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
+        system = with_current_date_context(system)
         response = self._chat(
             messages=[
                 {"role": "system", "content": system},
@@ -107,6 +108,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
         schema: dict[str, Any],
         temperature: float = 0.2,
     ) -> dict[str, Any]:
+        system = with_current_date_context(system)
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
