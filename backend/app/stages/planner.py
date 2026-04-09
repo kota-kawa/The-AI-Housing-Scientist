@@ -325,8 +325,10 @@ def _llm_parse(
             "examples は user_message や memory にない特定の地域・予算・条件へ誘導しない",
             "examples は固定候補に見えにくいよう、粒度や表現を少し分散させてよい",
             "next_action が search_and_compare のときは seed_queries を 5〜8 件返す",
-            "seed_queries には、同一エリアの言い換えだけでなく、近隣エリアや沿線違いの探索クエリを 1〜2 本含める",
-            "seed_queries には、必須条件を外した比較用クエリや予算を少し緩めた確認用クエリを少なくとも 1 本含める",
+            "seed_queries は current_user_memory.target_area と今回の user_message のみを根拠に生成する",
+            "seed_queries に profile_history_summary のエリア・条件は含めない（user_message に同じエリアが明示されている場合を除く）",
+            "seed_queries には同一エリアの言い換えを含め、必須条件を外した比較用クエリや予算を少し緩めた確認用クエリを 1 本含めてよい",
+            "seed_queries に別エリアへの拡張は入れない。近隣エリアの探索は検索システムが自動的に追加する",
             "next_action が missing_slots_question のときは seed_queries を空にしてよい",
             "research_plan はユーザー条件に即して summary / goal / strategy / rationale を返す",
             "condition_reasons は各条件が今回の検索で重要な理由を 1 文ずつ返し、該当しない key は空文字にする",
@@ -334,7 +336,6 @@ def _llm_parse(
             "『できれば』『あったらいい』『理想』『〜だとうれしい』は nice_to_have",
             "地名や駅名は『町田』『三軒茶屋』『武蔵小杉』のように接尾辞がなくても target_area に入れる",
             "RC / SRC / 鉄筋コンクリート / 鉄骨 / 木造 など建物構造も条件として扱う",
-            "ユーザー条件の探索幅を確認する目的に限り、近隣エリア・沿線・比較用の軽い条件緩和は seed_queries に含めてよい",
             "与えられたメッセージや memory にない制約・設備は発明しない",
         ],
         "examples_instruction": (
@@ -368,7 +369,7 @@ def _parse_planner_output(
         intent = "general_question"
 
     merged_memory = _sanitize_slot_memory(payload.get("user_memory"))
-    if not any(
+    llm_returned_empty = not any(
         [
             merged_memory.get("budget_max") is not None,
             merged_memory.get("target_area"),
@@ -378,7 +379,11 @@ def _parse_planner_output(
             merged_memory.get("must_conditions"),
             merged_memory.get("nice_to_have"),
         ]
-    ):
+    )
+    # LLM が空の user_memory を返した場合、intent=="search" のときのみ
+    # 前回条件を引き継ぐ（「もう一度検索」ユースケース）。
+    # general_question 等では引き継がず空のまま返す。
+    if llm_returned_empty and intent == "search":
         merged_memory = _sanitize_slot_memory(default_user_memory)
 
     missing_slots = _sanitize_missing_slots(payload.get("missing_slots"))

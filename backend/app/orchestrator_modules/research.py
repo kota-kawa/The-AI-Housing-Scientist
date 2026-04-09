@@ -117,25 +117,45 @@ class OrchestratorResearchMixin:
             )
 
         if area:
-            if nearby_areas:
-                for nearby in nearby_areas[:2]:
+            # seed_queries に近隣エリアのクエリが既に含まれている場合は追加しない（二重追加防止）
+            nearby_tokens = nearby_areas[:2] if nearby_areas else [f"{area}周辺"]
+            seeds_cover_nearby = any(
+                token.lower() in q.lower()
+                for token in nearby_tokens
+                for q in normalized_seed_queries
+            )
+            if not seeds_cover_nearby:
+                if nearby_areas:
+                    for nearby in nearby_areas[:2]:
+                        nearby_candidates.append(
+                            _compose_query(
+                                nearby, "賃貸", budget_token, layout, core_must or core_nice
+                            )
+                        )
+                else:
                     nearby_candidates.append(
-                        _compose_query(nearby, "賃貸", budget_token, layout, core_must or core_nice)
+                        _compose_query(
+                            f"{area}周辺", "賃貸", budget_token, layout, core_must or core_nice
+                        )
                     )
-            else:
-                nearby_candidates.append(
-                    _compose_query(
-                        f"{area}周辺", "賃貸", budget_token, layout, core_must or core_nice
-                    )
-                )
 
-            if line_hints:
-                for line in line_hints[:2]:
+            # seed_queries に沿線クエリが既に含まれている場合は追加しない（二重追加防止）
+            line_tokens = line_hints[:2] if line_hints else [f"{area}沿線"]
+            seeds_cover_lines = any(
+                token.lower() in q.lower()
+                for token in line_tokens
+                for q in normalized_seed_queries
+            )
+            if not seeds_cover_lines:
+                if line_hints:
+                    for line in line_hints[:2]:
+                        line_candidates.append(
+                            _compose_query(line, area, "賃貸", budget_token, layout, core_must)
+                        )
+                else:
                     line_candidates.append(
-                        _compose_query(line, area, "賃貸", budget_token, layout, core_must)
+                        _compose_query(area, "沿線", "賃貸", budget_token, layout)
                     )
-            else:
-                line_candidates.append(_compose_query(area, "沿線", "賃貸", budget_token, layout))
 
         candidates: list[str] = []
         candidates.extend(normalized_seed_queries[:2])
