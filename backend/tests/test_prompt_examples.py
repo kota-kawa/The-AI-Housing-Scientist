@@ -34,6 +34,8 @@ def test_planner_prompt_examples_golden_cases_cover_core_slot_patterns():
     assert generic["next_action"] == "missing_slots_question"
     assert generic["missing_slots"] == ["target_area", "budget_max", "station_walk_max"]
     assert len(generic["follow_up_questions"]) == 3
+    assert "例以外でも大丈夫" in generic["follow_up_questions"][0]["question"]
+    assert "ざっくりでも大丈夫" in generic["follow_up_questions"][1]["question"]
 
     explicit = examples["explicit_area_budget_and_structure"]["output"]
     assert explicit["user_memory"]["target_area"] == "町田"

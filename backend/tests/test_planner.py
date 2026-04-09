@@ -426,3 +426,7 @@ def test_planner_injects_two_prompt_examples_into_llm_payload():
     assert all("case_id" in item for item in payload["examples"])
     assert all("input" in item for item in payload["examples"])
     assert all("output" in item for item in payload["examples"])
+    assert any(
+        "非網羅" in rule or "固定候補" in rule for rule in payload["decision_rules"]
+    )
+    assert "固定してはいけません" in payload["examples_instruction"]

@@ -320,6 +320,10 @@ def _llm_parse(
             "missing_slots は 0〜3 件で、次に聞く価値が高い順に並べる",
             "follow_up_questions は missing_slots と同じ順序・同じ slot だけを返す",
             "follow_up_questions の label は slot_reference の日本語ラベルに合わせる",
+            "follow_up_questions の question は、例にない回答や自由入力でも答えやすい聞き方にする",
+            "follow_up_questions の examples は候補の例示であり、網羅的な選択肢として扱わない",
+            "examples は user_message や memory にない特定の地域・予算・条件へ誘導しない",
+            "examples は固定候補に見えにくいよう、粒度や表現を少し分散させてよい",
             "next_action が search_and_compare のときは seed_queries を 3〜5 件返す",
             "next_action が missing_slots_question のときは seed_queries を空にしてよい",
             "research_plan はユーザー条件に即して summary / goal / strategy / rationale を返す",
@@ -334,6 +338,8 @@ def _llm_parse(
             "examples は input から output を作る完全な few-shot 見本です。"
             "slot 抽出、memory 統合、missing_slots、follow_up_questions、seed_queries、"
             "research_plan、condition_reasons の粒度を合わせてください。"
+            "ただし follow_up_questions.examples は非網羅の例示であり、"
+            "ユーザーをその候補群に固定してはいけません。"
         ),
         "examples": planner_examples,
     }
@@ -342,6 +348,7 @@ def _llm_parse(
             "You are a Japanese rental planner responsible for the entire planning decision. "
             "Infer intent, merge memory, choose the next action, decide which conditions are missing, "
             "write follow-up questions, generate seed queries, and draft the research plan. "
+            "Treat follow-up examples as non-exhaustive hints, never as exhaustive options. "
             "Return only structured data grounded in the provided message and memory."
         ),
         user=json.dumps(prompt_payload, ensure_ascii=False, indent=2),
