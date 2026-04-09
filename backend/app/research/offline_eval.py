@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.llm.base import LLMAdapter
+from app.research.journal import ResearchIntent
 
 REPEATED_ISSUE_MIN_BRANCH_SCORE_IMPROVEMENT = 8.0
 REPEATED_ISSUE_HARD_BRANCH_SCORE_IMPROVEMENT = 12.0
@@ -89,6 +90,9 @@ def evaluate_branch(
     strategy_tags: list[str] | None = None,
     depth: int = 0,
     query_hash: str = "",
+    intent: ResearchIntent = "draft",
+    is_failed: bool = False,
+    debug_depth: int = 0,
 ) -> dict[str, Any]:
     normalized_count = len(normalized_properties)
     detail_hit_count = int(search_summary.get("detail_hit_count", 0) or 0)
@@ -166,6 +170,9 @@ def evaluate_branch(
         "node_key": branch_id,
         "label": label,
         "status": "completed",
+        "intent": intent,
+        "is_failed": is_failed,
+        "debug_depth": debug_depth,
         "depth": depth,
         "query_count": len(queries),
         "queries": queries,
@@ -200,6 +207,7 @@ def branch_selection_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     return (
         float(item.get("branch_score") or 0.0),
         float(item.get("frontier_score") or 0.0),
+        -int(item.get("debug_depth") or 0),
         float(item.get("detail_coverage") or 0.0),
         float(item.get("avg_top3_score") or 0.0),
         int(item.get("normalized_count") or 0),

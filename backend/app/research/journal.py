@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+
+ResearchIntent = Literal["draft", "refine", "pivot", "recovery"]
 
 
 @dataclass
@@ -12,6 +14,9 @@ class ResearchNode:
     input_payload: dict[str, Any]
     output_payload: dict[str, Any]
     reasoning: str
+    intent: ResearchIntent = "draft"
+    is_failed: bool = False
+    debug_depth: int = 0
     duration_ms: int = 0
     parent_node_id: int | None = None
     branch_id: str = ""

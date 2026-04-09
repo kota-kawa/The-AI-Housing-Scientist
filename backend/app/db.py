@@ -107,6 +107,9 @@ class Database:
                     output_json TEXT NOT NULL,
                     reasoning TEXT NOT NULL,
                     duration_ms INTEGER NOT NULL,
+                    intent TEXT NOT NULL DEFAULT 'draft',
+                    is_failed INTEGER NOT NULL DEFAULT 0,
+                    debug_depth INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(job_id) REFERENCES research_jobs(id)
                 );
@@ -160,6 +163,24 @@ class Database:
             self._ensure_column(conn, "research_journal_nodes", "parent_node_id", "INTEGER")
             self._ensure_column(conn, "research_journal_nodes", "branch_id", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "research_journal_nodes", "selected", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(
+                conn,
+                "research_journal_nodes",
+                "intent",
+                "TEXT NOT NULL DEFAULT 'draft'",
+            )
+            self._ensure_column(
+                conn,
+                "research_journal_nodes",
+                "is_failed",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(
+                conn,
+                "research_journal_nodes",
+                "debug_depth",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
             self._ensure_column(
                 conn,
                 "research_journal_nodes",
@@ -801,6 +822,9 @@ class Database:
         parent_node_id: int | None = None,
         branch_id: str = "",
         selected: bool = False,
+        intent: str = "draft",
+        is_failed: bool = False,
+        debug_depth: int = 0,
         metrics_payload: dict[str, Any] | None = None,
     ) -> int:
         now = utc_now_iso()
@@ -819,9 +843,12 @@ class Database:
                     parent_node_id,
                     branch_id,
                     selected,
+                    intent,
+                    is_failed,
+                    debug_depth,
                     metrics_json,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -835,6 +862,9 @@ class Database:
                     parent_node_id,
                     branch_id,
                     1 if selected else 0,
+                    intent,
+                    1 if is_failed else 0,
+                    debug_depth,
                     json.dumps(metrics_payload or {}, ensure_ascii=False),
                     now,
                 ),
@@ -859,6 +889,9 @@ class Database:
                     parent_node_id,
                     branch_id,
                     selected,
+                    intent,
+                    is_failed,
+                    debug_depth,
                     metrics_json,
                     created_at
                 FROM research_journal_nodes
@@ -881,6 +914,9 @@ class Database:
                 "parent_node_id": row["parent_node_id"],
                 "branch_id": row["branch_id"],
                 "selected": bool(row["selected"]),
+                "intent": str(row["intent"] or "draft"),
+                "is_failed": bool(row["is_failed"]),
+                "debug_depth": int(row["debug_depth"] or 0),
                 "metrics": json.loads(row["metrics_json"]) if row["metrics_json"] else {},
                 "created_at": row["created_at"],
             }
@@ -899,6 +935,9 @@ class Database:
         parent_node_id: int | None = None,
         branch_id: str | None = None,
         selected: bool | None = None,
+        intent: str | None = None,
+        is_failed: bool | None = None,
+        debug_depth: int | None = None,
         metrics_payload: dict[str, Any] | None = None,
     ) -> None:
         updates: list[str] = []
@@ -928,6 +967,15 @@ class Database:
         if selected is not None:
             updates.append("selected = ?")
             params.append(1 if selected else 0)
+        if intent is not None:
+            updates.append("intent = ?")
+            params.append(intent)
+        if is_failed is not None:
+            updates.append("is_failed = ?")
+            params.append(1 if is_failed else 0)
+        if debug_depth is not None:
+            updates.append("debug_depth = ?")
+            params.append(debug_depth)
         if metrics_payload is not None:
             updates.append("metrics_json = ?")
             params.append(json.dumps(metrics_payload, ensure_ascii=False))

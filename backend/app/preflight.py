@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from app.config import Settings, get_provider_api_key
 from app.llm.factory import create_adapter
 from app.models import PreflightProviderReport, PreflightReport

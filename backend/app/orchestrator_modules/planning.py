@@ -110,6 +110,14 @@ class OrchestratorPlanningMixin:
             ),
             "summary": summary,
             "depth": 0 if node_type == "search_root" else depth,
+            "intent": str(node.get("intent") or metrics.get("intent") or input_payload.get("intent") or "draft"),
+            "is_failed": bool(node.get("is_failed") or metrics.get("is_failed")),
+            "debug_depth": int(
+                node.get("debug_depth")
+                or metrics.get("debug_depth")
+                or input_payload.get("debug_depth")
+                or 0
+            ),
             "query_count": int(metrics.get("query_count") or len(queries)),
             "queries": queries[:3],
             "strategy_tags": strategy_tags[:4],

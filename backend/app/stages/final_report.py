@@ -78,6 +78,9 @@ def _node_snapshot(node: ResearchNode) -> dict[str, Any]:
         "stage": node.stage,
         "node_type": node.node_type,
         "status": node.status,
+        "intent": node.intent,
+        "is_failed": node.is_failed,
+        "debug_depth": node.debug_depth,
         "branch_id": node.branch_id,
         "selected": node.selected,
         "summary": _compact_text(summary, max_chars=240),
@@ -97,6 +100,9 @@ def _node_snapshot(node: ResearchNode) -> dict[str, Any]:
                 "normalized_count",
                 "top_issue_class",
                 "strategy_tags",
+                "intent",
+                "is_failed",
+                "debug_depth",
             }
         },
         "output": {

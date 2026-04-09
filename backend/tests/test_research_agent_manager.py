@@ -131,11 +131,17 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
 
     search_roots = [node for node in nodes if node["node_type"] == "search_root"]
     assert len(search_roots) == 1
+    assert search_roots[0]["intent"] == "draft"
+    assert search_roots[0]["is_failed"] is False
+    assert search_roots[0]["debug_depth"] == 0
 
     candidate_nodes = [node for node in nodes if node["node_type"] == "search_candidate"]
     assert len(candidate_nodes) >= 2
     assert all(node["branch_id"] for node in candidate_nodes)
     assert all(node["parent_node_id"] is not None for node in candidate_nodes)
+    assert all(node["intent"] in {"draft", "refine", "pivot", "recovery"} for node in candidate_nodes)
+    assert all(isinstance(node["is_failed"], bool) for node in candidate_nodes)
+    assert all(isinstance(node["debug_depth"], int) for node in candidate_nodes)
 
     branch_selections = [
         node for node in nodes if node["node_type"] == "search_selection" and node["selected"]
@@ -143,6 +149,7 @@ def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
     assert len(branch_selections) == 1
     selected_node = branch_selections[0]
     assert selected_node["parent_node_id"] is not None
+    assert selected_node["intent"] in {"draft", "refine", "pivot", "recovery"}
     assert selected_node["metrics"]["status"] == "completed"
     assert float(selected_node["metrics"]["branch_score"]) >= 0.0
 
@@ -436,7 +443,7 @@ def test_research_tools_reuse_query_and_detail_caches(tmp_path: Path):
 
     retrieve_a = manager._tool_retrieve(context=manager.context, branch=plan_a)
     retrieve_b = manager._tool_retrieve(context=manager.context, branch=plan_b)
-    enrich_a = manager._tool_enrich(
+    manager._tool_enrich(
         context=manager.context,
         branch=plan_a,
         raw_results=retrieve_a["raw_results"],
@@ -896,6 +903,9 @@ def test_tree_search_expands_recovery_nodes_after_initial_failures(tmp_path: Pat
     assert len(state.branch_summaries) == 5
     assert any(int(summary.get("depth") or 0) >= 2 for summary in state.branch_summaries)
     assert any(str(summary.get("parent_key") or "").strip() for summary in state.branch_summaries)
+    assert any(summary.get("intent") == "recovery" for summary in state.branch_summaries)
+    assert any(int(summary.get("debug_depth") or 0) >= 1 for summary in state.branch_summaries)
+    assert all(bool(summary.get("is_failed")) for summary in state.branch_summaries)
 
 
 def test_tree_search_attaches_branch_result_summary_before_final_selection(tmp_path: Path, monkeypatch):

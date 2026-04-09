@@ -6,6 +6,7 @@ import time
 from collections import Counter
 from typing import Any
 
+from app.research.journal import ResearchIntent
 from app.research.offline_eval import (
     branch_selection_sort_key,
     evaluate_branch,
@@ -288,6 +289,37 @@ class AgentManagerTreeMixin:
         }
         return descriptions.get(operator, "探索ノード")
 
+    def _operator_intent(self, operator: str) -> ResearchIntent:
+        if operator in {"relax_for_coverage", "source_diversify", "explore_adjacent"}:
+            return "pivot"
+        if operator in {"tighten_match", "detail_first", "schema_first", "exploit_best"}:
+            return "refine"
+        return "refine"
+
+    def _is_recovery_source_summary(self, summary: dict[str, Any] | None) -> bool:
+        if not summary:
+            return False
+        if str(summary.get("status") or "").strip() != "completed":
+            return True
+        return bool(summary.get("prune_reasons"))
+
+    def _intent_for_child_plan(
+        self,
+        *,
+        operator: str,
+        parent_summary: dict[str, Any] | None,
+    ) -> ResearchIntent:
+        if parent_summary is None:
+            return "draft"
+        if self._is_recovery_source_summary(parent_summary):
+            return "recovery"
+        return self._operator_intent(operator)
+
+    def _debug_depth_for_child_plan(self, parent_summary: dict[str, Any] | None) -> int:
+        if not self._is_recovery_source_summary(parent_summary):
+            return 0
+        return max(0, int((parent_summary or {}).get("debug_depth") or 0)) + 1
+
     def _available_tree_operators(self) -> list[str]:
         return [
             "tighten_match",
@@ -379,6 +411,8 @@ class AgentManagerTreeMixin:
             "queries": plan.queries,
             "strategy_tags": plan.strategy_tags,
             "depth": plan.depth,
+            "intent": plan.intent,
+            "debug_depth": plan.debug_depth,
         }
 
     def _estimate_frontier_score(
@@ -436,6 +470,7 @@ class AgentManagerTreeMixin:
             for tag in extra_tags or []
             if str(tag).strip() and str(tag).strip() != operator
         ]
+        intent = self._intent_for_child_plan(operator=operator, parent_summary=parent_summary)
         return SearchNodePlan(
             node_key=self._next_node_key(state, operator, depth),
             label=self._operator_label(operator),
@@ -453,6 +488,8 @@ class AgentManagerTreeMixin:
             depth=depth,
             parent_key=parent_key,
             parent_node_id=parent_node_id,
+            intent=intent,
+            debug_depth=self._debug_depth_for_child_plan(parent_summary),
         )
 
     def _initial_node_plans(self, state: ResearchExecutionState) -> list[SearchNodePlan]:
@@ -507,6 +544,9 @@ class AgentManagerTreeMixin:
             "label": plan.label,
             "depth": plan.depth,
             "strategy_tags": plan.strategy_tags,
+            "intent": plan.intent,
+            "is_failed": False,
+            "debug_depth": plan.debug_depth,
             "prune_reasons": prune_reasons,
         }
         if evaluation:
@@ -529,7 +569,15 @@ class AgentManagerTreeMixin:
             reasoning="重複・深さ・低品質・失敗再発の条件により探索を剪定する。",
             parent_node_id=parent_node_id,
             branch_id=plan.node_key,
-            metrics=evaluation,
+            intent=plan.intent,
+            is_failed=False,
+            debug_depth=plan.debug_depth,
+            metrics={
+                **(evaluation or {}),
+                "intent": plan.intent,
+                "is_failed": False,
+                "debug_depth": plan.debug_depth,
+            },
         )
 
     def _register_frontier_node(
@@ -583,11 +631,17 @@ class AgentManagerTreeMixin:
             reasoning="優先度順に評価するため、探索フロンティアへ候補ノードを登録する。",
             parent_node_id=plan.parent_node_id,
             branch_id=plan.node_key,
+            intent=plan.intent,
+            is_failed=False,
+            debug_depth=plan.debug_depth,
             metrics={
                 "branch_id": plan.node_key,
                 "label": plan.label,
                 "description": plan.description,
                 "depth": plan.depth,
+                "intent": plan.intent,
+                "is_failed": False,
+                "debug_depth": plan.debug_depth,
                 "strategy_tags": plan.strategy_tags,
                 "query_count": len(plan.queries),
                 "queries": plan.queries,
@@ -762,6 +816,9 @@ class AgentManagerTreeMixin:
             strategy_tags=plan.strategy_tags,
             depth=plan.depth,
             query_hash=artifacts.query_hash,
+            intent=plan.intent,
+            is_failed=True,
+            debug_depth=plan.debug_depth,
         )
         summary["status"] = "failed"
         summary["frontier_score"] = 0.0
@@ -819,12 +876,18 @@ class AgentManagerTreeMixin:
                 "label": plan.label,
                 "description": plan.description,
                 "depth": plan.depth,
+                "intent": plan.intent,
+                "is_failed": False,
+                "debug_depth": plan.debug_depth,
                 "strategy_tags": plan.strategy_tags,
                 "query_count": len(plan.queries),
                 "queries": plan.queries,
                 "frontier_score": artifacts.frontier_score,
                 "status": "running",
             },
+            intent=plan.intent,
+            is_failed=False,
+            debug_depth=plan.debug_depth,
         )
         started = time.perf_counter()
         try:
@@ -879,6 +942,9 @@ class AgentManagerTreeMixin:
                 strategy_tags=plan.strategy_tags,
                 depth=plan.depth,
                 query_hash=artifacts.query_hash,
+                intent=plan.intent,
+                is_failed=False,
+                debug_depth=plan.debug_depth,
             )
             summary["parent_key"] = plan.parent_key or ""
             summary["description"] = plan.description
@@ -926,6 +992,9 @@ class AgentManagerTreeMixin:
                 parent_node_id=plan.parent_node_id,
                 branch_id=plan.node_key,
                 metrics=summary,
+                intent=plan.intent,
+                is_failed=False,
+                debug_depth=plan.debug_depth,
             )
             state.branch_summaries.append(summary)
             if summary["prune_reasons"]:
@@ -968,6 +1037,9 @@ class AgentManagerTreeMixin:
                 parent_node_id=plan.parent_node_id,
                 branch_id=plan.node_key,
                 metrics=failure_summary,
+                intent=plan.intent,
+                is_failed=True,
+                debug_depth=plan.debug_depth,
             )
             return failure_summary
 
@@ -1099,6 +1171,9 @@ class AgentManagerTreeMixin:
             "node_key": "none",
             "label": "none",
             "status": "failed",
+            "intent": "draft",
+            "is_failed": True,
+            "debug_depth": 0,
             "depth": 0,
             "query_count": 0,
             "queries": [],
@@ -1138,6 +1213,9 @@ class AgentManagerTreeMixin:
                     "branch_id": current_key,
                     "label": artifacts.plan.label,
                     "depth": artifacts.plan.depth,
+                    "intent": str(summary.get("intent") or artifacts.plan.intent),
+                    "is_failed": bool(summary.get("is_failed")),
+                    "debug_depth": int(summary.get("debug_depth") or artifacts.plan.debug_depth),
                     "strategy_tags": artifacts.plan.strategy_tags,
                     "branch_score": float(summary.get("branch_score") or 0.0),
                     "frontier_score": float(summary.get("frontier_score") or artifacts.frontier_score),
@@ -1415,6 +1493,9 @@ class AgentManagerTreeMixin:
                     "strategy_memory": self._strategy_memory(),
                 },
                 reasoning="承認済み計画、履歴戦略、再試行文脈を束ねた探索根を作る。",
+                intent="draft",
+                is_failed=False,
+                debug_depth=0,
             )
 
             for plan in self._initial_node_plans(state):
@@ -1494,6 +1575,9 @@ class AgentManagerTreeMixin:
                 branch_id=str(state.selected_branch_summary.get("branch_id") or ""),
                 selected=True,
                 metrics=state.selected_branch_summary,
+                intent=str(state.selected_branch_summary.get("intent") or "draft"),
+                is_failed=bool(state.selected_branch_summary.get("is_failed")),
+                debug_depth=int(state.selected_branch_summary.get("debug_depth") or 0),
             )
             state.search_tree_summary = self._build_search_tree_summary(state)
             selected_label = str(state.selected_branch_summary.get("label") or "none")

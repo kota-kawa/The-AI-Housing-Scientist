@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-from app.research.journal import ResearchNode
+from app.research.journal import ResearchIntent, ResearchNode
 from app.research.state_machine import ResearchStageDefinition, ResearchStateMachine
 from app.research.tools import CallableResearchTool, ToolContext, ToolSpec, Toolbox
 from app.stages.integrity_review import run_integrity_review
@@ -47,6 +47,8 @@ class AgentManagerToolingMixin:
                 "strategy_tags": {"type": "array", "items": {"type": "string"}},
                 "depth": {"type": "integer"},
                 "parent_key": {"type": ["string", "null"]},
+                "intent": {"type": "string"},
+                "debug_depth": {"type": "integer"},
             },
             "required": [
                 "node_key",
@@ -242,8 +244,12 @@ class AgentManagerToolingMixin:
         parent_node_id: int | None = None,
         branch_id: str = "",
         selected: bool = False,
+        intent: ResearchIntent = "draft",
+        is_failed: bool | None = None,
+        debug_depth: int = 0,
         metrics: dict[str, Any] | None = None,
     ) -> ResearchNode:
+        resolved_is_failed = status == "failed" if is_failed is None else is_failed
         row_id = self.db.add_research_journal_node(
             job_id=self.job_id,
             stage=stage,
@@ -256,6 +262,9 @@ class AgentManagerToolingMixin:
             parent_node_id=parent_node_id,
             branch_id=branch_id,
             selected=selected,
+            intent=intent,
+            is_failed=resolved_is_failed,
+            debug_depth=debug_depth,
             metrics_payload=metrics,
         )
         node = ResearchNode(
@@ -266,6 +275,9 @@ class AgentManagerToolingMixin:
             input_payload=input_payload,
             output_payload=output_payload,
             reasoning=reasoning,
+            intent=intent,
+            is_failed=resolved_is_failed,
+            debug_depth=debug_depth,
             duration_ms=duration_ms,
             parent_node_id=parent_node_id,
             branch_id=branch_id,
@@ -287,6 +299,9 @@ class AgentManagerToolingMixin:
         parent_node_id: int | None = None,
         branch_id: str | None = None,
         selected: bool | None = None,
+        intent: ResearchIntent | None = None,
+        is_failed: bool | None = None,
+        debug_depth: int | None = None,
         metrics: dict[str, Any] | None = None,
     ) -> None:
         if node_id is None:
@@ -302,6 +317,9 @@ class AgentManagerToolingMixin:
             parent_node_id=parent_node_id,
             branch_id=branch_id,
             selected=selected,
+            intent=intent,
+            is_failed=is_failed,
+            debug_depth=debug_depth,
             metrics_payload=metrics,
         )
 
@@ -324,6 +342,12 @@ class AgentManagerToolingMixin:
             node.branch_id = branch_id
         if selected is not None:
             node.selected = selected
+        if intent is not None:
+            node.intent = intent
+        if is_failed is not None:
+            node.is_failed = is_failed
+        if debug_depth is not None:
+            node.debug_depth = debug_depth
         if metrics is not None:
             node.metrics = metrics
 

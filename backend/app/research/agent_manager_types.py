@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.research.journal import ResearchNode
+from app.research.journal import ResearchIntent, ResearchNode
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,8 @@ class SearchNodePlan:
     depth: int
     parent_key: str | None = None
     parent_node_id: int | None = None
+    intent: ResearchIntent = "draft"
+    debug_depth: int = 0
 
 
 @dataclass

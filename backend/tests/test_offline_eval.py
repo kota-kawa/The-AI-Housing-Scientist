@@ -169,3 +169,39 @@ def test_select_best_branch_allows_large_gain_when_issue_class_repeats():
 
     assert selected is not None
     assert selected["branch_id"] == "tighten-child"
+
+
+def test_select_best_branch_penalizes_deep_recovery_chain_on_tie_break():
+    stable = {
+        "branch_id": "stable",
+        "node_key": "stable",
+        "label": "条件厳格化",
+        "status": "completed",
+        "branch_score": 88.0,
+        "frontier_score": 88.0,
+        "detail_coverage": 0.7,
+        "avg_top3_score": 84.0,
+        "normalized_count": 4,
+        "debug_depth": 0,
+        "top_issue_class": "healthy",
+        "parent_key": "",
+    }
+    recovery = {
+        "branch_id": "recovery-3",
+        "node_key": "recovery-3",
+        "label": "recovery",
+        "status": "completed",
+        "branch_score": 88.0,
+        "frontier_score": 88.0,
+        "detail_coverage": 0.95,
+        "avg_top3_score": 90.0,
+        "normalized_count": 5,
+        "debug_depth": 3,
+        "top_issue_class": "healthy",
+        "parent_key": "",
+    }
+
+    selected = select_best_branch([stable, recovery])
+
+    assert selected is not None
+    assert selected["branch_id"] == "stable"
