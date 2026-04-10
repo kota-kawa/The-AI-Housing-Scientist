@@ -9,6 +9,9 @@ from app.stages.prompt_examples import PromptExamplesError, sample_prompt_exampl
 
 DEFAULT_RANKING_PROFILE = {
     "base_score": 50.0,
+    "area_match_bonus": 20.0,
+    "area_partial_bonus": 8.0,
+    "area_miss_penalty": 25.0,
     "budget_match_bonus": 25.0,
     "budget_near_bonus": 5.0,
     "budget_far_penalty": 20.0,
@@ -85,6 +88,20 @@ def _score_property_rules(
     score = profile["base_score"]
     positives: list[str] = []
     negatives: list[str] = []
+
+    # JP: 希望エリアとの一致を評価する。
+    # EN: Evaluate area match against target area.
+    target_area = str(user_memory.get("target_area") or "").strip()
+    if target_area:
+        area_name = str(prop.get("area_name") or "")
+        address = str(prop.get("address") or "")
+        area_haystack = f"{area_name} {address}"
+        if target_area in area_haystack:
+            score += profile["area_match_bonus"]
+            positives.append(f"希望エリア {target_area} と一致")
+        else:
+            score -= profile["area_miss_penalty"]
+            negatives.append(f"希望エリア {target_area} と不一致")
 
     budget_max = int(user_memory.get("budget_max") or 0)
     rent = int(prop.get("rent") or 0)
