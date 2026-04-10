@@ -33,6 +33,8 @@ class HousingResearchAgentManager(
     AgentManagerToolingMixin,
     AgentManagerSummaryMixin,
 ):
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(
         self,
         *,

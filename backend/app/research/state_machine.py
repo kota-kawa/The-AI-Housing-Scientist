@@ -13,9 +13,13 @@ class ResearchStageDefinition:
 
 
 class ResearchStateMachine:
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(self, stages: list[ResearchStageDefinition]):
         self._stages = {stage.name: stage for stage in stages}
 
+    # JP: 必要な処理を実行する。
+    # EN: Run the required data.
     def run(self, state: Any, *, start_stage: str) -> Any:
         current_stage = start_stage
         guard = 0

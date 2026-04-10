@@ -17,6 +17,8 @@ class TokenPricing:
     completion_per_1m_tokens_usd: float
 
 
+# JP: cost estimatorを構築する。
+# EN: Build cost estimator.
 def build_cost_estimator(
     pricing_overrides_json: str,
 ) -> Callable[[str, str, int, int], float | None]:
@@ -44,6 +46,8 @@ def build_cost_estimator(
                 except (TypeError, ValueError):
                     continue
 
+    # JP: 必要な処理を推定する。
+    # EN: Estimate the required data.
     def estimate(
         provider: str, model: str, prompt_tokens: int, completion_tokens: int
     ) -> float | None:
@@ -70,6 +74,8 @@ class LLMObservationContext:
 
 
 class DatabaseLLMObserver:
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(
         self,
         db: Database,
@@ -79,6 +85,8 @@ class DatabaseLLMObserver:
         self.db = db
         self.cost_estimator = cost_estimator
 
+    # JP: 必要な処理を記録する。
+    # EN: Record the required data.
     def record(
         self,
         *,
@@ -119,6 +127,8 @@ class DatabaseLLMObserver:
 
 
 class ObservedLLMAdapter(LLMAdapter):
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(
         self,
         *,
@@ -130,6 +140,8 @@ class ObservedLLMAdapter(LLMAdapter):
         self.observer = observer
         self.context_factory = context_factory
 
+    # JP: measure promptを処理する。
+    # EN: Process measure prompt.
     def _measure_prompt(self, system: str, user: str, extra: dict[str, Any] | None = None) -> int:
         payload = {
             "system": system,
@@ -138,6 +150,8 @@ class ObservedLLMAdapter(LLMAdapter):
         }
         return len(str(payload))
 
+    # JP: generate textを処理する。
+    # EN: Process generate text.
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
         prompt_chars = self._measure_prompt(system, user, {"temperature": temperature})
         context = self.context_factory("generate_text", {"temperature": temperature})
@@ -166,6 +180,8 @@ class ObservedLLMAdapter(LLMAdapter):
         )
         return text
 
+    # JP: generate structuredを処理する。
+    # EN: Process generate structured.
     def generate_structured(
         self,
         *,
@@ -214,5 +230,7 @@ class ObservedLLMAdapter(LLMAdapter):
         )
         return payload
 
+    # JP: modelsを一覧化する。
+    # EN: List models.
     def list_models(self) -> list[str]:
         return self.wrapped.list_models()

@@ -13,6 +13,8 @@ from app.stages.risk_check import looks_like_contract_text
 
 
 class OrchestratorActionsMixin:
+    # JP: process user messageを処理する。
+    # EN: Process process user message.
     def process_user_message(
         self,
         *,
@@ -73,6 +75,8 @@ class OrchestratorActionsMixin:
             )
         )
 
+    # JP: actionを実行する。
+    # EN: Execute action.
     def execute_action(
         self,
         *,
@@ -453,6 +457,8 @@ class OrchestratorActionsMixin:
 
         raise RuntimeError(f"unsupported action_type: {action_type}")
 
+    # JP: confirm actionを処理する。
+    # EN: Process confirm action.
     def confirm_action(
         self,
         *,

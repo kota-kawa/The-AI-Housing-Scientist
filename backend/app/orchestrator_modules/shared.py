@@ -13,6 +13,8 @@ RESEARCH_STAGE_ORDER = [
 ]
 
 
+# JP: generate LLM resume bodyを処理する。
+# EN: Process generate LLM resume body.
 def _generate_llm_resume_body(profile_summary: dict[str, Any], adapter: LLMAdapter) -> str:
     """LLMで自然なセッション再開メッセージを生成する。失敗時は空文字を返す。"""
     labels = profile_summary.get("last_search_labels") or []
@@ -36,10 +38,14 @@ def _generate_llm_resume_body(profile_summary: dict[str, Any], adapter: LLMAdapt
     return adapter.generate_text(system=system, user=user_prompt, temperature=0.4).strip()
 
 
+# JP: display textを正規化する。
+# EN: Normalize display text.
 def _normalize_display_text(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
+# JP: display textsを正規化する。
+# EN: Normalize display texts.
 def _normalize_display_texts(values: list[Any], *, limit: int | None = None) -> list[str]:
     items: list[str] = []
     for value in values:
@@ -51,6 +57,8 @@ def _normalize_display_texts(values: list[Any], *, limit: int | None = None) -> 
     return items
 
 
+# JP: generate LLM plan presentationを処理する。
+# EN: Process generate LLM plan presentation.
 def _generate_llm_plan_presentation(
     *,
     user_message: str,
@@ -148,6 +156,8 @@ def _generate_llm_plan_presentation(
     return presentation
 
 
+# JP: generate response labelsを処理する。
+# EN: Process generate response labels.
 def _generate_response_labels(
     *,
     response: ChatMessageResponse,
@@ -194,6 +204,8 @@ def _generate_response_labels(
     return new_response
 
 
+# JP: generate LLM guidance messageを処理する。
+# EN: Process generate LLM guidance message.
 def _generate_llm_guidance_message(
     *,
     task_memory: dict[str, Any],

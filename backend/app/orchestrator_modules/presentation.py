@@ -8,6 +8,8 @@ from .shared import _generate_llm_guidance_message
 
 
 class OrchestratorPresentationMixin:
+    # JP: property cardsを構築する。
+    # EN: Build property cards.
     def _build_property_cards(
         self,
         *,
@@ -68,6 +70,8 @@ class OrchestratorPresentationMixin:
             cards.append(card)
         return cards
 
+    # JP: search blocksを構築する。
+    # EN: Build search blocks.
     def _build_search_blocks(
         self,
         *,
@@ -154,6 +158,8 @@ class OrchestratorPresentationMixin:
 
         return blocks
 
+    # JP: research summary bodyを構築する。
+    # EN: Build research summary body.
     def _build_research_summary_body(
         self,
         *,
@@ -206,6 +212,8 @@ class OrchestratorPresentationMixin:
             f"問い合わせで確認したい点: {' / '.join(confirmation_items[:4])}"
         )
 
+    # JP: research result blocksを構築する。
+    # EN: Build research result blocks.
     def _build_research_result_blocks(
         self,
         *,
@@ -387,6 +395,8 @@ class OrchestratorPresentationMixin:
 
         return blocks
 
+    # JP: inquiry blocksを構築する。
+    # EN: Build inquiry blocks.
     def _build_inquiry_blocks(
         self,
         *,
@@ -438,6 +448,8 @@ class OrchestratorPresentationMixin:
             ),
         ]
 
+    # JP: compare blocksを構築する。
+    # EN: Build compare blocks.
     def _build_compare_blocks(
         self,
         *,
@@ -548,6 +560,8 @@ class OrchestratorPresentationMixin:
             ),
         ]
 
+    # JP: contract prompt blocksを構築する。
+    # EN: Build contract prompt blocks.
     def _build_contract_prompt_blocks(self, property_name: str) -> list[UIBlock]:
         return [
             UIBlock(
@@ -562,6 +576,8 @@ class OrchestratorPresentationMixin:
             )
         ]
 
+    # JP: risk blocksを構築する。
+    # EN: Build risk blocks.
     def _build_risk_blocks(self, risk_result: dict[str, Any]) -> list[UIBlock]:
         rows = [
             {
@@ -599,6 +615,8 @@ class OrchestratorPresentationMixin:
             ),
         ]
 
+    # JP: guidance blocksを構築する。
+    # EN: Build guidance blocks.
     def _build_guidance_blocks(self, task_memory: dict[str, Any]) -> list[UIBlock]:
         """状態に応じた次のアクションボタンを返す。情報不足時はブロックなし。"""
         if task_memory.get("status") == "awaiting_plan_confirmation" and task_memory.get(
@@ -654,6 +672,8 @@ class OrchestratorPresentationMixin:
 
         return []
 
+    # JP: guidance responseを構築する。
+    # EN: Build guidance response.
     def _build_guidance_response(
         self,
         *,
@@ -715,6 +735,8 @@ class OrchestratorPresentationMixin:
         )
         return response
 
+    # JP: annotate response labelsを処理する。
+    # EN: Process annotate response labels.
     @staticmethod
     def _annotate_response_labels(response: ChatMessageResponse) -> ChatMessageResponse:
         """UIBlock.display_label と ChatMessageResponse.status_label をコンテンツベースで設定する。"""

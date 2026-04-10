@@ -52,12 +52,16 @@ LLM_HTML_MAX_CHARS = 9000
 LLM_EXTRACTION_CONFIDENCE_THRESHOLD = 0.35
 
 
+# JP: textを正規化する。
+# EN: Normalize text.
 def _normalize_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value or "").lower()
     normalized = re.sub(r"[\s　]+", "", normalized)
     return normalized.strip()
 
 
+# JP: building nameを正規化する。
+# EN: Normalize building name.
 def _normalize_building_name(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value or "").lower()
     for english, japanese in BUILDING_TOKEN_ALIASES.items():
@@ -68,6 +72,8 @@ def _normalize_building_name(value: str) -> str:
     return normalized
 
 
+# JP: addressを正規化する。
+# EN: Normalize address.
 def _normalize_address(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value or "").strip()
     if normalized in UNKNOWN_ADDRESS_VALUES:
@@ -80,6 +86,8 @@ def _normalize_address(value: str) -> str:
     return normalized.lower()
 
 
+# JP: address levelsを分割する。
+# EN: Split address levels.
 def _split_address_levels(value: str) -> dict[str, str]:
     normalized = _normalize_address(value)
     if not normalized:
@@ -115,6 +123,8 @@ def _split_address_levels(value: str) -> dict[str, str]:
     }
 
 
+# JP: levenshtein ratioを処理する。
+# EN: Process levenshtein ratio.
 def _levenshtein_ratio(left: str, right: str) -> float:
     if not left or not right:
         return 0.0
@@ -135,6 +145,8 @@ def _levenshtein_ratio(left: str, right: str) -> float:
     return round(1 - (distance / max(len(left), len(right))), 3)
 
 
+# JP: rentを抽出する。
+# EN: Extract rent.
 def _extract_rent(text: str) -> int:
     normalized = unicodedata.normalize("NFKC", text or "")
     normalized_no_commas = normalized.replace(",", "")
@@ -175,6 +187,8 @@ def _extract_rent(text: str) -> int:
     return 0
 
 
+# JP: layoutを抽出する。
+# EN: Extract layout.
 def _extract_layout(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text or "").upper().replace(" ", "")
     normalized = normalized.replace("ワンルーム", "1R")
@@ -182,16 +196,22 @@ def _extract_layout(text: str) -> str:
     return match.group(1).upper() if match else ""
 
 
+# JP: station walkを抽出する。
+# EN: Extract station walk.
 def _extract_station_walk(text: str) -> int:
     match = re.search(r"徒歩\s*(\d{1,2})\s*分", text)
     return int(match.group(1)) if match else 0
 
 
+# JP: areaを抽出する。
+# EN: Extract area.
 def _extract_area(text: str) -> float:
     match = re.search(r"(\d{1,3}(?:\.\d+)?)\s*(?:m2|㎡)", text)
     return float(match.group(1)) if match else 0.0
 
 
+# JP: deposit or key moneyを抽出する。
+# EN: Extract deposit or key money.
 def _extract_deposit_or_key_money(text: str, token: str) -> int:
     pattern = rf"{token}\s*(\d+(?:\.\d+)?)\s*万"
     match = re.search(pattern, text)
@@ -200,16 +220,22 @@ def _extract_deposit_or_key_money(text: str, token: str) -> int:
     return 0
 
 
+# JP: addressを抽出する。
+# EN: Extract address.
 def _extract_address(text: str) -> str:
     match = ADDRESS_PATTERN.search(unicodedata.normalize("NFKC", text or ""))
     return match.group(1) if match else ""
 
 
+# JP: area nameを抽出する。
+# EN: Extract area name.
 def _extract_area_name(address: str) -> str:
     levels = _split_address_levels(address)
     return levels["municipality"] or levels["locality"]
 
 
+# JP: strip htmlを処理する。
+# EN: Process strip html.
 def _strip_html(value: str) -> str:
     text = re.sub(r"<script[\s\S]*?</script>", " ", value, flags=re.IGNORECASE)
     text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
@@ -217,6 +243,8 @@ def _strip_html(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+# JP: html fieldを抽出する。
+# EN: Extract html field.
 def _extract_html_field(value: str, field_name: str) -> str:
     pattern = rf'data-field="{re.escape(field_name)}"[^>]*>(.*?)</'
     match = re.search(pattern, value, flags=re.IGNORECASE | re.DOTALL)
@@ -226,6 +254,8 @@ def _extract_html_field(value: str, field_name: str) -> str:
     return html.unescape(re.sub(r"\s+", " ", text).strip())
 
 
+# JP: html JSON fieldを抽出する。
+# EN: Extract html JSON field.
 def _extract_html_json_field(value: str, field_name: str) -> list[str]:
     raw = _extract_html_field(value, field_name)
     if not raw:
@@ -239,6 +269,8 @@ def _extract_html_json_field(value: str, field_name: str) -> list[str]:
     return [str(item) for item in payload if str(item).strip()]
 
 
+# JP: compact LLM textを処理する。
+# EN: Process compact LLM text.
 def _compact_llm_text(value: str, *, max_chars: int) -> str:
     text = re.sub(r"<!--[\s\S]*?-->", " ", value or "")
     text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.IGNORECASE)
@@ -249,6 +281,8 @@ def _compact_llm_text(value: str, *, max_chars: int) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+# JP: coerce positive intを処理する。
+# EN: Process coerce positive int.
 def _coerce_positive_int(value: Any) -> int:
     try:
         number = int(float(value))
@@ -257,6 +291,8 @@ def _coerce_positive_int(value: Any) -> int:
     return number if number > 0 else 0
 
 
+# JP: coerce positive floatを処理する。
+# EN: Process coerce positive float.
 def _coerce_positive_float(value: Any) -> float:
     try:
         number = float(value)
@@ -265,6 +301,8 @@ def _coerce_positive_float(value: Any) -> float:
     return number if number > 0 else 0.0
 
 
+# JP: property fields with LLMを抽出する。
+# EN: Extract property fields with LLM.
 def _extract_property_fields_with_llm(
     *,
     adapter: LLMAdapter | None,
@@ -371,6 +409,8 @@ def _extract_property_fields_with_llm(
     return supplements, confidence
 
 
+# JP: fallback propertyを構築する。
+# EN: Build fallback property.
 def _build_fallback_property(
     source_id: str,
     item: dict[str, Any],
@@ -433,6 +473,8 @@ def _build_fallback_property(
     )
 
 
+# JP: detail propertyを構築する。
+# EN: Build detail property.
 def _build_detail_property(
     source_id: str,
     item: dict[str, Any],
@@ -537,6 +579,8 @@ def _build_detail_property(
     return prop if _has_structured_payload(prop) else None
 
 
+# JP: structured payloadかどうかを判定する。
+# EN: Check whether structured payload.
 def _has_structured_payload(prop: PropertyNormalized) -> bool:
     return any(
         [
@@ -549,6 +593,8 @@ def _has_structured_payload(prop: PropertyNormalized) -> bool:
     )
 
 
+# JP: address similarityを処理する。
+# EN: Process address similarity.
 def _address_similarity(left: str, right: str) -> float:
     left_levels = _split_address_levels(left)
     right_levels = _split_address_levels(right)
@@ -570,6 +616,8 @@ def _address_similarity(left: str, right: str) -> float:
     return round(min(score, 1.0), 3)
 
 
+# JP: duplicate matchを処理する。
+# EN: Process duplicate match.
 def _duplicate_match(
     left: PropertyNormalized, right: PropertyNormalized
 ) -> tuple[float, str] | None:
@@ -611,6 +659,8 @@ def _duplicate_match(
 _LLM_DUPLICATE_CANDIDATE_LIMIT = 20
 
 
+# JP: LLM verify duplicate pairsを処理する。
+# EN: Process LLM verify duplicate pairs.
 def _llm_verify_duplicate_pairs(
     *,
     adapter: LLMAdapter,
@@ -696,6 +746,8 @@ def _llm_verify_duplicate_pairs(
     return confirmed
 
 
+# JP: duplicate groupsを構築する。
+# EN: Build duplicate groups.
 def _build_duplicate_groups(
     properties: list[PropertyNormalized],
     *,
@@ -704,12 +756,16 @@ def _build_duplicate_groups(
     parent = list(range(len(properties)))
     group_reasons: dict[int, list[tuple[float, str]]] = defaultdict(list)
 
+    # JP: 必要な処理を探索する。
+    # EN: Find the required data.
     def find(index: int) -> int:
         while parent[index] != index:
             parent[index] = parent[parent[index]]
             index = parent[index]
         return index
 
+    # JP: unionを処理する。
+    # EN: Process union.
     def union(left_index: int, right_index: int, confidence: float, reason: str) -> None:
         left_root = find(left_index)
         right_root = find(right_index)
@@ -769,6 +825,8 @@ def _build_duplicate_groups(
     return duplicates
 
 
+# JP: search and normalizeを実行する。
+# EN: Run search and normalize.
 def run_search_and_normalize(
     *,
     query: str,

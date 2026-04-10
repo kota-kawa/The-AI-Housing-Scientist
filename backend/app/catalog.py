@@ -20,10 +20,14 @@ MOCK_PROPERTY_IMAGE_URLS = {
 }
 
 
+# JP: catalog detail URLを構築する。
+# EN: Build catalog detail URL.
 def build_catalog_detail_url(property_id: str) -> str:
     return f"{CATALOG_URL_PREFIX}{property_id}"
 
 
+# JP: catalog image URLを構築する。
+# EN: Build catalog image URL.
 def build_catalog_image_url(property_id: str) -> str:
     return MOCK_PROPERTY_IMAGE_URLS.get(str(property_id or "").strip(), "")
 
@@ -252,6 +256,8 @@ CATALOG_SEED: list[dict[str, Any]] = [
 ]
 
 
+# JP: rewrite catalog notesを処理する。
+# EN: Process rewrite catalog notes.
 def rewrite_catalog_notes(catalog: list[dict[str, Any]], adapter: Any) -> list[dict[str, Any]]:
     """notesフィールドをLLMでリライトして検索品質を向上させる。起動時1回の前処理用。"""
     result: list[dict[str, Any]] = []
@@ -287,6 +293,8 @@ def rewrite_catalog_notes(catalog: list[dict[str, Any]], adapter: Any) -> list[d
     return result
 
 
+# JP: property detail htmlを生成する。
+# EN: Render property detail html.
 def render_property_detail_html(property_row: dict[str, Any]) -> str:
     image_url = str(
         property_row.get("image_url")

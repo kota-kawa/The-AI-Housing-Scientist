@@ -6,6 +6,8 @@ from .agent_manager_types import ResearchExecutionResult, ResearchExecutionState
 
 
 class AgentManagerExecutionMixin:
+    # JP: synthesizeを処理する。
+    # EN: Handle synthesize.
     def _handle_synthesize(self, state: ResearchExecutionState) -> str | None:
         selected_artifacts = self._selected_artifacts(state)
         selected_rank = selected_artifacts.rank if selected_artifacts else {}
@@ -133,6 +135,8 @@ class AgentManagerExecutionMixin:
         )
         return None
 
+    # JP: 必要な処理を実行する。
+    # EN: Execute the required data.
     def execute(self) -> ResearchExecutionResult:
         state = ResearchExecutionState()
         self.state_machine.run(state, start_stage="plan_finalize")

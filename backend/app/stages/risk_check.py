@@ -49,12 +49,16 @@ CONTRACT_KEYWORDS = (
 )
 
 
+# JP: looks like contract textを処理する。
+# EN: Process looks like contract text.
 def looks_like_contract_text(source_text: str) -> bool:
     keyword_hits = sum(1 for token in CONTRACT_KEYWORDS if token in source_text)
     normalized_length = len(re.sub(r"\s+", "", source_text))
     return keyword_hits >= 2 or (keyword_hits >= 1 and normalized_length >= 80)
 
 
+# JP: rule based risk resultを構築する。
+# EN: Build rule based risk result.
 def _build_rule_based_risk_result(source_text: str) -> dict[str, Any]:
     risk_items: list[RiskItem] = []
     must_confirm: list[str] = []
@@ -90,6 +94,8 @@ def _build_rule_based_risk_result(source_text: str) -> dict[str, Any]:
     }
 
 
+# JP: LLM risk resultを構築する。
+# EN: Build LLM risk result.
 def _build_llm_risk_result(source_text: str, adapter: LLMAdapter) -> dict[str, Any]:
     schema = {
         "type": "object",
@@ -140,6 +146,8 @@ def _build_llm_risk_result(source_text: str, adapter: LLMAdapter) -> dict[str, A
     }
 
 
+# JP: risk resultsを結合する。
+# EN: Merge risk results.
 def _merge_risk_results(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[str, Any]:
     merged_items: list[dict[str, Any]] = []
     seen_item_keys: set[tuple[str, str]] = set()
@@ -165,6 +173,8 @@ def _merge_risk_results(primary: dict[str, Any], secondary: dict[str, Any]) -> d
     }
 
 
+# JP: risk checkを実行する。
+# EN: Run risk check.
 def run_risk_check(
     *,
     source_text: str,

@@ -28,6 +28,8 @@ DEFAULT_RANKING_PROFILE = {
 }
 
 
+# JP: profileを解決する。
+# EN: Resolve profile.
 def _resolve_profile(profile: dict[str, Any] | None) -> dict[str, float]:
     resolved = dict(DEFAULT_RANKING_PROFILE)
     for key, value in (profile or {}).items():
@@ -38,6 +40,8 @@ def _resolve_profile(profile: dict[str, Any] | None) -> dict[str, float]:
     return resolved
 
 
+# JP: nice to haveを収集する。
+# EN: Collect nice to have.
 def _collect_nice_to_have(user_memory: dict[str, Any]) -> list[str]:
     deduped: list[str] = []
     for item in user_memory.get("nice_to_have", []) or []:
@@ -47,6 +51,8 @@ def _collect_nice_to_have(user_memory: dict[str, Any]) -> list[str]:
     return deduped
 
 
+# JP: property haystackを構築する。
+# EN: Build property haystack.
 def _build_property_haystack(prop: dict[str, Any]) -> str:
     return " ".join(
         [
@@ -60,6 +66,8 @@ def _build_property_haystack(prop: dict[str, Any]) -> str:
     )
 
 
+# JP: compact textを処理する。
+# EN: Process compact text.
 def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= max_chars:
@@ -67,6 +75,8 @@ def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+# JP: score property rulesを処理する。
+# EN: Process score property rules.
 def _score_property_rules(
     prop: dict[str, Any],
     user_memory: dict[str, Any],
@@ -147,6 +157,8 @@ def _score_property_rules(
     return round(score, 2), positives, negatives
 
 
+# JP: fallback nice to have assessmentsを構築する。
+# EN: Build fallback nice to have assessments.
 def _build_fallback_nice_to_have_assessments(
     *,
     prop: dict[str, Any],
@@ -167,6 +179,8 @@ def _build_fallback_nice_to_have_assessments(
     return assessments
 
 
+# JP: score nice to have assessmentsを処理する。
+# EN: Process score nice to have assessments.
 def _score_nice_to_have_assessments(
     assessments: list[dict[str, str]],
     profile: dict[str, float],
@@ -196,6 +210,8 @@ def _score_nice_to_have_assessments(
     return round(min(score_delta, profile["nice_to_have_bonus_cap"]), 2), positives, negatives
 
 
+# JP: fallback selected reasonを構築する。
+# EN: Build fallback selected reason.
 def _build_fallback_selected_reason(
     positives: list[str],
     nice_to_have_positives: list[str],
@@ -210,6 +226,8 @@ def _build_fallback_selected_reason(
     return f"{'、'.join(highlights)}ため、条件との相性が良い候補です。"
 
 
+# JP: fallback not selected reasonを構築する。
+# EN: Build fallback not selected reason.
 def _build_fallback_not_selected_reason(
     negatives: list[str],
     nice_to_have_negatives: list[str],
@@ -224,6 +242,8 @@ def _build_fallback_not_selected_reason(
     return f"{'、'.join(concerns)}ため、優先度はやや下がります。"
 
 
+# JP: LLM ranking enhancementsを構築する。
+# EN: Build LLM ranking enhancements.
 def _build_llm_ranking_enhancements(
     *,
     normalized_properties: list[dict[str, Any]],
@@ -362,6 +382,8 @@ def _build_llm_ranking_enhancements(
     return enhancements
 
 
+# JP: rankingを実行する。
+# EN: Run ranking.
 def run_ranking(
     *,
     normalized_properties: list[dict[str, Any]],

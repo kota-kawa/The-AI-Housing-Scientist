@@ -36,10 +36,14 @@ INTEGER_SLOT_KEYS = {"budget_max", "station_walk_max"}
 LIST_SLOT_KEYS = {"must_conditions", "nice_to_have"}
 
 
+# JP: textを正規化する。
+# EN: Normalize text.
 def _normalize_text(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
+# JP: dedupe textsを処理する。
+# EN: Process dedupe texts.
 def _dedupe_texts(values: list[Any], *, limit: int | None = None) -> list[str]:
     deduped: list[str] = []
     for value in values:
@@ -51,6 +55,8 @@ def _dedupe_texts(values: list[Any], *, limit: int | None = None) -> list[str]:
     return deduped
 
 
+# JP: blank slot memoryを処理する。
+# EN: Process blank slot memory.
 def _blank_slot_memory() -> dict[str, Any]:
     return {
         "budget_max": None,
@@ -63,14 +69,20 @@ def _blank_slot_memory() -> dict[str, Any]:
     }
 
 
+# JP: blank research planを処理する。
+# EN: Process blank research plan.
 def _blank_research_plan() -> dict[str, Any]:
     return {"summary": "", "goal": "", "strategy": [], "rationale": ""}
 
 
+# JP: blank condition reasonsを処理する。
+# EN: Process blank condition reasons.
 def _blank_condition_reasons() -> dict[str, str]:
     return dict.fromkeys(SEARCH_SIGNAL_KEYS, "")
 
 
+# JP: sanitize slot memoryを処理する。
+# EN: Process sanitize slot memory.
 def _sanitize_slot_memory(raw_memory: Any) -> dict[str, Any]:
     memory = _blank_slot_memory()
     if not isinstance(raw_memory, dict):
@@ -91,6 +103,8 @@ def _sanitize_slot_memory(raw_memory: Any) -> dict[str, Any]:
     return memory
 
 
+# JP: sanitize missing slotsを処理する。
+# EN: Process sanitize missing slots.
 def _sanitize_missing_slots(raw_missing_slots: Any) -> list[str]:
     return [
         slot
@@ -99,6 +113,8 @@ def _sanitize_missing_slots(raw_missing_slots: Any) -> list[str]:
     ]
 
 
+# JP: sanitize follow up questionsを処理する。
+# EN: Process sanitize follow up questions.
 def _sanitize_follow_up_questions(raw_questions: Any) -> list[dict[str, Any]]:
     if not isinstance(raw_questions, list):
         return []
@@ -126,6 +142,8 @@ def _sanitize_follow_up_questions(raw_questions: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+# JP: sanitize research planを処理する。
+# EN: Process sanitize research plan.
 def _sanitize_research_plan(raw_plan: Any) -> dict[str, Any]:
     raw_plan = raw_plan if isinstance(raw_plan, dict) else {}
     return {
@@ -136,6 +154,8 @@ def _sanitize_research_plan(raw_plan: Any) -> dict[str, Any]:
     }
 
 
+# JP: sanitize condition reasonsを処理する。
+# EN: Process sanitize condition reasons.
 def _sanitize_condition_reasons(raw_reasons: Any) -> dict[str, str]:
     reasons = _blank_condition_reasons()
     if not isinstance(raw_reasons, dict):
@@ -145,6 +165,8 @@ def _sanitize_condition_reasons(raw_reasons: Any) -> dict[str, str]:
     return reasons
 
 
+# JP: empty planner resultを処理する。
+# EN: Process empty planner result.
 def _empty_planner_result(user_memory: dict[str, Any]) -> dict[str, Any]:
     merged_memory = _sanitize_slot_memory(user_memory)
     return {
@@ -166,10 +188,14 @@ def _empty_planner_result(user_memory: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# JP: safe intを処理する。
+# EN: Process safe int.
 def _safe_int(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
+# JP: profile historyを要約する。
+# EN: Summarize profile history.
 def _summarize_profile_history(profile_memory: dict[str, Any] | None) -> dict[str, Any]:
     profile_memory = profile_memory or {}
     search_history = list(profile_memory.get("search_history", []) or [])[-3:]
@@ -211,6 +237,8 @@ def _summarize_profile_history(profile_memory: dict[str, Any] | None) -> dict[st
     }
 
 
+# JP: planner schemaを処理する。
+# EN: Process planner schema.
 def _planner_schema() -> dict[str, Any]:
     slot_schema = {
         "type": "object",
@@ -290,6 +318,8 @@ def _planner_schema() -> dict[str, Any]:
     }
 
 
+# JP: LLM parseを処理する。
+# EN: Process LLM parse.
 def _llm_parse(
     message: str,
     user_memory: dict[str, Any],
@@ -361,6 +391,8 @@ def _llm_parse(
     )
 
 
+# JP: planner outputを解析する。
+# EN: Parse planner output.
 def _parse_planner_output(
     payload: dict[str, Any], *, default_user_memory: dict[str, Any]
 ) -> dict[str, Any]:
@@ -421,12 +453,16 @@ def _parse_planner_output(
     }
 
 
+# JP: search signalを検出する。
+# EN: Detect search signal.
 def detect_search_signal(message: str, planner_result: dict[str, Any] | None = None) -> bool:
     if planner_result is None:
         return False
     return _normalize_text(planner_result.get("intent")) == "search"
 
 
+# JP: plannerを実行する。
+# EN: Run planner.
 def run_planner(
     *,
     message: str,

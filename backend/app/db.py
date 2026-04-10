@@ -10,21 +10,29 @@ import uuid
 from app.catalog import CATALOG_SEED, build_catalog_detail_url, build_catalog_image_url
 
 
+# JP: UTC now isoを処理する。
+# EN: Process UTC now iso.
 def utc_now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
 
 class Database:
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(self, path: str):
         self.path = path
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
+    # JP: connectを処理する。
+    # EN: Process connect.
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout = 30000;")
         return conn
 
+    # JP: initを処理する。
+    # EN: Process init.
     def init(self) -> None:
         with self.connect() as conn:
             conn.executescript(
@@ -210,6 +218,8 @@ class Database:
             self._seed_property_catalog(conn)
             conn.commit()
 
+    # JP: columnを保証する。
+    # EN: Ensure column.
     def _ensure_column(
         self,
         conn: sqlite3.Connection,
@@ -222,6 +232,8 @@ class Database:
             return
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
+    # JP: seed property catalogを処理する。
+    # EN: Process seed property catalog.
     def _seed_property_catalog(self, conn: sqlite3.Connection) -> None:
         row = conn.execute("SELECT COUNT(*) AS count FROM property_catalog").fetchone()
         count = int(row["count"]) if row is not None else 0
@@ -284,6 +296,8 @@ class Database:
                 ),
             )
 
+    # JP: backfill property catalog image urlsを処理する。
+    # EN: Process backfill property catalog image urls.
     def _backfill_property_catalog_image_urls(self, conn: sqlite3.Connection) -> None:
         for item in CATALOG_SEED:
             image_url = str(
@@ -302,6 +316,8 @@ class Database:
                 (image_url, utc_now_iso(), property_id),
             )
 
+    # JP: or create profileを取得する。
+    # EN: Get or create profile.
     def get_or_create_profile(self, profile_id: str | None = None) -> tuple[str, dict[str, Any]]:
         resolved_profile_id = (profile_id or uuid.uuid4().hex).strip() or uuid.uuid4().hex
         profile = self.get_profile(resolved_profile_id)
@@ -343,6 +359,8 @@ class Database:
             raise RuntimeError("profile creation failed")
         return resolved_profile_id, created_profile
 
+    # JP: profileを取得する。
+    # EN: Get profile.
     def get_profile(self, profile_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
@@ -356,6 +374,8 @@ class Database:
             "updated_at": row["updated_at"],
         }
 
+    # JP: profileを更新する。
+    # EN: Update profile.
     def update_profile(
         self,
         profile_id: str,
@@ -379,6 +399,8 @@ class Database:
             )
             conn.commit()
 
+    # JP: sessionを作成する。
+    # EN: Create session.
     def create_session(
         self,
         profile_id: str | None = None,
@@ -417,11 +439,15 @@ class Database:
             conn.commit()
         return session_id, now
 
+    # JP: session existsを処理する。
+    # EN: Process session exists.
     def session_exists(self, session_id: str) -> bool:
         with self.connect() as conn:
             row = conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
         return row is not None
 
+    # JP: sessionを取得する。
+    # EN: Get session.
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
@@ -438,6 +464,8 @@ class Database:
             "updated_at": row["updated_at"],
         }
 
+    # JP: session statusを設定する。
+    # EN: Set session status.
     def set_session_status(self, session_id: str, status: str) -> None:
         now = utc_now_iso()
         with self.connect() as conn:
@@ -447,6 +475,8 @@ class Database:
             )
             conn.commit()
 
+    # JP: pending actionを設定する。
+    # EN: Set pending action.
     def set_pending_action(self, session_id: str, pending_action: dict[str, Any] | None) -> None:
         now = utc_now_iso()
         payload = json.dumps(pending_action, ensure_ascii=False) if pending_action else None
@@ -457,6 +487,8 @@ class Database:
             )
             conn.commit()
 
+    # JP: add messageを処理する。
+    # EN: Process add message.
     def add_message(self, session_id: str, role: str, content: dict[str, Any]) -> None:
         now = utc_now_iso()
         with self.connect() as conn:
@@ -467,6 +499,8 @@ class Database:
             conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
             conn.commit()
 
+    # JP: messagesを一覧化する。
+    # EN: List messages.
     def list_messages(self, session_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -482,6 +516,8 @@ class Database:
             for row in rows
         ]
 
+    # JP: memoriesを取得する。
+    # EN: Get memories.
     def get_memories(self, session_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
         with self.connect() as conn:
             row = conn.execute(
@@ -492,6 +528,8 @@ class Database:
             return {}, {}
         return json.loads(row["user_memory_json"]), json.loads(row["task_memory_json"])
 
+    # JP: memoriesを更新する。
+    # EN: Update memories.
     def update_memories(
         self, session_id: str, user_memory: dict[str, Any], task_memory: dict[str, Any]
     ) -> None:
@@ -509,6 +547,8 @@ class Database:
             conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
             conn.commit()
 
+    # JP: add audit eventを処理する。
+    # EN: Process add audit event.
     def add_audit_event(
         self,
         session_id: str,
@@ -532,6 +572,8 @@ class Database:
             )
             conn.commit()
 
+    # JP: audit eventsを一覧化する。
+    # EN: List audit events.
     def list_audit_events(self, session_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -552,6 +594,8 @@ class Database:
             )
         return events
 
+    # JP: catalog propertiesを一覧化する。
+    # EN: List catalog properties.
     def list_catalog_properties(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -583,6 +627,8 @@ class Database:
             ).fetchall()
         return [self._catalog_row_to_dict(row) for row in rows]
 
+    # JP: catalog property by IDを取得する。
+    # EN: Get catalog property by ID.
     def get_catalog_property_by_id(self, property_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
@@ -617,6 +663,8 @@ class Database:
             return None
         return self._catalog_row_to_dict(row)
 
+    # JP: catalog property notesを更新する。
+    # EN: Update catalog property notes.
     def update_catalog_property_notes(self, property_id: str, notes: str) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -624,6 +672,8 @@ class Database:
                 (notes, utc_now_iso(), property_id),
             )
 
+    # JP: catalog property by URLを取得する。
+    # EN: Get catalog property by URL.
     def get_catalog_property_by_url(self, detail_url: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
@@ -658,6 +708,8 @@ class Database:
             return None
         return self._catalog_row_to_dict(row)
 
+    # JP: catalog row to dictを処理する。
+    # EN: Process catalog row to dict.
     def _catalog_row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
             "property_id": row["property_id"],
@@ -682,6 +734,8 @@ class Database:
             "features": json.loads(row["features_json"]) if row["features_json"] else [],
         }
 
+    # JP: research jobを作成する。
+    # EN: Create research job.
     def create_research_job(
         self,
         *,
@@ -734,6 +788,8 @@ class Database:
             conn.commit()
         return job_id, now
 
+    # JP: research jobを取得する。
+    # EN: Get research job.
     def get_research_job(self, job_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM research_jobs WHERE id = ?", (job_id,)).fetchone()
@@ -741,6 +797,8 @@ class Database:
             return None
         return self._research_job_row_to_dict(row)
 
+    # JP: latest research jobを取得する。
+    # EN: Get latest research job.
     def get_latest_research_job(self, session_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
@@ -757,6 +815,8 @@ class Database:
             return None
         return self._research_job_row_to_dict(row)
 
+    # JP: claim next research jobを処理する。
+    # EN: Process claim next research job.
     def claim_next_research_job(self) -> dict[str, Any] | None:
         now = utc_now_iso()
         with self.connect() as conn:
@@ -793,6 +853,8 @@ class Database:
 
         return self.get_research_job(row["id"])
 
+    # JP: research jobを更新する。
+    # EN: Update research job.
     def update_research_job(
         self,
         job_id: str,
@@ -845,6 +907,8 @@ class Database:
             )
             conn.commit()
 
+    # JP: add research journal nodeを処理する。
+    # EN: Process add research journal node.
     def add_research_journal_node(
         self,
         *,
@@ -909,6 +973,8 @@ class Database:
             conn.commit()
         return int(cursor.lastrowid)
 
+    # JP: research journal nodesを一覧化する。
+    # EN: List research journal nodes.
     def list_research_journal_nodes(self, job_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -960,6 +1026,8 @@ class Database:
             for row in rows
         ]
 
+    # JP: research journal nodeを更新する。
+    # EN: Update research journal node.
     def update_research_journal_node(
         self,
         node_id: int,
@@ -1028,6 +1096,8 @@ class Database:
             )
             conn.commit()
 
+    # JP: add LLM call eventを処理する。
+    # EN: Process add LLM call event.
     def add_llm_call_event(
         self,
         *,
@@ -1092,6 +1162,8 @@ class Database:
             conn.commit()
         return int(cursor.lastrowid)
 
+    # JP: LLM call eventsを一覧化する。
+    # EN: List LLM call events.
     def list_llm_call_events(
         self,
         *,
@@ -1156,6 +1228,8 @@ class Database:
             for row in rows
         ]
 
+    # JP: research job row to dictを処理する。
+    # EN: Process research job row to dict.
     def _research_job_row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
             "id": row["id"],

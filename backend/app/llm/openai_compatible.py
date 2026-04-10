@@ -11,6 +11,8 @@ from .utils import extract_json_object, flatten_content, with_current_date_conte
 
 
 class OpenAICompatibleAdapter(LLMAdapter):
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(
         self,
         *,
@@ -29,9 +31,13 @@ class OpenAICompatibleAdapter(LLMAdapter):
         self.max_retries = max_retries
         self._last_usage: LLMUsage | None = None
 
+    # JP: hide reasoningかどうかを判定する。
+    # EN: Check whether hide reasoning.
     def _should_hide_reasoning(self) -> bool:
         return self.provider_name == "groq" and str(self.model).strip().lower() == "qwen/qwen3-32b"
 
+    # JP: headersを処理する。
+    # EN: Process headers.
     @property
     def _headers(self) -> dict[str, str]:
         return {
@@ -39,6 +45,8 @@ class OpenAICompatibleAdapter(LLMAdapter):
             "Content-Type": "application/json",
         }
 
+    # JP: requestを処理する。
+    # EN: Process request.
     def _request(
         self, method: str, path: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -68,6 +76,8 @@ class OpenAICompatibleAdapter(LLMAdapter):
 
         raise RuntimeError(f"{self.provider_name} request failed: {last_error}")
 
+    # JP: usageを抽出する。
+    # EN: Extract usage.
     def _extract_usage(self, response: dict[str, Any]) -> LLMUsage:
         usage = response.get("usage", {}) or {}
         prompt_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
@@ -80,6 +90,8 @@ class OpenAICompatibleAdapter(LLMAdapter):
             raw=usage if isinstance(usage, dict) else {},
         )
 
+    # JP: chatを処理する。
+    # EN: Process chat.
     def _chat(
         self,
         messages: list[dict[str, Any]],
@@ -100,6 +112,8 @@ class OpenAICompatibleAdapter(LLMAdapter):
         self._last_usage = self._extract_usage(response)
         return response
 
+    # JP: generate textを処理する。
+    # EN: Process generate text.
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
         system = with_current_date_context(system)
         response = self._chat(
@@ -112,6 +126,8 @@ class OpenAICompatibleAdapter(LLMAdapter):
         message = response["choices"][0]["message"]
         return flatten_content(message.get("content", ""))
 
+    # JP: generate structuredを処理する。
+    # EN: Process generate structured.
     def generate_structured(
         self,
         *,
@@ -184,10 +200,14 @@ class OpenAICompatibleAdapter(LLMAdapter):
 
         raise RuntimeError(f"{self.provider_name} structured response failed unexpectedly")
 
+    # JP: modelsを一覧化する。
+    # EN: List models.
     def list_models(self) -> list[str]:
         response = self._request("GET", "/models")
         data = response.get("data", [])
         return sorted([item.get("id", "") for item in data if item.get("id")])
 
+    # JP: last usageを取得する。
+    # EN: Get last usage.
     def get_last_usage(self) -> LLMUsage | None:
         return self._last_usage

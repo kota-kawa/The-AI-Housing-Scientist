@@ -15,10 +15,14 @@ class LLMUsage:
 
 
 class LLMAdapter(ABC):
+    # JP: generate textを処理する。
+    # EN: Process generate text.
     @abstractmethod
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
         raise NotImplementedError
 
+    # JP: generate structuredを処理する。
+    # EN: Process generate structured.
     @abstractmethod
     def generate_structured(
         self,
@@ -30,9 +34,13 @@ class LLMAdapter(ABC):
     ) -> dict[str, Any]:
         raise NotImplementedError
 
+    # JP: modelsを一覧化する。
+    # EN: List models.
     @abstractmethod
     def list_models(self) -> list[str]:
         raise NotImplementedError
 
+    # JP: last usageを取得する。
+    # EN: Get last usage.
     def get_last_usage(self) -> LLMUsage | None:
         return None

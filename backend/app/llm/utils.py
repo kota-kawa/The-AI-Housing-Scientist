@@ -11,6 +11,8 @@ _PROMPT_TIMEZONE = ZoneInfo("Asia/Tokyo")
 _WEEKDAYS_JA = ("月", "火", "水", "木", "金", "土", "日")
 
 
+# JP: JSON objectを抽出する。
+# EN: Extract JSON object.
 def extract_json_object(text: str) -> dict[str, Any]:
     text = text.strip()
     try:
@@ -25,6 +27,8 @@ def extract_json_object(text: str) -> dict[str, Any]:
     return json.loads(match.group(0))
 
 
+# JP: flatten contentを処理する。
+# EN: Process flatten content.
 def flatten_content(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -42,6 +46,8 @@ def flatten_content(content: Any) -> str:
     return str(content)
 
 
+# JP: current date contextを構築する。
+# EN: Build current date context.
 def build_current_date_context(now: datetime | None = None) -> str:
     current = (
         now.astimezone(_PROMPT_TIMEZONE) if now is not None else datetime.now(_PROMPT_TIMEZONE)
@@ -50,6 +56,8 @@ def build_current_date_context(now: datetime | None = None) -> str:
     return f"現在の日付は {current.year}年{current.month}月{current.day}日（{weekday}）です。"
 
 
+# JP: with current date contextを処理する。
+# EN: Process with current date context.
 def with_current_date_context(system: str, now: datetime | None = None) -> str:
     system = system.rstrip()
     current_date_context = build_current_date_context(now)

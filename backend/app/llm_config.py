@@ -37,14 +37,20 @@ _STAGE_PROVIDER_PREFERENCES: dict[LLMRouteKey, list[ProviderName]] = {
 }
 
 
+# JP: LLM route keysを取得する。
+# EN: Get LLM route keys.
 def get_llm_route_keys() -> list[LLMRouteKey]:
     return [item["key"] for item in LLM_ROUTE_DEFINITIONS]  # type: ignore[return-value]
 
 
+# JP: LLM route definitionsを取得する。
+# EN: Get LLM route definitions.
 def get_llm_route_definitions() -> list[dict[str, str]]:
     return [dict(item) for item in LLM_ROUTE_DEFINITIONS]
 
 
+# JP: pick default providerを処理する。
+# EN: Process pick default provider.
 def _pick_default_provider(settings: Settings, route_key: LLMRouteKey) -> ProviderName:
     for provider in _STAGE_PROVIDER_PREFERENCES[route_key]:
         if get_provider_api_key(settings, provider):
@@ -52,6 +58,8 @@ def _pick_default_provider(settings: Settings, route_key: LLMRouteKey) -> Provid
     return settings.llm_default_provider
 
 
+# JP: default LLM configを構築する。
+# EN: Build default LLM config.
 def build_default_llm_config(settings: Settings) -> dict[str, Any]:
     routes: dict[str, dict[str, str]] = {}
     for route_key in get_llm_route_keys():
@@ -62,6 +70,8 @@ def build_default_llm_config(settings: Settings) -> dict[str, Any]:
     return {"preset": "default", "routes": routes}
 
 
+# JP: LLM configを正規化する。
+# EN: Normalize LLM config.
 def normalize_llm_config(settings: Settings, raw_config: Any) -> dict[str, Any]:
     default_config = build_default_llm_config(settings)
     raw_routes = raw_config.get("routes", {}) if isinstance(raw_config, dict) else {}
@@ -80,6 +90,8 @@ def normalize_llm_config(settings: Settings, raw_config: Any) -> dict[str, Any]:
     return {"preset": preset, "routes": routes}
 
 
+# JP: route config forを処理する。
+# EN: Process route config for.
 def route_config_for(config: dict[str, Any], route_key: LLMRouteKey) -> dict[str, str]:
     routes = config.get("routes", {}) if isinstance(config, dict) else {}
     route = routes.get(route_key, {}) if isinstance(routes, dict) else {}

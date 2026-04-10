@@ -10,6 +10,8 @@ from .utils import extract_json_object, with_current_date_context
 
 
 class AnthropicAdapter(LLMAdapter):
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(
         self,
         *,
@@ -25,6 +27,8 @@ class AnthropicAdapter(LLMAdapter):
         self.base_url = "https://api.anthropic.com/v1"
         self._last_usage: LLMUsage | None = None
 
+    # JP: headersを処理する。
+    # EN: Process headers.
     @property
     def _headers(self) -> dict[str, str]:
         return {
@@ -33,6 +37,8 @@ class AnthropicAdapter(LLMAdapter):
             "content-type": "application/json",
         }
 
+    # JP: requestを処理する。
+    # EN: Process request.
     def _request(
         self, method: str, path: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -62,6 +68,8 @@ class AnthropicAdapter(LLMAdapter):
 
         raise RuntimeError(f"claude request failed: {last_error}")
 
+    # JP: usageを抽出する。
+    # EN: Extract usage.
     def _extract_usage(self, response: dict[str, Any]) -> LLMUsage:
         usage = response.get("usage", {}) or {}
         prompt_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
@@ -74,6 +82,8 @@ class AnthropicAdapter(LLMAdapter):
             raw=usage if isinstance(usage, dict) else {},
         )
 
+    # JP: messages createを処理する。
+    # EN: Process messages create.
     def _messages_create(self, *, system: str, user: str, temperature: float) -> str:
         response = self._request(
             "POST",
@@ -91,10 +101,14 @@ class AnthropicAdapter(LLMAdapter):
         texts = [part.get("text", "") for part in content if part.get("type") == "text"]
         return "\n".join([t for t in texts if t])
 
+    # JP: generate textを処理する。
+    # EN: Process generate text.
     def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
         system = with_current_date_context(system)
         return self._messages_create(system=system, user=user, temperature=temperature)
 
+    # JP: generate structuredを処理する。
+    # EN: Process generate structured.
     def generate_structured(
         self,
         *,
@@ -146,10 +160,14 @@ class AnthropicAdapter(LLMAdapter):
 
         raise RuntimeError("claude structured response failed unexpectedly")
 
+    # JP: modelsを一覧化する。
+    # EN: List models.
     def list_models(self) -> list[str]:
         response = self._request("GET", "/models")
         data = response.get("data", [])
         return sorted([item.get("id", "") for item in data if item.get("id")])
 
+    # JP: last usageを取得する。
+    # EN: Get last usage.
     def get_last_usage(self) -> LLMUsage | None:
         return self._last_usage

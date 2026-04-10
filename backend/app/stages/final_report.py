@@ -52,6 +52,8 @@ Requirements:
 """
 
 
+# JP: compact textを処理する。
+# EN: Process compact text.
 def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= max_chars:
@@ -59,10 +61,14 @@ def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+# JP: compact JSONを処理する。
+# EN: Process compact JSON.
 def _compact_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
 
 
+# JP: node snapshotを処理する。
+# EN: Process node snapshot.
 def _node_snapshot(node: ResearchNode) -> dict[str, Any]:
     summary = ""
     if isinstance(node.output_payload, dict):
@@ -121,6 +127,8 @@ def _node_snapshot(node: ResearchNode) -> dict[str, Any]:
     }
 
 
+# JP: selected contextを処理する。
+# EN: Process selected context.
 def _selected_context(selected_branch_nodes: list[ResearchNode]) -> dict[str, Any]:
     selection_node = next(
         (
@@ -155,6 +163,8 @@ def _selected_context(selected_branch_nodes: list[ResearchNode]) -> dict[str, An
     }
 
 
+# JP: synthesize contextを処理する。
+# EN: Process synthesize context.
 def _synthesize_context(
     stage_nodes: list[ResearchNode],
 ) -> dict[str, Any]:
@@ -179,6 +189,8 @@ def _synthesize_context(
     }
 
 
+# JP: comparison tableを処理する。
+# EN: Process comparison table.
 def _comparison_table(candidates: list[dict[str, Any]]) -> str:
     if not candidates:
         return "| 物件 | 家賃 | 間取り | 駅徒歩 | 面積 | 根拠 |\n| --- | --- | --- | --- | --- | --- |\n| 候補なし | 要確認 | 要確認 | 要確認 | 要確認 | 候補比較に必要な情報が不足しています。 |"
@@ -210,6 +222,8 @@ def _comparison_table(candidates: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+# JP: fallback reportを構築する。
+# EN: Build fallback report.
 def _build_fallback_report(
     *,
     stage_nodes: list[ResearchNode],
@@ -313,6 +327,8 @@ def _build_fallback_report(
     }
 
 
+# JP: final reportを実行する。
+# EN: Run final report.
 def run_final_report(
     *,
     stage_nodes: list[ResearchNode],

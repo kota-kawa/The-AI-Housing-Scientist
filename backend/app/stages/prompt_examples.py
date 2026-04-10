@@ -34,30 +34,42 @@ class PromptExamplesError(RuntimeError):
     pass
 
 
+# JP: failを処理する。
+# EN: Process fail.
 def _fail(filename: str, message: str) -> None:
     full_message = f"invalid prompt examples in {filename}: {message}"
     logger.error(full_message)
     raise PromptExamplesError(full_message)
 
 
+# JP: int or noneかどうかを判定する。
+# EN: Check whether int or none.
 def _is_int_or_none(value: Any) -> bool:
     return value is None or (isinstance(value, int) and not isinstance(value, bool))
 
 
+# JP: numberかどうかを判定する。
+# EN: Check whether number.
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+# JP: expect typeを処理する。
+# EN: Process expect type.
 def _expect_type(filename: str, value: Any, expected_type: type, path: str) -> None:
     if not isinstance(value, expected_type):
         _fail(filename, f"{path} must be {expected_type.__name__}")
 
 
+# JP: expect stringを処理する。
+# EN: Process expect string.
 def _expect_string(filename: str, value: Any, path: str) -> None:
     if not isinstance(value, str) or not value.strip():
         _fail(filename, f"{path} must be a non-empty string")
 
 
+# JP: expect string listを処理する。
+# EN: Process expect string list.
 def _expect_string_list(filename: str, value: Any, path: str) -> None:
     if not isinstance(value, list):
         _fail(filename, f"{path} must be a list")
@@ -65,6 +77,8 @@ def _expect_string_list(filename: str, value: Any, path: str) -> None:
         _expect_string(filename, item, f"{path}[{index}]")
 
 
+# JP: expect slot memory shapeを処理する。
+# EN: Process expect slot memory shape.
 def _expect_slot_memory_shape(filename: str, value: Any, path: str) -> None:
     _expect_type(filename, value, dict, path)
     required_keys = {
@@ -90,6 +104,8 @@ def _expect_slot_memory_shape(filename: str, value: Any, path: str) -> None:
         _expect_string_list(filename, value[key], f"{path}.{key}")
 
 
+# JP: expect condition reasons shapeを処理する。
+# EN: Process expect condition reasons shape.
 def _expect_condition_reasons_shape(filename: str, value: Any, path: str) -> None:
     _expect_type(filename, value, dict, path)
     required_keys = {
@@ -108,6 +124,8 @@ def _expect_condition_reasons_shape(filename: str, value: Any, path: str) -> Non
             _fail(filename, f"{path}.{key} must be a string")
 
 
+# JP: planner examplesを検証する。
+# EN: Validate planner examples.
 def _validate_planner_examples(filename: str, payload: list[Any]) -> None:
     if len(payload) < 2:
         _fail(filename, "at least 2 examples are required")
@@ -203,6 +221,8 @@ def _validate_planner_examples(filename: str, payload: list[Any]) -> None:
         )
 
 
+# JP: ranking examplesを検証する。
+# EN: Validate ranking examples.
 def _validate_ranking_examples(filename: str, payload: list[Any]) -> None:
     if len(payload) < 2:
         _fail(filename, "at least 2 examples are required")
@@ -344,6 +364,8 @@ VALIDATORS = {
 }
 
 
+# JP: prompt examplesを読み込む。
+# EN: Load prompt examples.
 @cache
 def _load_prompt_examples(filename: str) -> tuple[dict[str, Any], ...]:
     path = PROMPTS_DIR / filename
@@ -370,10 +392,14 @@ def _load_prompt_examples(filename: str) -> tuple[dict[str, Any], ...]:
     return tuple(copy.deepcopy(payload))
 
 
+# JP: prompt examplesを読み込む。
+# EN: Load prompt examples.
 def load_prompt_examples(filename: str) -> list[dict[str, Any]]:
     return copy.deepcopy(list(_load_prompt_examples(filename)))
 
 
+# JP: sample prompt examplesを処理する。
+# EN: Process sample prompt examples.
 def sample_prompt_examples(filename: str, *, count: int = 2) -> list[dict[str, Any]]:
     examples = load_prompt_examples(filename)
     if len(examples) < count:
@@ -381,6 +407,8 @@ def sample_prompt_examples(filename: str, *, count: int = 2) -> list[dict[str, A
     return random.sample(examples, count)
 
 
+# JP: required prompt examplesを検証する。
+# EN: Validate required prompt examples.
 def validate_required_prompt_examples() -> None:
     for filename in VALIDATORS:
         _load_prompt_examples(filename)

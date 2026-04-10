@@ -9,6 +9,8 @@ from .shared import RESEARCH_STAGE_ORDER, _generate_llm_plan_presentation
 
 
 class OrchestratorPlanningMixin:
+    # JP: tree prune reason labelを処理する。
+    # EN: Process tree prune reason label.
     def _tree_prune_reason_label(self, reason: str) -> str:
         normalized = str(reason or "").strip()
         if not normalized:
@@ -24,6 +26,8 @@ class OrchestratorPlanningMixin:
         }
         return labels.get(normalized, normalized)
 
+    # JP: tree termination labelを処理する。
+    # EN: Process tree termination label.
     def _tree_termination_label(self, reason: str) -> str:
         labels = {
             "queued": "キューで待機中",
@@ -35,6 +39,8 @@ class OrchestratorPlanningMixin:
         }
         return labels.get(reason, reason or "進行中")
 
+    # JP: tree node payloadを構築する。
+    # EN: Build tree node payload.
     def _build_tree_node_payload(self, node: dict[str, Any]) -> dict[str, Any]:
         node_type = str(node.get("node_type") or "")
         input_payload = node.get("input") or {}
@@ -130,6 +136,8 @@ class OrchestratorPlanningMixin:
             "created_at": str(node.get("created_at") or ""),
         }
 
+    # JP: tree blockを構築する。
+    # EN: Build tree block.
     def _build_tree_block(
         self,
         job: dict[str, Any] | None,
@@ -308,6 +316,8 @@ class OrchestratorPlanningMixin:
             },
         )
 
+    # JP: question blockを構築する。
+    # EN: Build question block.
     def _build_question_block(
         self,
         *,
@@ -330,12 +340,16 @@ class OrchestratorPlanningMixin:
             },
         )
 
+    # JP: stage labelを処理する。
+    # EN: Process stage label.
     def _stage_label(self, stage_name: str) -> str:
         for name, label in RESEARCH_STAGE_ORDER:
             if name == stage_name:
                 return label
         return stage_name
 
+    # JP: plan conditionsを構築する。
+    # EN: Build plan conditions.
     def _build_plan_conditions(
         self,
         user_memory: dict[str, Any],
@@ -344,6 +358,8 @@ class OrchestratorPlanningMixin:
         condition_reasons = condition_reasons or {}
         conditions: list[dict[str, str]] = []
 
+        # JP: add conditionを処理する。
+        # EN: Process add condition.
         def add_condition(key: str, label: str, value: str) -> None:
             item = {"label": label, "value": value}
             reason = str(condition_reasons.get(key) or "").strip()
@@ -377,6 +393,8 @@ class OrchestratorPlanningMixin:
             )
         return conditions
 
+    # JP: research planを構築する。
+    # EN: Build research plan.
     def _build_research_plan(
         self,
         *,
@@ -442,6 +460,8 @@ class OrchestratorPlanningMixin:
             "user_memory_snapshot": user_memory,
         }
 
+    # JP: plan blockを構築する。
+    # EN: Build plan block.
     def _build_plan_block(self, plan: dict[str, Any]) -> UIBlock:
         return UIBlock(
             type="plan",
@@ -458,6 +478,8 @@ class OrchestratorPlanningMixin:
             },
         )
 
+    # JP: timeline itemsを構築する。
+    # EN: Build timeline items.
     def _build_timeline_items(self, job: dict[str, Any] | None) -> list[dict[str, str]]:
         if job is None:
             return []
@@ -488,6 +510,8 @@ class OrchestratorPlanningMixin:
             items.append({"label": label, "status": status, "detail": detail})
         return items
 
+    # JP: timeline blockを構築する。
+    # EN: Build timeline block.
     def _build_timeline_block(self, job: dict[str, Any] | None) -> UIBlock:
         return UIBlock(
             type="timeline",
@@ -502,6 +526,8 @@ class OrchestratorPlanningMixin:
             },
         )
 
+    # JP: research progress blocksを構築する。
+    # EN: Build research progress blocks.
     def _build_research_progress_blocks(
         self,
         job: dict[str, Any] | None,
@@ -515,6 +541,8 @@ class OrchestratorPlanningMixin:
             self._build_tree_block(job, task_memory=task_memory),
         ]
 
+    # JP: sources blockを構築する。
+    # EN: Build sources block.
     def _build_sources_block(self, source_items: list[dict[str, Any]]) -> UIBlock:
         return UIBlock(
             type="sources",
@@ -522,6 +550,8 @@ class OrchestratorPlanningMixin:
             content={"items": source_items},
         )
 
+    # JP: research running responseを構築する。
+    # EN: Build research running response.
     def _build_research_running_response(self, job: dict[str, Any]) -> ChatMessageResponse:
         status = "research_running" if job["status"] == "running" else "research_queued"
         assistant_message = (

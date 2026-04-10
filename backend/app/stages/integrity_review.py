@@ -34,6 +34,8 @@ REFERENCE_TOKENS = (
 LAYOUT_PATTERN = re.compile(r"(\d(?:SLDK|SDK|LDK|DK|K|R))", re.IGNORECASE)
 
 
+# JP: compact textを処理する。
+# EN: Process compact text.
 def _compact_text(value: Any, *, max_chars: int = 320) -> str:
     text = " ".join(str(value or "").split()).strip()
     if len(text) <= max_chars:
@@ -41,6 +43,8 @@ def _compact_text(value: Any, *, max_chars: int = 320) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+# JP: strip htmlを処理する。
+# EN: Process strip html.
 def _strip_html(value: str) -> str:
     text = re.sub(r"<script[\s\S]*?</script>", " ", value or "", flags=re.IGNORECASE)
     text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
@@ -48,6 +52,8 @@ def _strip_html(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+# JP: unique stringsを処理する。
+# EN: Process unique strings.
 def _unique_strings(values: list[Any]) -> list[str]:
     deduped: list[str] = []
     for value in values:
@@ -57,6 +63,8 @@ def _unique_strings(values: list[Any]) -> list[str]:
     return deduped
 
 
+# JP: score to trustを処理する。
+# EN: Process score to trust.
 def _score_to_trust(score_map: dict[str, int], issue_count: int = 0) -> int:
     total = sum(max(1, min(5, int(score_map.get(key, 3)))) for key in INTEGRITY_DIMENSIONS)
     trust = int(round((total / (len(INTEGRITY_DIMENSIONS) * 5)) * 100))
@@ -65,11 +73,15 @@ def _score_to_trust(score_map: dict[str, int], issue_count: int = 0) -> int:
     return trust
 
 
+# JP: layout valuesを抽出する。
+# EN: Extract layout values.
 def _extract_layout_values(text: str) -> list[str]:
     normalized = str(text or "").upper().replace("ワンルーム", "1R")
     return _unique_strings(match.group(1).upper() for match in LAYOUT_PATTERN.finditer(normalized))
 
 
+# JP: walk valuesを抽出する。
+# EN: Extract walk values.
 def _extract_walk_values(text: str) -> list[int]:
     values = [
         int(match.group(1)) for match in re.finditer(r"徒歩\s*(\d{1,2})\s*分", str(text or ""))
@@ -77,6 +89,8 @@ def _extract_walk_values(text: str) -> list[int]:
     return [value for value in values if value > 0]
 
 
+# JP: yen from matchを処理する。
+# EN: Process yen from match.
 def _yen_from_match(match: re.Match[str]) -> int:
     man = str(match.group(1) or "").strip()
     sub = str(match.group(2) or "").strip()
@@ -89,6 +103,8 @@ def _yen_from_match(match: re.Match[str]) -> int:
     return int(man)
 
 
+# JP: labeled money valuesを抽出する。
+# EN: Extract labeled money values.
 def _extract_labeled_money_values(text: str, labels: tuple[str, ...]) -> list[int]:
     normalized = str(text or "").replace(",", "")
     label_pattern = "(?:" + "|".join(re.escape(label) for label in labels) + ")"
@@ -114,6 +130,8 @@ def _extract_labeled_money_values(text: str, labels: tuple[str, ...]) -> list[in
     return _unique_numeric(values, tolerance=3000)
 
 
+# JP: unique numericを処理する。
+# EN: Process unique numeric.
 def _unique_numeric(values: list[int], *, tolerance: int) -> list[int]:
     deduped: list[int] = []
     for value in sorted(value for value in values if value > 0):
@@ -122,6 +140,8 @@ def _unique_numeric(values: list[int], *, tolerance: int) -> list[int]:
     return deduped
 
 
+# JP: available dateを解析する。
+# EN: Parse available date.
 def _parse_available_date(value: str, *, today: date) -> date | None:
     text = str(value or "").strip()
     if not text:
@@ -140,6 +160,8 @@ def _parse_available_date(value: str, *, today: date) -> date | None:
         return None
 
 
+# JP: evidence urlsを処理する。
+# EN: Process evidence urls.
 def _evidence_urls(prop: dict[str, Any], raw_result: dict[str, Any]) -> list[str]:
     return _unique_strings(
         [
@@ -149,6 +171,8 @@ def _evidence_urls(prop: dict[str, Any], raw_result: dict[str, Any]) -> list[str
     )
 
 
+# JP: evidence completeness scoreを処理する。
+# EN: Process evidence completeness score.
 def _evidence_completeness_score(
     prop: dict[str, Any],
     raw_result: dict[str, Any],
@@ -165,6 +189,8 @@ def _evidence_completeness_score(
     return max(1, min(5, passed))
 
 
+# JP: rule review for propertyを処理する。
+# EN: Process rule review for property.
 def _rule_review_for_property(
     *,
     prop: dict[str, Any],
@@ -282,6 +308,8 @@ def _rule_review_for_property(
     }
 
 
+# JP: LLM integrity reviewsを構築する。
+# EN: Build LLM integrity reviews.
 def _build_llm_integrity_reviews(
     *,
     normalized_properties: list[dict[str, Any]],
@@ -444,6 +472,8 @@ def _build_llm_integrity_reviews(
     return reviews
 
 
+# JP: reviewsを結合する。
+# EN: Merge reviews.
 def _merge_reviews(
     rule_review: dict[str, Any],
     llm_review: dict[str, Any] | None,
@@ -488,6 +518,8 @@ def _merge_reviews(
     }
 
 
+# JP: integrity reviewを実行する。
+# EN: Run integrity review.
 def run_integrity_review(
     *,
     normalized_properties: list[dict[str, Any]],

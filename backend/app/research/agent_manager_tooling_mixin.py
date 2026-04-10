@@ -16,6 +16,8 @@ from .agent_manager_types import SearchNodePlan
 
 
 class AgentManagerToolingMixin:
+    # JP: cached singleflight loadを処理する。
+    # EN: Process cached singleflight load.
     def _cached_singleflight_load(
         self,
         *,
@@ -62,6 +64,8 @@ class AgentManagerToolingMixin:
             raise entry["error"]
         return self._cache_copy(entry["value"]), True
 
+    # JP: state machineを構築する。
+    # EN: Build state machine.
     def _build_state_machine(self) -> ResearchStateMachine:
         return ResearchStateMachine(
             [
@@ -83,6 +87,8 @@ class AgentManagerToolingMixin:
             ]
         )
 
+    # JP: toolboxを構築する。
+    # EN: Build toolbox.
     def _build_toolbox(self) -> Toolbox:
         node_schema = {
             "type": "object",
@@ -274,6 +280,8 @@ class AgentManagerToolingMixin:
             ]
         )
 
+    # JP: jobを更新する。
+    # EN: Update job.
     def _update_job(self, *, stage_name: str, progress_percent: int, latest_summary: str) -> None:
         with self._job_lock:
             resolved_progress = max(self._job_progress_percent, progress_percent)
@@ -285,6 +293,8 @@ class AgentManagerToolingMixin:
                 latest_summary=latest_summary,
             )
 
+    # JP: nodeを記録する。
+    # EN: Record node.
     def _record_node(
         self,
         *,
@@ -342,6 +352,8 @@ class AgentManagerToolingMixin:
             self.journal.append(node)
             return node
 
+    # JP: recorded nodeを更新する。
+    # EN: Update recorded node.
     def _update_recorded_node(
         self,
         node_id: int | None,
@@ -407,6 +419,8 @@ class AgentManagerToolingMixin:
             if metrics is not None:
                 node.metrics = metrics
 
+    # JP: stageを実行する。
+    # EN: Run stage.
     def _run_stage(
         self,
         *,
@@ -450,6 +464,8 @@ class AgentManagerToolingMixin:
         )
         return node, output
 
+    # JP: tool plan finalizeを処理する。
+    # EN: Process tool plan finalize.
     def _tool_plan_finalize(self, *, context: ToolContext) -> dict[str, Any]:
         seed_queries = [
             " ".join(str(item).split()).strip()
@@ -468,6 +484,8 @@ class AgentManagerToolingMixin:
             "seed_queries": seed_queries,
         }
 
+    # JP: tool retrieveを処理する。
+    # EN: Process tool retrieve.
     def _tool_retrieve(self, *, context: ToolContext, branch: SearchNodePlan) -> dict[str, Any]:
         merged_by_url: dict[str, dict[str, Any]] = {}
         per_query: list[dict[str, Any]] = []
@@ -549,6 +567,8 @@ class AgentManagerToolingMixin:
             "per_query": per_query,
         }
 
+    # JP: tool enrichを処理する。
+    # EN: Process tool enrich.
     def _tool_enrich(
         self,
         *,
@@ -589,6 +609,8 @@ class AgentManagerToolingMixin:
             },
         }
 
+    # JP: tool normalizeを処理する。
+    # EN: Process tool normalize.
     def _tool_normalize(
         self,
         *,
@@ -614,6 +636,8 @@ class AgentManagerToolingMixin:
             else None,
         )
 
+    # JP: tool rankを処理する。
+    # EN: Process tool rank.
     def _tool_rank(
         self,
         *,
@@ -628,6 +652,8 @@ class AgentManagerToolingMixin:
             adapter=self.research_adapter,
         )
 
+    # JP: tool integrity reviewを処理する。
+    # EN: Process tool integrity review.
     def _tool_integrity_review(
         self,
         *,

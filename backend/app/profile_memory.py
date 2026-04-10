@@ -10,6 +10,8 @@ MAX_SEARCH_HISTORY = 12
 MAX_REACTION_HISTORY = 30
 
 
+# JP: learned preferencesを結合する。
+# EN: Merge learned preferences.
 def merge_learned_preferences(
     user_memory: dict[str, Any],
     learned_preferences: dict[str, Any],
@@ -21,6 +23,8 @@ def merge_learned_preferences(
     return merged
 
 
+# JP: memory labelsを要約する。
+# EN: Summarize memory labels.
 def summarize_memory_labels(user_memory: dict[str, Any]) -> list[str]:
     labels: list[str] = []
 
@@ -53,6 +57,8 @@ def summarize_memory_labels(user_memory: dict[str, Any]) -> list[str]:
     return labels
 
 
+# JP: profile resume summaryを構築する。
+# EN: Build profile resume summary.
 def build_profile_resume_summary(
     user_memory: dict[str, Any],
     profile_memory: dict[str, Any],
@@ -70,6 +76,8 @@ def build_profile_resume_summary(
     return summary
 
 
+# JP: profile memory with searchを更新する。
+# EN: Update profile memory with search.
 def update_profile_memory_with_search(
     profile_memory: dict[str, Any],
     *,
@@ -105,6 +113,8 @@ def update_profile_memory_with_search(
     return updated
 
 
+# JP: profile memory with reactionを更新する。
+# EN: Update profile memory with reaction.
 def update_profile_memory_with_reaction(
     profile_memory: dict[str, Any],
     *,
@@ -142,6 +152,8 @@ def update_profile_memory_with_reaction(
     return updated
 
 
+# JP: infer strategy memoryを処理する。
+# EN: Process infer strategy memory.
 def infer_strategy_memory(
     search_history: list[dict[str, Any]],
     reaction_history: list[dict[str, Any]],
@@ -217,6 +229,8 @@ def infer_strategy_memory(
     }
 
 
+# JP: infer preferences with LLMを処理する。
+# EN: Process infer preferences with LLM.
 def _infer_preferences_with_llm(
     *,
     adapter: LLMAdapter,
@@ -287,6 +301,8 @@ def _infer_preferences_with_llm(
         return {}
 
 
+# JP: infer learned preferencesを処理する。
+# EN: Process infer learned preferences.
 def infer_learned_preferences(
     search_history: list[dict[str, Any]],
     reaction_history: list[dict[str, Any]],

@@ -5,6 +5,8 @@ from typing import Any
 from app.llm.base import LLMAdapter
 
 
+# JP: user focus pointsを収集する。
+# EN: Collect user focus points.
 def _collect_user_focus_points(user_memory: dict[str, Any]) -> list[str]:
     focus_points: list[str] = []
 
@@ -23,6 +25,8 @@ def _collect_user_focus_points(user_memory: dict[str, Any]) -> list[str]:
     return focus_points
 
 
+# JP: LLM confirmation itemsを処理する。
+# EN: Process LLM confirmation items.
 def _llm_confirmation_items(
     prop: dict[str, Any],
     user_memory: dict[str, Any],
@@ -73,6 +77,8 @@ def _llm_confirmation_items(
     return [str(item).strip() for item in result.get("items", []) if str(item).strip()]
 
 
+# JP: confirmation itemsを収集する。
+# EN: Collect confirmation items.
 def _collect_confirmation_items(
     prop: dict[str, Any],
     user_memory: dict[str, Any],
@@ -123,6 +129,8 @@ def _collect_confirmation_items(
     return deduped
 
 
+# JP: fallback draftを構築する。
+# EN: Build fallback draft.
 def _build_fallback_draft(
     prop: dict[str, Any],
     user_memory: dict[str, Any],
@@ -165,6 +173,8 @@ def _build_fallback_draft(
     )
 
 
+# JP: LLM draftを構築する。
+# EN: Build LLM draft.
 def _build_llm_draft(
     *,
     adapter: LLMAdapter,
@@ -200,6 +210,8 @@ def _build_llm_draft(
     return adapter.generate_text(system=system, user=user, temperature=0.3).strip()
 
 
+# JP: communicationを実行する。
+# EN: Run communication.
 def run_communication(
     *,
     ranked_properties: list[dict[str, Any]],

@@ -18,12 +18,16 @@ class LLMConfigManagerMixin:
     db: Database
     _model_cache: dict[str, list[str]]
 
+    # JP: models for providerを一覧化する。
+    # EN: List models for provider.
     def _list_models_for_provider(self, provider: ProviderName) -> list[str]:
         if provider not in self._model_cache:
             adapter = create_adapter(self.settings, provider)
             self._model_cache[provider] = adapter.list_models()
         return self._model_cache[provider]
 
+    # JP: model provider catalogを構築する。
+    # EN: Build model provider catalog.
     def _build_model_provider_catalog(
         self,
     ) -> tuple[dict[str, ProviderName], list[dict[str, Any]]]:
@@ -61,6 +65,8 @@ class LLMConfigManagerMixin:
             )
         return provider_by_model, model_options
 
+    # JP: provider for modelを解決する。
+    # EN: Resolve provider for model.
     def _resolve_provider_for_model(self, model: str) -> ProviderName:
         catalog, _ = self._build_model_provider_catalog()
         model_text = str(model).strip()
@@ -69,12 +75,18 @@ class LLMConfigManagerMixin:
             return provider
         raise RuntimeError(f"unknown model: {model_text}")
 
+    # JP: LLM configを正規化する。
+    # EN: Normalize LLM config.
     def _normalize_llm_config(self, raw_config: Any) -> dict[str, Any]:
         return normalize_llm_config(self.settings, raw_config)
 
+    # JP: default LLM configを構築する。
+    # EN: Build default LLM config.
     def _build_default_llm_config(self) -> dict[str, Any]:
         return build_default_llm_config(self.settings)
 
+    # JP: session LLM configを保証する。
+    # EN: Ensure session LLM config.
     def _ensure_session_llm_config(
         self,
         session_id: str,
@@ -91,10 +103,14 @@ class LLMConfigManagerMixin:
             self.db.update_memories(session_id, user_memory, task_memory)
         return user_memory, task_memory, normalized
 
+    # JP: active job for sessionを処理する。
+    # EN: Process active job for session.
     def _active_job_for_session(self, task_memory: dict[str, Any]) -> dict[str, Any] | None:
         active_job_id = str(task_memory.get("active_research_job_id") or "").strip()
         return self.db.get_research_job(active_job_id) if active_job_id else None
 
+    # JP: session LLM configを取得する。
+    # EN: Get session LLM config.
     def get_session_llm_config(self, session_id: str) -> dict[str, Any]:
         if not self.db.session_exists(session_id):
             raise RuntimeError("session not found")
@@ -110,6 +126,8 @@ class LLMConfigManagerMixin:
             "active_job_id": active_job["id"] if active_job and not editable else None,
         }
 
+    # JP: LLM configを検証する。
+    # EN: Validate LLM config.
     def _validate_llm_config(self, llm_config: dict[str, Any]) -> None:
         catalog, _ = self._build_model_provider_catalog()
         for route_definition in get_llm_route_definitions():
@@ -134,6 +152,8 @@ class LLMConfigManagerMixin:
             if models and model not in models:
                 raise RuntimeError(f"model not available for {provider}: {model}")
 
+    # JP: session LLM configを更新する。
+    # EN: Update session LLM config.
     def update_session_llm_config(
         self, session_id: str, config_payload: dict[str, Any]
     ) -> dict[str, Any]:
@@ -151,6 +171,8 @@ class LLMConfigManagerMixin:
         self.db.update_memories(session_id, user_memory, task_memory)
         return self.get_session_llm_config(session_id)
 
+    # JP: LLM capabilitiesを取得する。
+    # EN: Get LLM capabilities.
     def get_llm_capabilities(self) -> dict[str, Any]:
         providers: dict[str, Any] = {}
         _, model_options = self._build_model_provider_catalog()

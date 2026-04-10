@@ -46,6 +46,8 @@ Requirements:
 """
 
 
+# JP: compact textを処理する。
+# EN: Process compact text.
 def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= max_chars:
@@ -53,6 +55,8 @@ def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+# JP: strip htmlを処理する。
+# EN: Process strip html.
 def _strip_html(value: str) -> str:
     text = re.sub(r"<script[\s\S]*?</script>", " ", value or "", flags=re.IGNORECASE)
     text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
@@ -60,6 +64,8 @@ def _strip_html(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+# JP: unique stringsを処理する。
+# EN: Process unique strings.
 def _unique_strings(values: list[Any], *, limit: int) -> list[str]:
     deduped: list[str] = []
     for value in values:
@@ -71,6 +77,8 @@ def _unique_strings(values: list[Any], *, limit: int) -> list[str]:
     return deduped
 
 
+# JP: property keyを処理する。
+# EN: Process property key.
 def _property_key(candidate: dict[str, Any]) -> str:
     return (
         str(candidate.get("property_id_norm") or "").strip()
@@ -79,6 +87,8 @@ def _property_key(candidate: dict[str, Any]) -> str:
     )
 
 
+# JP: candidate completenessを処理する。
+# EN: Process candidate completeness.
 def _candidate_completeness(candidate: dict[str, Any]) -> int:
     checks = [
         int(candidate.get("rent") or 0) > 0,
@@ -92,6 +102,8 @@ def _candidate_completeness(candidate: dict[str, Any]) -> int:
     return sum(1 for passed in checks if passed)
 
 
+# JP: candidate sort keyを処理する。
+# EN: Process candidate sort key.
 def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[Any, ...]:
     return (
         float(candidate.get("score") or 0.0),
@@ -101,6 +113,8 @@ def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+# JP: candidate snapshotを構築する。
+# EN: Build candidate snapshot.
 def _build_candidate_snapshot(
     *,
     prop: dict[str, Any],
@@ -158,6 +172,8 @@ def _build_candidate_snapshot(
     }
 
 
+# JP: node snapshotを構築する。
+# EN: Build node snapshot.
 def _build_node_snapshot(branch_node: dict[str, Any]) -> dict[str, Any]:
     raw_results = list(branch_node.get("raw_results", []) or [])
     detail_html_map = dict(branch_node.get("detail_html_map", {}) or {})
@@ -250,6 +266,8 @@ def _build_node_snapshot(branch_node: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# JP: fallback result summaryを処理する。
+# EN: Process fallback result summary.
 def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, Any]:
     merged: dict[str, dict[str, Any]] = {}
     rejections: list[dict[str, Any]] = []
@@ -438,6 +456,8 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+# JP: result summary schemaを処理する。
+# EN: Process result summary schema.
 def _result_summary_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -527,6 +547,8 @@ def _result_summary_schema() -> dict[str, Any]:
     }
 
 
+# JP: coerce result summaryを処理する。
+# EN: Process coerce result summary.
 def _coerce_result_summary(
     result: dict[str, Any],
     *,
@@ -550,6 +572,8 @@ def _coerce_result_summary(
     return merged
 
 
+# JP: result summarizerを実行する。
+# EN: Run result summarizer.
 def run_result_summarizer(
     *,
     branch_nodes: list[dict[str, Any]],

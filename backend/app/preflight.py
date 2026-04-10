@@ -6,6 +6,8 @@ from app.models import PreflightProviderReport, PreflightReport
 from app.services.brave_search import BraveSearchClient
 
 
+# JP: provider model validを処理する。
+# EN: Process provider model valid.
 def _provider_model_valid(settings: Settings, provider: str, models: list[str]) -> tuple[bool, str]:
     if provider == "openai":
         wanted = settings.openai_model
@@ -22,6 +24,8 @@ def _provider_model_valid(settings: Settings, provider: str, models: list[str]) 
     return primary in models, f"wanted={primary}; secondary={secondary}"
 
 
+# JP: preflightを実行する。
+# EN: Run preflight.
 def run_preflight(settings: Settings) -> tuple[PreflightReport, bool]:
     providers: dict[str, PreflightProviderReport] = {}
 

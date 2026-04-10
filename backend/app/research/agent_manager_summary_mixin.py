@@ -11,6 +11,8 @@ from app.stages.result_summarizer import (
 
 
 class AgentManagerSummaryMixin:
+    # JP: condition summaryを構築する。
+    # EN: Build condition summary.
     def _build_condition_summary(self, user_memory: dict[str, Any]) -> str:
         parts: list[str] = []
         area = str(user_memory.get("target_area") or "").strip()
@@ -27,6 +29,8 @@ class AgentManagerSummaryMixin:
             parts.append(layout)
         return "・".join(parts)
 
+    # JP: fallback research summaryを構築する。
+    # EN: Build fallback research summary.
     def _build_fallback_research_summary(
         self,
         *,
@@ -90,6 +94,8 @@ class AgentManagerSummaryMixin:
             action = f"現時点では有力ですが、{caution}"
         return f"{lead}最上位候補は{top_detail}で、{top_reason}{action}"
 
+    # JP: confirmation itemsを構築する。
+    # EN: Build confirmation items.
     def _build_confirmation_items(
         self,
         *,
@@ -133,6 +139,8 @@ class AgentManagerSummaryMixin:
                 items.append(text)
         return items[:5]
 
+    # JP: LLM research summaryを構築する。
+    # EN: Build LLM research summary.
     def _build_llm_research_summary(
         self,
         *,

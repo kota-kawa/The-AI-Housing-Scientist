@@ -19,12 +19,16 @@ class _TokenBucket:
     updated_at: float = field(init=False)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
+    # JP: 初期化直後の補正処理を行う。
+    # EN: Run post-initialization adjustments.
     def __post_init__(self) -> None:
         self.rate_per_second = max(0.1, float(self.rate_per_second))
         self.capacity = max(1, int(self.capacity))
         self.tokens = float(self.capacity)
         self.updated_at = time.monotonic()
 
+    # JP: acquireを処理する。
+    # EN: Process acquire.
     def acquire(self) -> None:
         while True:
             with self.lock:
@@ -47,6 +51,8 @@ _BRAVE_BUCKETS: dict[tuple[str, float, int], _TokenBucket] = {}
 _BRAVE_BUCKETS_LOCK = threading.Lock()
 
 
+# JP: brave token bucketを取得する。
+# EN: Get brave token bucket.
 def _get_brave_token_bucket(
     *,
     api_key: str,
@@ -65,6 +71,8 @@ def _get_brave_token_bucket(
         return bucket
 
 
+# JP: rewrite query for braveを処理する。
+# EN: Process rewrite query for brave.
 def _rewrite_query_for_brave(adapter: LLMAdapter, query: str) -> str:
     try:
         result = adapter.generate_text(
@@ -82,6 +90,8 @@ def _rewrite_query_for_brave(adapter: LLMAdapter, query: str) -> str:
         return query
 
 
+# JP: result snippetsを要約する。
+# EN: Summarize result snippets.
 def _summarize_result_snippets(
     adapter: LLMAdapter, results: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -155,6 +165,8 @@ def _summarize_result_snippets(
 
 
 class BraveSearchClient:
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(
         self,
         api_key: str,
@@ -169,6 +181,8 @@ class BraveSearchClient:
         self.burst_size = max(1, int(burst_size))
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
 
+    # JP: 必要な処理を検索する。
+    # EN: Search the required data.
     def search(
         self,
         query: str,
@@ -222,6 +236,8 @@ class BraveSearchClient:
 
 
 class BraveImageSearchClient:
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(
         self,
         api_key: str,
@@ -236,6 +252,8 @@ class BraveImageSearchClient:
         self.burst_size = max(1, int(burst_size))
         self.base_url = "https://api.search.brave.com/res/v1/images/search"
 
+    # JP: 必要な処理を検索する。
+    # EN: Search the required data.
     def search(
         self,
         query: str,

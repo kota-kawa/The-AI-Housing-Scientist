@@ -46,6 +46,8 @@ IMAGE_POSITIVE_TOKENS = (
 )
 
 
+# JP: compact textを処理する。
+# EN: Process compact text.
 def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= max_chars:
@@ -53,6 +55,8 @@ def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+# JP: strip htmlを処理する。
+# EN: Process strip html.
 def _strip_html(value: str) -> str:
     text = re.sub(r"<script[\s\S]*?</script>", " ", value or "", flags=re.IGNORECASE)
     text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
@@ -60,6 +64,8 @@ def _strip_html(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+# JP: tag attributesを解析する。
+# EN: Parse tag attributes.
 def _parse_tag_attributes(tag: str) -> dict[str, str]:
     attributes: dict[str, str] = {}
     for key, value in re.findall(r'([a-zA-Z0-9:_-]+)\s*=\s*["\']([^"\']+)["\']', tag):
@@ -67,6 +73,8 @@ def _parse_tag_attributes(tag: str) -> dict[str, str]:
     return attributes
 
 
+# JP: candidate URLを正規化する。
+# EN: Normalize candidate URL.
 def _normalize_candidate_url(raw_url: str, page_url: str) -> str:
     candidate = str(raw_url or "").strip()
     if not candidate:
@@ -84,11 +92,15 @@ def _normalize_candidate_url(raw_url: str, page_url: str) -> str:
     return candidate
 
 
+# JP: contains blacklist tokenを処理する。
+# EN: Process contains blacklist token.
 def _contains_blacklist_token(text: str) -> bool:
     lowered = text.lower()
     return any(token in lowered for token in IMAGE_BLACKLIST_TOKENS)
 
 
+# JP: JSON ld image candidatesを抽出する。
+# EN: Extract JSON ld image candidates.
 def _extract_json_ld_image_candidates(detail_html: str, page_url: str) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for raw_payload in re.findall(
@@ -131,6 +143,8 @@ def _extract_json_ld_image_candidates(detail_html: str, page_url: str) -> list[d
     return candidates
 
 
+# JP: html image candidatesを抽出する。
+# EN: Extract html image candidates.
 def _extract_html_image_candidates(detail_html: str, page_url: str) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
 
@@ -217,6 +231,8 @@ def _extract_html_image_candidates(detail_html: str, page_url: str) -> list[dict
     return candidates
 
 
+# JP: dedupe candidatesを処理する。
+# EN: Process dedupe candidates.
 def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
@@ -239,6 +255,8 @@ def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
     return deduped
 
 
+# JP: heuristic score candidateを処理する。
+# EN: Process heuristic score candidate.
 def _heuristic_score_candidate(
     *,
     candidate: dict[str, Any],
@@ -308,6 +326,8 @@ def _heuristic_score_candidate(
 
 
 class PropertyImageResolver:
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(
         self,
         *,
@@ -323,6 +343,8 @@ class PropertyImageResolver:
         self._resolution_cache: dict[str, str] = {}
         self._image_query_cache: dict[str, list[dict[str, Any]]] = {}
 
+    # JP: resolution cache keyを構築する。
+    # EN: Build resolution cache key.
     def _build_resolution_cache_key(
         self,
         *,
@@ -341,6 +363,8 @@ class PropertyImageResolver:
             sort_keys=True,
         )
 
+    # JP: image queryを構築する。
+    # EN: Build image query.
     def _build_image_query(
         self,
         *,
@@ -405,6 +429,8 @@ class PropertyImageResolver:
         result = " ".join(result.split())
         return result[:160] if result else fallback_query
 
+    # JP: brave imagesを検索する。
+    # EN: Search brave images.
     def _search_brave_images(self, query: str) -> list[dict[str, Any]]:
         if not query or self.image_search_client is None:
             return []
@@ -436,6 +462,8 @@ class PropertyImageResolver:
         self._image_query_cache[query] = deduped
         return deduped
 
+    # JP: with LLMを選択する。
+    # EN: Select with LLM.
     def _select_with_llm(
         self,
         *,
@@ -506,6 +534,8 @@ class PropertyImageResolver:
             return candidates[selected_index]
         return None
 
+    # JP: candidateを選択する。
+    # EN: Select candidate.
     def _select_candidate(
         self,
         *,
@@ -542,6 +572,8 @@ class PropertyImageResolver:
 
         return shortlisted[0] if shortlisted else None
 
+    # JP: 必要な処理を解決する。
+    # EN: Resolve the required data.
     def resolve(
         self,
         *,

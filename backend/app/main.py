@@ -33,6 +33,8 @@ from app.stages.prompt_examples import validate_required_prompt_examples
 logger = logging.getLogger(__name__)
 
 
+# JP: research workerを処理する。
+# EN: Process research worker.
 def _research_worker(stop_event: threading.Event, orchestrator: HousingOrchestrator) -> None:
     while not stop_event.is_set():
         try:
@@ -44,6 +46,8 @@ def _research_worker(stop_event: threading.Event, orchestrator: HousingOrchestra
             stop_event.wait(1.0)
 
 
+# JP: lifespanを処理する。
+# EN: Process lifespan.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = load_settings()
@@ -88,21 +92,29 @@ app.add_middleware(
 )
 
 
+# JP: healthを処理する。
+# EN: Process health.
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# JP: preflightを取得する。
+# EN: Get preflight.
 @app.get("/api/system/preflight", response_model=PreflightReport)
 def get_preflight() -> PreflightReport:
     return app.state.preflight_report
 
 
+# JP: LLM capabilitiesを取得する。
+# EN: Get LLM capabilities.
 @app.get("/api/system/llm-capabilities", response_model=LLMCapabilitiesResponse)
 def get_llm_capabilities() -> LLMCapabilitiesResponse:
     return LLMCapabilitiesResponse(**app.state.orchestrator.get_llm_capabilities())
 
 
+# JP: sessionを作成する。
+# EN: Create session.
 @app.post("/api/chat/sessions", response_model=CreateSessionResponse)
 def create_session(body: CreateSessionRequest | None = None) -> CreateSessionResponse:
     profile_id, _ = app.state.db.get_or_create_profile(body.profile_id if body else None)
@@ -120,6 +132,8 @@ def create_session(body: CreateSessionRequest | None = None) -> CreateSessionRes
     )
 
 
+# JP: session stateを取得する。
+# EN: Get session state.
 @app.get("/api/chat/sessions/{session_id}", response_model=SessionStateResponse)
 def get_session_state(session_id: str) -> SessionStateResponse:
     session = app.state.db.get_session(session_id)
@@ -140,6 +154,8 @@ def get_session_state(session_id: str) -> SessionStateResponse:
     )
 
 
+# JP: session LLM configを取得する。
+# EN: Get session LLM config.
 @app.get("/api/chat/sessions/{session_id}/llm-config", response_model=SessionLLMConfigResponse)
 def get_session_llm_config(session_id: str) -> SessionLLMConfigResponse:
     if not app.state.db.session_exists(session_id):
@@ -147,6 +163,8 @@ def get_session_llm_config(session_id: str) -> SessionLLMConfigResponse:
     return SessionLLMConfigResponse(**app.state.orchestrator.get_session_llm_config(session_id))
 
 
+# JP: session LLM configを更新する。
+# EN: Update session LLM config.
 @app.put("/api/chat/sessions/{session_id}/llm-config", response_model=SessionLLMConfigResponse)
 def update_session_llm_config(session_id: str, body: LLMConfigPayload) -> SessionLLMConfigResponse:
     if not app.state.db.session_exists(session_id):
@@ -161,6 +179,8 @@ def update_session_llm_config(session_id: str, body: LLMConfigPayload) -> Sessio
     return SessionLLMConfigResponse(**payload)
 
 
+# JP: research stateを取得する。
+# EN: Get research state.
 @app.get("/api/chat/sessions/{session_id}/research", response_model=ResearchStateResponse)
 def get_research_state(session_id: str) -> ResearchStateResponse:
     if not app.state.db.session_exists(session_id):
@@ -168,6 +188,8 @@ def get_research_state(session_id: str) -> ResearchStateResponse:
     return app.state.orchestrator.get_research_state(session_id)
 
 
+# JP: post messageを処理する。
+# EN: Process post message.
 @app.post("/api/chat/sessions/{session_id}/messages", response_model=ChatMessageResponse)
 def post_message(session_id: str, body: ChatMessageRequest) -> ChatMessageResponse:
     if not app.state.db.session_exists(session_id):
@@ -190,6 +212,8 @@ def post_message(session_id: str, body: ChatMessageRequest) -> ChatMessageRespon
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+# JP: actionを実行する。
+# EN: Execute action.
 @app.post("/api/chat/sessions/{session_id}/actions", response_model=ChatMessageResponse)
 def execute_action(session_id: str, body: ActionRequest) -> ChatMessageResponse:
     if not app.state.db.session_exists(session_id):
@@ -206,6 +230,8 @@ def execute_action(session_id: str, body: ActionRequest) -> ChatMessageResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+# JP: confirm actionを処理する。
+# EN: Process confirm action.
 @app.post("/api/chat/sessions/{session_id}/actions/confirm", response_model=ChatMessageResponse)
 def confirm_action(session_id: str, body: ConfirmActionRequest) -> ChatMessageResponse:
     if not app.state.db.session_exists(session_id):
@@ -222,6 +248,8 @@ def confirm_action(session_id: str, body: ConfirmActionRequest) -> ChatMessageRe
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+# JP: audit logを取得する。
+# EN: Get audit log.
 @app.get("/api/audit/sessions/{session_id}", response_model=list[AuditEventResponse])
 def get_audit_log(session_id: str) -> list[AuditEventResponse]:
     if not app.state.db.session_exists(session_id):
@@ -241,6 +269,8 @@ def get_audit_log(session_id: str) -> list[AuditEventResponse]:
     ]
 
 
+# JP: LLM call eventsを取得する。
+# EN: Get LLM call events.
 @app.get("/api/audit/sessions/{session_id}/llm-calls", response_model=list[LLMCallEventResponse])
 def get_llm_call_events(session_id: str) -> list[LLMCallEventResponse]:
     if not app.state.db.session_exists(session_id):

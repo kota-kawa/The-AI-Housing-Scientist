@@ -23,9 +23,13 @@ from .agent_manager_types import ResearchExecutionState, SearchNodeArtifacts, Se
 
 
 class AgentManagerTreeMixin:
+    # JP: active user memoryを処理する。
+    # EN: Process active user memory.
     def _active_user_memory(self) -> dict[str, Any]:
         return self.approved_plan.get("user_memory_snapshot", self.user_memory)
 
+    # JP: strategy memoryを処理する。
+    # EN: Process strategy memory.
     def _strategy_memory(self) -> dict[str, Any]:
         learned = self._active_user_memory().get("learned_preferences", {}) or {}
         strategy = learned.get("strategy_memory", {}) or {}
@@ -33,9 +37,13 @@ class AgentManagerTreeMixin:
             return strategy
         return self.task_memory.get("strategy_memory_snapshot", {}) or {}
 
+    # JP: compose queryを処理する。
+    # EN: Process compose query.
     def _compose_query(self, *parts: Any) -> str:
         return " ".join(str(part).strip() for part in parts if str(part).strip()).strip()
 
+    # JP: dedupe queriesを処理する。
+    # EN: Process dedupe queries.
     def _dedupe_queries(self, values: list[str], *, limit: int = 5) -> list[str]:
         deduped: list[str] = []
         for value in values:
@@ -46,6 +54,8 @@ class AgentManagerTreeMixin:
                 break
         return deduped
 
+    # JP: hash queriesを処理する。
+    # EN: Process hash queries.
     def _hash_queries(self, queries: list[str], ranking_profile: dict[str, Any]) -> str:
         payload = {
             "queries": [" ".join(str(item).split()) for item in queries],
@@ -55,10 +65,14 @@ class AgentManagerTreeMixin:
             json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()[:12]
 
+    # JP: next node keyを処理する。
+    # EN: Process next node key.
     def _next_node_key(self, state: ResearchExecutionState, operator: str, depth: int) -> str:
         state.node_sequence += 1
         return f"{operator}-d{depth}-n{state.node_sequence}"
 
+    # JP: ranking profileを結合する。
+    # EN: Merge ranking profile.
     def _merge_ranking_profile(
         self,
         base_profile: dict[str, Any],
@@ -69,6 +83,8 @@ class AgentManagerTreeMixin:
             merged[key] = float(value)
         return merged
 
+    # JP: LLM query suggestionsを処理する。
+    # EN: Process LLM query suggestions.
     def _llm_query_suggestions(
         self,
         *,
@@ -127,6 +143,8 @@ class AgentManagerTreeMixin:
             limit=2,
         )
 
+    # JP: queries for operatorを処理する。
+    # EN: Process queries for operator.
     def _queries_for_operator(
         self,
         *,
@@ -220,6 +238,8 @@ class AgentManagerTreeMixin:
         )
         return self._dedupe_queries(queries)
 
+    # JP: profile for operatorを処理する。
+    # EN: Process profile for operator.
     def _profile_for_operator(
         self,
         *,
@@ -278,6 +298,8 @@ class AgentManagerTreeMixin:
             )
         return dict(base_profile)
 
+    # JP: operator labelを処理する。
+    # EN: Process operator label.
     def _operator_label(self, operator: str) -> str:
         labels = {
             "tighten_match": "条件厳格化",
@@ -290,6 +312,8 @@ class AgentManagerTreeMixin:
         }
         return labels.get(operator, operator)
 
+    # JP: operator descriptionを処理する。
+    # EN: Process operator description.
     def _operator_description(self, operator: str) -> str:
         descriptions = {
             "tighten_match": "must 条件と予算一致度を強める探索",
@@ -302,6 +326,8 @@ class AgentManagerTreeMixin:
         }
         return descriptions.get(operator, "探索ノード")
 
+    # JP: operator intentを処理する。
+    # EN: Process operator intent.
     def _operator_intent(self, operator: str) -> ResearchIntent:
         if operator in {"relax_for_coverage", "source_diversify", "explore_adjacent"}:
             return "pivot"
@@ -309,6 +335,8 @@ class AgentManagerTreeMixin:
             return "refine"
         return "refine"
 
+    # JP: recovery source summaryかどうかを判定する。
+    # EN: Check whether recovery source summary.
     def _is_recovery_source_summary(self, summary: dict[str, Any] | None) -> bool:
         if not summary:
             return False
@@ -316,6 +344,8 @@ class AgentManagerTreeMixin:
             return True
         return bool(summary.get("prune_reasons"))
 
+    # JP: intent for child planを処理する。
+    # EN: Process intent for child plan.
     def _intent_for_child_plan(
         self,
         *,
@@ -328,11 +358,15 @@ class AgentManagerTreeMixin:
             return "recovery"
         return self._operator_intent(operator)
 
+    # JP: debug depth for child planを処理する。
+    # EN: Process debug depth for child plan.
     def _debug_depth_for_child_plan(self, parent_summary: dict[str, Any] | None) -> int:
         if not self._is_recovery_source_summary(parent_summary):
             return 0
         return max(0, int((parent_summary or {}).get("debug_depth") or 0)) + 1
 
+    # JP: available tree operatorsを処理する。
+    # EN: Process available tree operators.
     def _available_tree_operators(self) -> list[str]:
         return [
             "tighten_match",
@@ -344,6 +378,8 @@ class AgentManagerTreeMixin:
             "exploit_best",
         ]
 
+    # JP: operators for issue hintsを処理する。
+    # EN: Process operators for issue hints.
     def _operators_for_issue_hints(self, issues: list[str]) -> list[str]:
         joined = " / ".join(str(item).strip() for item in issues if str(item).strip())
         operators: list[str] = []
@@ -363,6 +399,8 @@ class AgentManagerTreeMixin:
                 deduped.append(operator)
         return deduped
 
+    # JP: initial operatorsを処理する。
+    # EN: Process initial operators.
     def _initial_operators(self) -> list[str]:
         catalog = self._available_tree_operators()
         catalog_set = set(catalog)
@@ -406,6 +444,8 @@ class AgentManagerTreeMixin:
             return deduped[:count]
         return catalog[:count]
 
+    # JP: initial operator countを処理する。
+    # EN: Process initial operator count.
     def _initial_operator_count(self) -> int:
         user_memory = self._active_user_memory()
         retry = self._retry_context()
@@ -416,6 +456,8 @@ class AgentManagerTreeMixin:
         score += 1 if not user_memory.get("budget_max") else 0
         return max(2, min(5, 2 + score // 2))
 
+    # JP: candidate node input payloadを処理する。
+    # EN: Process candidate node input payload.
     def _candidate_node_input_payload(self, plan: SearchNodePlan) -> dict[str, Any]:
         return {
             "node_key": plan.node_key,
@@ -428,6 +470,8 @@ class AgentManagerTreeMixin:
             "debug_depth": plan.debug_depth,
         }
 
+    # JP: frontier scoreを推定する。
+    # EN: Estimate frontier score.
     def _estimate_frontier_score(
         self,
         *,
@@ -465,6 +509,8 @@ class AgentManagerTreeMixin:
             score -= (depth - 2) * 5.0
         return round(score, 2)
 
+    # JP: make node planを処理する。
+    # EN: Process make node plan.
     def _make_node_plan(
         self,
         state: ResearchExecutionState,
@@ -505,6 +551,8 @@ class AgentManagerTreeMixin:
             debug_depth=self._debug_depth_for_child_plan(parent_summary),
         )
 
+    # JP: initial node plansを処理する。
+    # EN: Process initial node plans.
     def _initial_node_plans(self, state: ResearchExecutionState) -> list[SearchNodePlan]:
         user_memory = self._active_user_memory()
         seed_queries = self.seed_queries_for_search(state)
@@ -529,20 +577,30 @@ class AgentManagerTreeMixin:
             for operator in self._initial_operators()
         ]
 
+    # JP: seed queries for searchを処理する。
+    # EN: Process seed queries for search.
     def seed_queries_for_search(self, state: ResearchExecutionState) -> list[str]:
         return state.seed_queries or ([state.query] if state.query else [])
 
+    # JP: contextを再試行する。
+    # EN: Retry context.
     def _retry_context(self) -> dict[str, Any]:
         return self.approved_plan.get("retry_context", {}) or {}
 
+    # JP: executed tree node countを処理する。
+    # EN: Process executed tree node count.
     def _executed_tree_node_count(self, state: ResearchExecutionState) -> int:
         # tree_max_nodes caps executed evaluations; completed plans should not
         # consume the remaining expansion budget just because they stay indexed.
         return len(state.branch_summaries)
 
+    # JP: tree execution budget exhaustedを処理する。
+    # EN: Process tree execution budget exhausted.
     def _tree_execution_budget_exhausted(self, state: ResearchExecutionState) -> bool:
         return self._executed_tree_node_count(state) >= self.tree_max_nodes
 
+    # JP: pruned nodeを記録する。
+    # EN: Record pruned node.
     def _record_pruned_node(
         self,
         state: ResearchExecutionState,
@@ -593,6 +651,8 @@ class AgentManagerTreeMixin:
             },
         )
 
+    # JP: register frontier nodeを処理する。
+    # EN: Process register frontier node.
     def _register_frontier_node(
         self,
         state: ResearchExecutionState,
@@ -665,6 +725,8 @@ class AgentManagerTreeMixin:
         state.node_artifacts[plan.node_key].journal_node_id = queued_node.id
         state.frontier.append(plan.node_key)
 
+    # JP: frontier nodesを選択する。
+    # EN: Select frontier nodes.
     def _select_frontier_nodes(self, state: ResearchExecutionState) -> list[str]:
         batch_limit = min(
             self.tree_batch_size,
@@ -733,6 +795,8 @@ class AgentManagerTreeMixin:
             selected_keys.add(artifact.plan.node_key)
         return selected
 
+    # JP: is descendant ofを計画する。
+    # EN: Plan is descendant of.
     def _plan_is_descendant_of(
         self,
         state: ResearchExecutionState,
@@ -752,6 +816,8 @@ class AgentManagerTreeMixin:
             current_key = plan.parent_key
         return False
 
+    # JP: frontier scoreを計算する。
+    # EN: Compute frontier score.
     def _compute_frontier_score(
         self,
         *,
@@ -788,6 +854,8 @@ class AgentManagerTreeMixin:
             score -= (depth - 2) * 5.0
         return round(score, 2)
 
+    # JP: prune reasons for summaryを処理する。
+    # EN: Process prune reasons for summary.
     def _prune_reasons_for_summary(
         self,
         state: ResearchExecutionState,
@@ -816,6 +884,8 @@ class AgentManagerTreeMixin:
                 reasons.append(f"repeated_issue:{summary.get('top_issue_class')}")
         return reasons
 
+    # JP: failure summaryを構築する。
+    # EN: Build failure summary.
     def _build_failure_summary(
         self,
         *,
@@ -867,6 +937,8 @@ class AgentManagerTreeMixin:
         summary["failure_stage"] = failure_stage
         return summary
 
+    # JP: failure stage hintを処理する。
+    # EN: Process failure stage hint.
     def _failure_stage_hint(self, artifacts: SearchNodeArtifacts) -> str:
         if not artifacts.retrieve:
             return "retrieve"
@@ -880,6 +952,8 @@ class AgentManagerTreeMixin:
             return "rank"
         return "tree_search"
 
+    # JP: candidateを実行する。
+    # EN: Execute candidate.
     def _execute_candidate(
         self,
         state: ResearchExecutionState,
@@ -1069,6 +1143,8 @@ class AgentManagerTreeMixin:
             )
             return failure_summary
 
+    # JP: candidate batch asyncを実行する。
+    # EN: Execute candidate batch async.
     async def _execute_candidate_batch_async(
         self,
         state: ResearchExecutionState,
@@ -1089,6 +1165,8 @@ class AgentManagerTreeMixin:
             ]
             return await asyncio.gather(*tasks)
 
+    # JP: upsert branch summaryを処理する。
+    # EN: Process upsert branch summary.
     def _upsert_branch_summary(
         self,
         state: ResearchExecutionState,
@@ -1127,6 +1205,8 @@ class AgentManagerTreeMixin:
                 evaluation=summary,
             )
 
+    # JP: expand branch batchを処理する。
+    # EN: Process expand branch batch.
     def _expand_branch_batch(
         self,
         state: ResearchExecutionState,
@@ -1150,6 +1230,8 @@ class AgentManagerTreeMixin:
             self._upsert_branch_summary(state, plan=plan, summary=summary)
         return summaries
 
+    # JP: expand candidates from summaryを処理する。
+    # EN: Process expand candidates from summary.
     def _expand_candidates_from_summary(
         self,
         state: ResearchExecutionState,
@@ -1190,6 +1272,8 @@ class AgentManagerTreeMixin:
             )
         return children
 
+    # JP: children budget forを処理する。
+    # EN: Process children budget for.
     def _children_budget_for(self, summary: dict[str, Any]) -> int:
         score = float(summary.get("branch_score") or 0.0)
         readiness = str(summary.get("readiness") or "").strip().lower()
@@ -1199,6 +1283,8 @@ class AgentManagerTreeMixin:
             return 3
         return self.tree_children_per_expansion
 
+    # JP: recovery operators for summaryを処理する。
+    # EN: Process recovery operators for summary.
     def _recovery_operators_for_summary(
         self,
         *,
@@ -1254,6 +1340,8 @@ class AgentManagerTreeMixin:
                 deduped.append(operator)
         return deduped[: self._children_budget_for(summary)]
 
+    # JP: next candidates after summaryを処理する。
+    # EN: Process next candidates after summary.
     def _next_candidates_after_summary(
         self,
         state: ResearchExecutionState,
@@ -1277,6 +1365,8 @@ class AgentManagerTreeMixin:
             operators=recovery_operators,
         )
 
+    # JP: default selected branch summaryを処理する。
+    # EN: Process default selected branch summary.
     def _default_selected_branch_summary(self) -> dict[str, Any]:
         return {
             "branch_id": "none",
@@ -1308,9 +1398,13 @@ class AgentManagerTreeMixin:
             "prune_reasons": [],
         }
 
+    # JP: selected artifactsを処理する。
+    # EN: Process selected artifacts.
     def _selected_artifacts(self, state: ResearchExecutionState) -> SearchNodeArtifacts | None:
         return state.node_artifacts.get(str(state.selected_branch_summary.get("branch_id") or ""))
 
+    # JP: selected pathを構築する。
+    # EN: Build selected path.
     def _build_selected_path(self, state: ResearchExecutionState) -> list[dict[str, Any]]:
         branch_id = str(state.selected_branch_summary.get("branch_id") or "")
         path: list[dict[str, Any]] = []
@@ -1340,6 +1434,8 @@ class AgentManagerTreeMixin:
         path.reverse()
         return path
 
+    # JP: branch path artifactsを処理する。
+    # EN: Process branch path artifacts.
     def _branch_path_artifacts(
         self,
         state: ResearchExecutionState,
@@ -1359,6 +1455,8 @@ class AgentManagerTreeMixin:
         path.reverse()
         return path
 
+    # JP: branch result nodesを処理する。
+    # EN: Process branch result nodes.
     def _branch_result_nodes(
         self,
         state: ResearchExecutionState,
@@ -1401,6 +1499,8 @@ class AgentManagerTreeMixin:
             )
         return branch_nodes
 
+    # JP: attach branch result summariesを処理する。
+    # EN: Process attach branch result summaries.
     def _attach_branch_result_summaries(self, state: ResearchExecutionState) -> None:
         cache: dict[tuple[str, ...], dict[str, Any]] = {}
         for artifacts in state.node_artifacts.values():
@@ -1427,6 +1527,8 @@ class AgentManagerTreeMixin:
                 )
             artifacts.summary["branch_result_summary"] = self._cache_copy(branch_result_summary)
 
+    # JP: search tree summaryを構築する。
+    # EN: Build search tree summary.
     def _build_search_tree_summary(self, state: ResearchExecutionState) -> dict[str, Any]:
         issue_counter: Counter[str] = Counter()
         max_depth = 0
@@ -1458,6 +1560,8 @@ class AgentManagerTreeMixin:
             "issue_distribution": dict(issue_counter.most_common(5)),
         }
 
+    # JP: cache candidate readinessを処理する。
+    # EN: Process cache candidate readiness.
     def _cache_candidate_readiness(
         self,
         *,
@@ -1478,6 +1582,8 @@ class AgentManagerTreeMixin:
         artifacts.readiness = str(result.get("readiness") or "low")
         summary["readiness"] = artifacts.readiness
 
+    # JP: eligible completed artifactsを処理する。
+    # EN: Process eligible completed artifacts.
     def _eligible_completed_artifacts(
         self,
         state: ResearchExecutionState,
@@ -1502,6 +1608,8 @@ class AgentManagerTreeMixin:
         ]
         return eligible or completed
 
+    # JP: best score gapを処理する。
+    # EN: Process best score gap.
     def _best_score_gap(self, state: ResearchExecutionState) -> float:
         candidates = self._eligible_completed_artifacts(state)
         if len(candidates) < 2:
@@ -1515,6 +1623,8 @@ class AgentManagerTreeMixin:
         second_score = float(sorted_candidates[1].summary.get("branch_score") or 0.0)
         return round(best_score - second_score, 2)
 
+    # JP: stop for stable bestかどうかを判定する。
+    # EN: Check whether stop for stable best.
     def _can_stop_for_stable_best(self, state: ResearchExecutionState) -> bool:
         if self._best_node_readiness(state) != "high":
             return False
@@ -1524,6 +1634,8 @@ class AgentManagerTreeMixin:
             return False
         return state.best_score_gap >= self.tree_min_best_score_gap
 
+    # JP: refresh best nodeを処理する。
+    # EN: Process refresh best node.
     def _refresh_best_node(self, state: ResearchExecutionState, *, candidate_key: str) -> None:
         previous_best_key = state.best_node_key
         best_artifacts = state.node_artifacts.get(previous_best_key) if previous_best_key else None
@@ -1569,6 +1681,8 @@ class AgentManagerTreeMixin:
             state.best_node_stability = 1
         state.best_score_gap = self._best_score_gap(state)
 
+    # JP: best node readinessを処理する。
+    # EN: Process best node readiness.
     def _best_node_readiness(self, state: ResearchExecutionState) -> str:
         if not state.best_node_key:
             return "low"
@@ -1577,6 +1691,8 @@ class AgentManagerTreeMixin:
             return "low"
         return artifacts.readiness
 
+    # JP: plan finalizeを処理する。
+    # EN: Handle plan finalize.
     def _handle_plan_finalize(self, state: ResearchExecutionState) -> str | None:
         _, state.plan_result = self._run_stage(
             stage_name="plan_finalize",
@@ -1597,7 +1713,11 @@ class AgentManagerTreeMixin:
         state.retry_context = self._retry_context()
         return None
 
+    # JP: tree searchを処理する。
+    # EN: Handle tree search.
     def _handle_tree_search(self, state: ResearchExecutionState) -> str | None:
+        # JP: runnerを処理する。
+        # EN: Process runner.
         def runner() -> dict[str, Any]:
             retry_context = state.retry_context
             state.root_node = self._record_node(

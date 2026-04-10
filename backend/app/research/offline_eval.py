@@ -16,6 +16,8 @@ REPEATED_ISSUE_MIN_AVG_TOP3_IMPROVEMENT = 6.0
 REPEATED_ISSUE_MIN_NORMALIZED_COUNT_IMPROVEMENT = 2
 
 
+# JP: metric valueを処理する。
+# EN: Process metric value.
 def _metric_value(
     value: Any,
     *,
@@ -25,6 +27,8 @@ def _metric_value(
     return MetricValue.from_raw(value, maximize=maximize, name=name)
 
 
+# JP: summary metricを処理する。
+# EN: Process summary metric.
 def _summary_metric(
     summary: dict[str, Any] | None,
     key: str,
@@ -38,6 +42,8 @@ def _summary_metric(
     )
 
 
+# JP: metric gainを処理する。
+# EN: Process metric gain.
 def _metric_gain(
     item: dict[str, Any],
     parent: dict[str, Any],
@@ -54,6 +60,8 @@ def _metric_gain(
     return item_value - parent_value
 
 
+# JP: structured property ratioを処理する。
+# EN: Process structured property ratio.
 def _structured_property_ratio(normalized_properties: list[dict[str, Any]]) -> float:
     if not normalized_properties:
         return 0.0
@@ -71,6 +79,8 @@ def _structured_property_ratio(normalized_properties: list[dict[str, Any]]) -> f
     return round(complete / len(normalized_properties), 3)
 
 
+# JP: score from rangeを処理する。
+# EN: Process score from range.
 def _score_from_range(value: float, *, min_value: float, max_value: float) -> float:
     if max_value <= min_value:
         return 0.0
@@ -78,6 +88,8 @@ def _score_from_range(value: float, *, min_value: float, max_value: float) -> fl
     return (clamped - min_value) / (max_value - min_value)
 
 
+# JP: classify top issueを処理する。
+# EN: Process classify top issue.
 def _classify_top_issue(issues: list[str]) -> str:
     joined = " / ".join(issues)
     if "検索結果" in joined:
@@ -93,6 +105,8 @@ def _classify_top_issue(issues: list[str]) -> str:
     return "healthy"
 
 
+# JP: expand recommendations from issuesを処理する。
+# EN: Process expand recommendations from issues.
 def _expand_recommendations_from_issues(issues: list[str], top_score: float) -> list[str]:
     recommendations: list[str] = []
     joined = " / ".join(issues)
@@ -115,6 +129,8 @@ def _expand_recommendations_from_issues(issues: list[str], top_score: float) -> 
     return deduped[:2]
 
 
+# JP: evaluate branchを処理する。
+# EN: Process evaluate branch.
 def evaluate_branch(
     *,
     branch_id: str,
@@ -244,6 +260,8 @@ def evaluate_branch(
     }
 
 
+# JP: branch selection sort keyを処理する。
+# EN: Process branch selection sort key.
 def branch_selection_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     return (
         _summary_metric(item, "branch_score"),
@@ -256,6 +274,8 @@ def branch_selection_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+# JP: material improvement over parentかどうかを判定する。
+# EN: Check whether material improvement over parent.
 def has_material_improvement_over_parent(
     item: dict[str, Any],
     parent: dict[str, Any],
@@ -278,6 +298,8 @@ def has_material_improvement_over_parent(
     )
 
 
+# JP: branch selection eligibleかどうかを判定する。
+# EN: Check whether branch selection eligible.
 def is_branch_selection_eligible(
     item: dict[str, Any],
     *,
@@ -294,6 +316,8 @@ def is_branch_selection_eligible(
     return has_material_improvement_over_parent(item, parent_summary)
 
 
+# JP: best branchを選択する。
+# EN: Select best branch.
 def select_best_branch(branch_summaries: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not branch_summaries:
         return None
@@ -322,6 +346,8 @@ def select_best_branch(branch_summaries: list[dict[str, Any]]) -> dict[str, Any]
     return max(candidates, key=branch_selection_sort_key)
 
 
+# JP: branch failuresを要約する。
+# EN: Summarize branch failures.
 def summarize_branch_failures(branch_summaries: list[dict[str, Any]]) -> dict[str, Any]:
     if not branch_summaries:
         return {
@@ -352,6 +378,8 @@ def summarize_branch_failures(branch_summaries: list[dict[str, Any]]) -> dict[st
     }
 
 
+# JP: evaluate final resultを処理する。
+# EN: Process evaluate final result.
 def evaluate_final_result(
     *,
     selected_branch_summary: dict[str, Any] | None,
@@ -396,6 +424,8 @@ def evaluate_final_result(
     }
 
 
+# JP: generate branch selection rationaleを処理する。
+# EN: Process generate branch selection rationale.
 def generate_branch_selection_rationale(
     *,
     selected_branch: dict[str, Any],
@@ -415,6 +445,8 @@ def generate_branch_selection_rationale(
         "additionalProperties": False,
     }
 
+    # JP: branch metricsを処理する。
+    # EN: Process branch metrics.
     def _branch_metrics(branch: dict[str, Any]) -> dict[str, Any]:
         return {
             "branch_id": branch.get("branch_id", ""),
@@ -458,10 +490,14 @@ def generate_branch_selection_rationale(
         return ""
 
 
+# JP: offline eval casesを読み込む。
+# EN: Load offline eval cases.
 def load_offline_eval_cases(path: str | Path) -> list[dict[str, Any]]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+# JP: offline eval caseを実行する。
+# EN: Run offline eval case.
 def run_offline_eval_case(
     case: dict[str, Any],
     *,
@@ -524,6 +560,8 @@ def run_offline_eval_case(
     return result
 
 
+# JP: offline eval suiteを実行する。
+# EN: Run offline eval suite.
 def run_offline_eval_suite(
     cases: list[dict[str, Any]],
     *,

@@ -10,6 +10,8 @@ from .openai_compatible import OpenAICompatibleAdapter
 
 
 class GeminiOpenAIAdapter(OpenAICompatibleAdapter):
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(self, *, api_key: str, model: str, timeout_seconds: int, max_retries: int):
         super().__init__(
             provider_name="gemini",
@@ -20,6 +22,8 @@ class GeminiOpenAIAdapter(OpenAICompatibleAdapter):
             max_retries=max_retries,
         )
 
+    # JP: modelsを一覧化する。
+    # EN: List models.
     def list_models(self) -> list[str]:
         url = "https://generativelanguage.googleapis.com/v1beta/models"
         with httpx.Client(timeout=self.timeout_seconds) as client:
@@ -36,6 +40,8 @@ class GeminiOpenAIAdapter(OpenAICompatibleAdapter):
 
 
 class GroqOpenAIAdapter(OpenAICompatibleAdapter):
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(self, *, api_key: str, model: str, timeout_seconds: int, max_retries: int):
         super().__init__(
             provider_name="groq",
@@ -48,6 +54,8 @@ class GroqOpenAIAdapter(OpenAICompatibleAdapter):
 
 
 class OpenAIAdapter(OpenAICompatibleAdapter):
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(self, *, api_key: str, model: str, timeout_seconds: int, max_retries: int):
         super().__init__(
             provider_name="openai",
@@ -59,6 +67,8 @@ class OpenAIAdapter(OpenAICompatibleAdapter):
         )
 
 
+# JP: adapterを作成する。
+# EN: Create adapter.
 def create_adapter(
     settings: Settings,
     provider: ProviderName,

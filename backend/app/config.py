@@ -45,10 +45,14 @@ class Settings:
     research_tree_min_best_score_gap: int = 5
 
 
+# JP: cleanを処理する。
+# EN: Process clean.
 def _clean(value: str | None) -> str:
     return (value or "").strip().rstrip("\r")
 
 
+# JP: dotenvを読み込む。
+# EN: Load dotenv.
 @lru_cache(maxsize=1)
 def _load_dotenv() -> dict[str, str]:
     candidates = [
@@ -71,6 +75,8 @@ def _load_dotenv() -> dict[str, str]:
     return env_map
 
 
+# JP: envを処理する。
+# EN: Process env.
 def _env(key: str, default: str = "", aliases: tuple[str, ...] = ()) -> str:
     val = _clean(os.getenv(key))
     if val:
@@ -90,6 +96,8 @@ def _env(key: str, default: str = "", aliases: tuple[str, ...] = ()) -> str:
     return default
 
 
+# JP: env boolを処理する。
+# EN: Process env bool.
 def _env_bool(key: str, default: bool = False) -> bool:
     raw = _clean(os.getenv(key))
     if raw == "":
@@ -97,6 +105,8 @@ def _env_bool(key: str, default: bool = False) -> bool:
     return raw.lower() in TRUE_VALUES
 
 
+# JP: env intを処理する。
+# EN: Process env int.
 def _env_int(key: str, default: int) -> int:
     raw = _clean(os.getenv(key))
     if raw == "":
@@ -107,6 +117,8 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+# JP: settingsを読み込む。
+# EN: Load settings.
 def load_settings() -> Settings:
     provider_raw = _env("LLM_DEFAULT_PROVIDER", "openai").lower()
     provider: ProviderName = "openai"
@@ -147,6 +159,8 @@ def load_settings() -> Settings:
     )
 
 
+# JP: provider modelを取得する。
+# EN: Get provider model.
 def get_provider_model(settings: Settings, provider: ProviderName) -> str:
     if provider == "openai":
         return settings.openai_model
@@ -157,6 +171,8 @@ def get_provider_model(settings: Settings, provider: ProviderName) -> str:
     return settings.claude_model
 
 
+# JP: provider API keyを取得する。
+# EN: Get provider API key.
 def get_provider_api_key(settings: Settings, provider: ProviderName) -> str:
     if provider == "openai":
         return settings.openai_api_key

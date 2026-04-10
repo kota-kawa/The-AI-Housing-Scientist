@@ -28,10 +28,14 @@ AREA_LINE_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 
+# JP: query textを正規化する。
+# EN: Normalize query text.
 def _normalize_query_text(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
+# JP: budget queryを整形する。
+# EN: Format budget query.
 def _format_budget_query(budget: int) -> str:
     if budget <= 0:
         return ""
@@ -41,12 +45,16 @@ def _format_budget_query(budget: int) -> str:
     return f"{amount:.1f}".rstrip("0").rstrip(".") + "万円以下"
 
 
+# JP: relaxed budget queryを処理する。
+# EN: Process relaxed budget query.
 def _relaxed_budget_query(budget: int) -> str:
     if budget <= 0:
         return ""
     return _format_budget_query(budget + 10000)
 
 
+# JP: lookup area hintsを処理する。
+# EN: Process lookup area hints.
 def _lookup_area_hints(area: str, hint_map: dict[str, tuple[str, ...]]) -> list[str]:
     normalized = _normalize_query_text(area)
     if not normalized:
@@ -57,11 +65,15 @@ def _lookup_area_hints(area: str, hint_map: dict[str, tuple[str, ...]]) -> list[
     return []
 
 
+# JP: compose queryを処理する。
+# EN: Process compose query.
 def _compose_query(*parts: str) -> str:
     return " ".join(part for part in (_normalize_query_text(item) for item in parts) if part)
 
 
 class OrchestratorResearchMixin:
+    # JP: research queriesを構築する。
+    # EN: Build research queries.
     def _build_research_queries(
         self, user_memory: dict[str, Any], seed_queries: list[str]
     ) -> list[str]:
@@ -188,6 +200,8 @@ class OrchestratorResearchMixin:
                 deduped.append(text)
         return deduped[:MAX_RESEARCH_QUERIES]
 
+    # JP: research source itemsを収集する。
+    # EN: Collect research source items.
     def _collect_research_source_items(
         self,
         *,
@@ -224,6 +238,8 @@ class OrchestratorResearchMixin:
             )
         return items
 
+    # JP: search resultsを収集する。
+    # EN: Collect search results.
     def _collect_search_results(
         self,
         *,
@@ -266,6 +282,8 @@ class OrchestratorResearchMixin:
             "brave_error": brave_error,
         }
 
+    # JP: process search messageを処理する。
+    # EN: Process process search message.
     def _process_search_message(
         self,
         *,
@@ -406,6 +424,8 @@ class OrchestratorResearchMixin:
         self.db.add_message(session_id, "assistant", response.model_dump())
         return response
 
+    # JP: research jobを実行する。
+    # EN: Execute research job.
     def _execute_research_job(self, job_id: str) -> dict[str, Any]:
         job = self.db.get_research_job(job_id)
         if job is None:
@@ -574,6 +594,8 @@ class OrchestratorResearchMixin:
         self.db.add_message(session_id, "assistant", response.model_dump())
         return response.model_dump()
 
+    # JP: process next research jobを処理する。
+    # EN: Process process next research job.
     def process_next_research_job(self) -> bool:
         job = self.db.claim_next_research_job()
         if job is None:
@@ -636,6 +658,8 @@ class OrchestratorResearchMixin:
             self.db.add_message(session_id, "assistant", response.model_dump())
         return True
 
+    # JP: research stateを取得する。
+    # EN: Get research state.
     def get_research_state(self, session_id: str) -> ResearchStateResponse:
         job = self.db.get_latest_research_job(session_id)
         if job is None:
@@ -658,6 +682,8 @@ class OrchestratorResearchMixin:
             response=response,
         )
 
+    # JP: process contract textを処理する。
+    # EN: Process process contract text.
     def _process_contract_text(
         self,
         *,

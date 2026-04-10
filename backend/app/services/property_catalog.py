@@ -44,6 +44,8 @@ CATALOG_LLM_SHORTLIST_MIN = 6
 CATALOG_LLM_SHORTLIST_MAX = 10
 
 
+# JP: profileを解決する。
+# EN: Resolve profile.
 def _resolve_profile(profile: dict[str, Any] | None = None) -> dict[str, float]:
     resolved = dict(DEFAULT_CATALOG_PROFILE)
     for key, value in (profile or {}).items():
@@ -54,6 +56,8 @@ def _resolve_profile(profile: dict[str, Any] | None = None) -> dict[str, float]:
     return resolved
 
 
+# JP: compact textを処理する。
+# EN: Process compact text.
 def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= max_chars:
@@ -61,6 +65,8 @@ def _compact_text(value: Any, *, max_chars: int = 220) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+# JP: property haystackを構築する。
+# EN: Build property haystack.
 def _build_property_haystack(item: dict[str, Any]) -> str:
     return " ".join(
         [
@@ -76,6 +82,8 @@ def _build_property_haystack(item: dict[str, Any]) -> str:
     )
 
 
+# JP: condition listを収集する。
+# EN: Collect condition list.
 def _collect_condition_list(user_memory: dict[str, Any], key: str) -> list[str]:
     deduped: list[str] = []
     for token in user_memory.get(key, []) or []:
@@ -85,6 +93,8 @@ def _collect_condition_list(user_memory: dict[str, Any], key: str) -> list[str]:
     return deduped
 
 
+# JP: score area matchを処理する。
+# EN: Process score area match.
 def _score_area_match(
     item: dict[str, Any],
     target_area: str,
@@ -122,6 +132,8 @@ def _score_area_match(
     return -profile["area_miss_penalty"], f"希望エリア {target_area} とは離れる"
 
 
+# JP: fallback condition assessmentsを構築する。
+# EN: Build fallback condition assessments.
 def _build_fallback_condition_assessments(
     *,
     conditions: list[str],
@@ -141,6 +153,8 @@ def _build_fallback_condition_assessments(
     return assessments
 
 
+# JP: score condition assessmentsを処理する。
+# EN: Process score condition assessments.
 def _score_condition_assessments(
     *,
     assessments: list[dict[str, str]],
@@ -160,6 +174,8 @@ def _score_condition_assessments(
     return score
 
 
+# JP: LLM catalog enhancementsを構築する。
+# EN: Build LLM catalog enhancements.
 def _build_llm_catalog_enhancements(
     *,
     candidates: list[dict[str, Any]],
@@ -314,10 +330,14 @@ def _build_llm_catalog_enhancements(
 
 
 class PropertyCatalogService:
+    # JP: クラスやインスタンスの初期状態を設定する。
+    # EN: Initialize the class or instance state.
     def __init__(self, db: Database):
         self.db = db
         self._notes_rewritten = False
 
+    # JP: rewrite notes with LLMを処理する。
+    # EN: Process rewrite notes with LLM.
     def rewrite_notes_with_llm(self, adapter: LLMAdapter) -> None:
         """カタログの notes フィールドをLLMでリライトしてDBを更新する（1プロセス1回限り）。"""
         if self._notes_rewritten:
@@ -331,6 +351,8 @@ class PropertyCatalogService:
             if pid and new_notes:
                 self.db.update_catalog_property_notes(pid, new_notes)
 
+    # JP: 必要な処理を検索する。
+    # EN: Search the required data.
     def search(
         self,
         *,
@@ -421,6 +443,8 @@ class PropertyCatalogService:
             )
         return normalized
 
+    # JP: detail htmlを取得する。
+    # EN: Fetch detail html.
     def fetch_detail_html(self, url: str) -> str | None:
         catalog_item = self.db.get_catalog_property_by_url(url)
         if catalog_item is not None:
@@ -450,6 +474,8 @@ class PropertyCatalogService:
             return None
         return response.text
 
+    # JP: score propertyを処理する。
+    # EN: Process score property.
     def _score_property(
         self,
         item: dict[str, Any],
@@ -522,6 +548,8 @@ class PropertyCatalogService:
 
         return score
 
+    # JP: score semantic enhancementを処理する。
+    # EN: Process score semantic enhancement.
     def _score_semantic_enhancement(
         self,
         enhancement: dict[str, Any],
