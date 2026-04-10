@@ -197,6 +197,8 @@ def post_message(session_id: str, body: ChatMessageRequest) -> ChatMessageRespon
 
     provider: ProviderName | None = body.provider
     user_message_payload = {"message": body.message}
+    if body.planner_answers:
+        user_message_payload["planner_answers"] = [item.model_dump() for item in body.planner_answers]
     if provider is not None:
         user_message_payload["provider"] = provider
 
@@ -206,6 +208,7 @@ def post_message(session_id: str, body: ChatMessageRequest) -> ChatMessageRespon
         return app.state.orchestrator.process_user_message(
             session_id=session_id,
             message=body.message,
+            planner_answers=[item.model_dump() for item in body.planner_answers],
             provider=provider,
         )
     except Exception as exc:

@@ -51,6 +51,7 @@ class FakePlannerRouteAdapter(LLMAdapter):
         return {
             "intent": "search",
             "user_memory": {
+                "listing_type": "賃貸",
                 "target_area": "江東区",
                 "budget_max": 120000,
                 "station_walk_max": 7,
@@ -77,6 +78,7 @@ class FakePlannerRouteAdapter(LLMAdapter):
                 "rationale": "最初に母集団を作ってから絞る方が条件差分を見やすいためです。",
             },
             "condition_reasons": {
+                "listing_type": "",
                 "budget_max": "",
                 "target_area": "",
                 "station_walk_max": "",

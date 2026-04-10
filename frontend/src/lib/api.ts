@@ -49,6 +49,11 @@ export type ActionDescriptor = {
   payload?: Record<string, unknown>;
 };
 
+export type PlannerAnswer = {
+  slot: string;
+  value: string;
+};
+
 export type UIBlock = {
   type:
     | "text"
@@ -167,11 +172,12 @@ export async function fetchSession(sessionId: string): Promise<SessionState> {
 export async function sendMessage(
   sessionId: string,
   message: string,
-  provider?: Provider
+  provider?: Provider,
+  plannerAnswers: PlannerAnswer[] = []
 ): Promise<ChatMessageResponse> {
   return request<ChatMessageResponse>(`/api/chat/sessions/${sessionId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ message, provider }),
+    body: JSON.stringify({ message, provider, planner_answers: plannerAnswers }),
   });
 }
 

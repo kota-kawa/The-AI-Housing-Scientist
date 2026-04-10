@@ -8,7 +8,7 @@ from app.llm_config import route_config_for
 from app.models import ChatMessageResponse, UIBlock
 from app.profile_memory import merge_learned_preferences, summarize_memory_labels
 from app.stages import run_communication
-from app.stages.planner import detect_search_signal, run_planner
+from app.stages.planner import REQUIRED_PLANNING_SLOTS, detect_search_signal, run_planner
 from app.stages.risk_check import looks_like_contract_text
 
 
@@ -20,6 +20,7 @@ class OrchestratorActionsMixin:
         *,
         session_id: str,
         message: str,
+        planner_answers: list[dict[str, Any]] | None = None,
         provider: ProviderName | None,
     ) -> ChatMessageResponse:
         user_memory, task_memory, llm_config = self._ensure_session_llm_config(session_id)
@@ -45,6 +46,7 @@ class OrchestratorActionsMixin:
             user_memory=user_memory,
             adapter=adapter,
             profile_memory=self._get_profile_memory_for_session(session_id),
+            planner_answers=planner_answers,
         )
         search_signal = detect_search_signal(message, planner_result=planner_result)
 
@@ -102,6 +104,7 @@ class OrchestratorActionsMixin:
 
             restored_user_memory = profile["user_memory"]
             task_memory["profile_resume_pending"] = False
+            task_memory["status"] = "awaiting_plan_inputs"
             self.db.update_memories(session_id, restored_user_memory, task_memory)
 
             labels = summarize_memory_labels(restored_user_memory)
@@ -111,7 +114,7 @@ class OrchestratorActionsMixin:
                 else "前回の条件を引き継ぎました。必要なら新しい条件を追加してください。"
             )
             response = ChatMessageResponse(
-                status="awaiting_user_input",
+                status="awaiting_plan_inputs",
                 assistant_message=message,
                 missing_slots=[],
                 next_action="await_search_input",
@@ -119,17 +122,18 @@ class OrchestratorActionsMixin:
                 pending_confirmation=False,
                 pending_action=None,
             )
-            self.db.set_session_status(session_id, "awaiting_user_input")
+            self.db.set_session_status(session_id, "awaiting_plan_inputs")
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 
         if action_type == "dismiss_profile_resume":
             task_memory["profile_resume_pending"] = False
+            task_memory["status"] = "awaiting_plan_inputs"
             self.db.update_memories(session_id, {}, task_memory)
 
-            message = "新しい条件で住まい探しを始めます。希望エリアや家賃条件を入力してください。"
+            message = "新しい条件で住まい探しを始めます。まずは物件種別、希望エリア、予算、間取りを入力してください。"
             response = ChatMessageResponse(
-                status="awaiting_user_input",
+                status="awaiting_plan_inputs",
                 assistant_message=message,
                 missing_slots=[],
                 next_action="await_search_input",
@@ -137,7 +141,7 @@ class OrchestratorActionsMixin:
                 pending_confirmation=False,
                 pending_action=None,
             )
-            self.db.set_session_status(session_id, "awaiting_user_input")
+            self.db.set_session_status(session_id, "awaiting_plan_inputs")
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 
@@ -184,17 +188,48 @@ class OrchestratorActionsMixin:
             return response
 
         if action_type == "revise_research_plan":
-            message = "条件を追加入力すると、計画を更新してから再度確認できます。"
+            current_plan = task_memory.get("draft_research_plan") or {}
+            profile_memory = self._get_profile_memory_for_session(session_id)
+            task_memory["status"] = "awaiting_plan_inputs"
+            self.db.update_memories(session_id, user_memory, task_memory)
+            required_questions = self._build_planning_questions(
+                user_memory=user_memory,
+                slots=list(REQUIRED_PLANNING_SLOTS),
+                required=True,
+                profile_memory=profile_memory,
+            )
+            optional_questions = self._build_planning_questions(
+                user_memory=user_memory,
+                slots=["station_walk_max", "move_in_date", "must_conditions", "nice_to_have"],
+                required=False,
+                profile_memory=profile_memory,
+            )
+            message = "条件を選び直すと、計画を更新してから再度確認できます。"
+            blocks = []
+            if current_plan:
+                blocks.append(self._build_plan_block(current_plan))
+            blocks.append(
+                self._build_question_block(
+                    questions=required_questions,
+                    optional=False,
+                )
+            )
+            blocks.append(
+                self._build_question_block(
+                    questions=optional_questions,
+                    optional=True,
+                )
+            )
             response = ChatMessageResponse(
-                status="awaiting_user_input",
+                status="awaiting_plan_inputs",
                 assistant_message=message,
                 missing_slots=[],
                 next_action="await_search_input",
-                blocks=[UIBlock(type="text", title="計画の更新", content={"body": message})],
+                blocks=blocks,
                 pending_confirmation=False,
                 pending_action=None,
             )
-            self.db.set_session_status(session_id, "awaiting_user_input")
+            self.db.set_session_status(session_id, "awaiting_plan_inputs")
             self.db.add_message(session_id, "assistant", response.model_dump())
             return response
 

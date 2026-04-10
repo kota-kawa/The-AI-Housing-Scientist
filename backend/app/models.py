@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PropertyNormalized(BaseModel):
@@ -76,9 +76,23 @@ class UIBlock(BaseModel):
     display_label: str = ""
 
 
+class PlannerAnswerPayload(BaseModel):
+    slot: str = Field(min_length=1, max_length=80)
+    value: str = Field(min_length=1, max_length=400)
+
+
 class ChatMessageRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=8000)
+    message: str = Field(default="", max_length=8000)
+    planner_answers: list[PlannerAnswerPayload] = Field(default_factory=list)
     provider: Literal["openai", "gemini", "groq", "claude"] | None = None
+
+    @model_validator(mode="after")
+    def validate_message_or_answers(self) -> "ChatMessageRequest":
+        has_message = bool(self.message.strip())
+        has_answers = bool(self.planner_answers)
+        if not has_message and not has_answers:
+            raise ValueError("message or planner_answers is required")
+        return self
 
 
 class LLMRouteConfigPayload(BaseModel):

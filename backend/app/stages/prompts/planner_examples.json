@@ -13,6 +13,7 @@
     "output": {
       "intent": "search",
       "user_memory": {
+        "listing_type": "賃貸",
         "budget_max": null,
         "target_area": null,
         "station_walk_max": null,
@@ -25,7 +26,7 @@
       "missing_slots": [
         "target_area",
         "budget_max",
-        "station_walk_max"
+        "layout_preference"
       ],
       "follow_up_questions": [
         {
@@ -41,10 +42,10 @@
           "examples": ["10万円まで", "管理費込みで12万円台", "条件次第で15万円まで"]
         },
         {
-          "slot": "station_walk_max",
-          "label": "駅徒歩",
-          "question": "駅からの距離はどの程度を優先したいですか？ 例にない条件でも大丈夫です。",
-          "examples": ["徒歩5分以内", "徒歩12分くらいまで", "バス便でも可"]
+          "slot": "layout_preference",
+          "label": "間取り",
+          "question": "希望の間取りを教えてください。例にない間取りでも大丈夫です。",
+          "examples": ["1K", "1LDK", "2LDK"]
         }
       ],
       "next_action": "missing_slots_question",
@@ -60,11 +61,12 @@
         "rationale": "条件が広すぎる段階で候補を集めると比較軸がぶれやすいためです。"
       },
       "condition_reasons": {
+        "listing_type": "賃貸か売買かで候補の探し方が大きく変わるためです。",
         "budget_max": "予算が未確定だと候補の絞り込み幅が大きすぎるためです。",
         "target_area": "生活圏が決まらないと検索範囲を適切に切れないためです。",
-        "station_walk_max": "駅距離の許容幅で候補数が大きく変わるためです。",
+        "station_walk_max": "",
         "move_in_date": "",
-        "layout_preference": "",
+        "layout_preference": "間取りが決まると比較対象の粒度が揃うためです。",
         "must_conditions": "",
         "nice_to_have": ""
       }
@@ -84,6 +86,7 @@
     "output": {
       "intent": "search",
       "user_memory": {
+        "listing_type": "賃貸",
         "budget_max": 100000,
         "target_area": "町田",
         "station_walk_max": null,
@@ -115,6 +118,7 @@
         "rationale": "RC造は候補数が絞られやすいため、最初に構造一致を優先して母集団を作る方が効率的です。"
       },
       "condition_reasons": {
+        "listing_type": "賃貸条件として候補を集めるためです。",
         "budget_max": "予算超過を早めに外して比較対象を安定させるためです。",
         "target_area": "町田に絞る希望が明確なので検索の中心条件になります。",
         "station_walk_max": "",
@@ -152,6 +156,7 @@
     "output": {
       "intent": "search",
       "user_memory": {
+        "listing_type": "賃貸",
         "budget_max": 140000,
         "target_area": "中野",
         "station_walk_max": 10,
@@ -183,6 +188,7 @@
         "rationale": "既存条件は活かしつつ、新しい必須条件と予算更新だけを反映する方が検索の一貫性を保てるためです。"
       },
       "condition_reasons": {
+        "listing_type": "同じ賃貸条件で比較を続けるためです。",
         "budget_max": "上限が更新されたので予算フィルタも最新値に合わせる必要があります。",
         "target_area": "前回と同じ中野を希望しているため引き続き検索の中心です。",
         "station_walk_max": "既存の徒歩条件を維持すると通勤負担の基準がぶれません。",

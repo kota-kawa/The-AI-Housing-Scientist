@@ -9,7 +9,7 @@ from app.models import ChatMessageResponse, ResearchStateResponse, UIBlock
 from app.research import HousingResearchAgentManager
 from app.services import BraveSearchClient
 from app.stages import run_final_report, run_risk_check
-from app.stages.planner import run_planner
+from app.stages.planner import REQUIRED_PLANNING_SLOTS, _has_slot_value, run_planner
 
 MAX_RESEARCH_QUERIES = 8
 AREA_NEARBY_HINTS: dict[str, tuple[str, ...]] = {
@@ -296,12 +296,13 @@ class OrchestratorResearchMixin:
     ) -> ChatMessageResponse:
         if user_memory is None or task_memory is None:
             user_memory, task_memory, llm_config = self._ensure_session_llm_config(session_id)
+        profile_memory = self._get_profile_memory_for_session(session_id)
         if planner_result is None:
             planner_result = run_planner(
                 message=message,
                 user_memory=user_memory,
                 adapter=adapter,
-                profile_memory=self._get_profile_memory_for_session(session_id),
+                profile_memory=profile_memory,
             )
         self.db.add_audit_event(
             session_id,
@@ -309,7 +310,7 @@ class OrchestratorResearchMixin:
             {
                 "message": message,
                 "user_memory": user_memory,
-                "profile_memory": self._get_profile_memory_for_session(session_id),
+                "profile_memory": profile_memory,
             },
             planner_result,
             "抽出済み条件と不足スロットを生成",
@@ -319,34 +320,30 @@ class OrchestratorResearchMixin:
         follow_up_questions = planner_result.get("follow_up_questions", [])
 
         if planner_result["missing_slots"]:
-            assistant_text = "検索を始める前に、条件を少しだけ確認させてください。"
-            task_memory["status"] = "awaiting_user_input"
+            assistant_text = "検索前に、まず大枠の条件を入力してください。選択肢でも自由入力でも進められます。"
+            task_memory["status"] = "awaiting_plan_inputs"
             task_memory["awaiting_contract_text"] = False
             task_memory["draft_research_plan"] = None
             task_memory["draft_llm_config"] = llm_config
             self.db.update_memories(session_id, updated_user_memory, task_memory)
             self.db.set_pending_action(session_id, None)
-            self.db.set_session_status(session_id, "awaiting_user_input")
+            self.db.set_session_status(session_id, "awaiting_plan_inputs")
 
-            blocks = []
-            if follow_up_questions:
-                blocks.append(
-                    self._build_question_block(
-                        questions=follow_up_questions,
-                        optional=False,
-                    )
+            required_questions = self._build_planning_questions(
+                user_memory=updated_user_memory,
+                slots=list(planner_result["missing_slots"]),
+                required=True,
+                profile_memory=profile_memory,
+            )
+            blocks = [
+                self._build_question_block(
+                    questions=required_questions,
+                    optional=False,
                 )
-            else:
-                blocks.append(
-                    UIBlock(
-                        type="warning",
-                        title="不足情報",
-                        content={"body": assistant_text},
-                    )
-                )
+            ]
 
             response = ChatMessageResponse(
-                status="awaiting_user_input",
+                status="awaiting_plan_inputs",
                 assistant_message=assistant_text,
                 missing_slots=planner_result["missing_slots"],
                 next_action=planner_result["next_action"],
@@ -375,10 +372,23 @@ class OrchestratorResearchMixin:
         self.db.set_session_status(session_id, "awaiting_plan_confirmation")
 
         blocks = [self._build_plan_block(draft_plan)]
-        if follow_up_questions:
+        optional_slots = [
+            slot
+            for slot in ["station_walk_max", "move_in_date", "must_conditions", "nice_to_have"]
+            if not _has_slot_value(slot, updated_user_memory)
+        ]
+        optional_questions = self._build_planning_questions(
+            user_memory=updated_user_memory,
+            slots=optional_slots,
+            required=False,
+            profile_memory=profile_memory,
+        )
+        if follow_up_questions and not optional_questions:
+            optional_questions = follow_up_questions
+        if optional_questions:
             blocks.append(
                 self._build_question_block(
-                    questions=follow_up_questions,
+                    questions=optional_questions,
                     optional=True,
                 )
             )
@@ -408,7 +418,7 @@ class OrchestratorResearchMixin:
             assistant_text = (
                 "調査計画を作成しました。内容を確認してから、明示承認で調査を開始します。"
             )
-        if follow_up_questions and "追加" not in assistant_text:
+        if optional_questions and "追加" not in assistant_text:
             assistant_text += "追加で分かる条件があれば、下の候補から反映できます。"
 
         response = ChatMessageResponse(

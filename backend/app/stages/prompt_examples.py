@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 PLANNER_ALLOWED_SLOTS = {
+    "listing_type",
     "target_area",
     "budget_max",
     "station_walk_max",
@@ -82,6 +83,7 @@ def _expect_string_list(filename: str, value: Any, path: str) -> None:
 def _expect_slot_memory_shape(filename: str, value: Any, path: str) -> None:
     _expect_type(filename, value, dict, path)
     required_keys = {
+        "listing_type",
         "budget_max",
         "target_area",
         "station_walk_max",
@@ -96,7 +98,7 @@ def _expect_slot_memory_shape(filename: str, value: Any, path: str) -> None:
         _fail(filename, f"{path}.budget_max must be integer or null")
     if not _is_int_or_none(value["station_walk_max"]):
         _fail(filename, f"{path}.station_walk_max must be integer or null")
-    for key in ["target_area", "move_in_date", "layout_preference"]:
+    for key in ["listing_type", "target_area", "move_in_date", "layout_preference"]:
         field_value = value[key]
         if field_value is not None and not isinstance(field_value, str):
             _fail(filename, f"{path}.{key} must be string or null")
@@ -109,6 +111,7 @@ def _expect_slot_memory_shape(filename: str, value: Any, path: str) -> None:
 def _expect_condition_reasons_shape(filename: str, value: Any, path: str) -> None:
     _expect_type(filename, value, dict, path)
     required_keys = {
+        "listing_type",
         "budget_max",
         "target_area",
         "station_walk_max",

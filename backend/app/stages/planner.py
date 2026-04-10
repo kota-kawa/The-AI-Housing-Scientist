@@ -7,19 +7,22 @@ from app.llm.base import LLMAdapter
 from app.stages.prompt_examples import PromptExamplesError, sample_prompt_examples
 
 FOLLOW_UP_SLOT_ORDER = [
+    "listing_type",
     "target_area",
     "budget_max",
-    "station_walk_max",
     "layout_preference",
+    "station_walk_max",
     "move_in_date",
 ]
 FOLLOW_UP_OPTIONAL_SLOTS = ["must_conditions", "nice_to_have"]
+REQUIRED_PLANNING_SLOTS = ("listing_type", "target_area", "budget_max", "layout_preference")
 SEARCH_SIGNAL_KEYS = (
     "budget_max",
     "target_area",
     "station_walk_max",
     "move_in_date",
     "layout_preference",
+    "listing_type",
     "must_conditions",
     "nice_to_have",
 )
@@ -34,6 +37,70 @@ NEXT_ACTION_VALUES = (
 TEXT_SLOT_KEYS = {"target_area", "move_in_date", "layout_preference", "listing_type"}
 INTEGER_SLOT_KEYS = {"budget_max", "station_walk_max"}
 LIST_SLOT_KEYS = {"must_conditions", "nice_to_have"}
+QUESTION_SLOT_ORDER = list(REQUIRED_PLANNING_SLOTS) + [
+    "station_walk_max",
+    "move_in_date",
+    "must_conditions",
+    "nice_to_have",
+]
+
+PLANNING_SLOT_LABELS = {
+    "listing_type": "物件種別",
+    "target_area": "希望エリア",
+    "budget_max": "家賃上限",
+    "layout_preference": "間取り",
+    "station_walk_max": "駅徒歩",
+    "move_in_date": "入居時期",
+    "must_conditions": "必須条件",
+    "nice_to_have": "あると良い条件",
+}
+PLANNING_SLOT_QUESTIONS = {
+    "listing_type": "まずは賃貸か売買かを選んでください。",
+    "target_area": "どのエリアや駅を中心に探したいですか？",
+    "budget_max": "家賃や購入予算の上限はどれくらいですか？",
+    "layout_preference": "希望の間取りを教えてください。",
+    "station_walk_max": "駅からの距離はどの程度を優先しますか？",
+    "move_in_date": "いつ頃から住み始めたいですか？",
+    "must_conditions": "外せない条件があれば教えてください。",
+    "nice_to_have": "あればうれしい条件があれば教えてください。",
+}
+PLANNING_SLOT_EXAMPLES = {
+    "listing_type": ["賃貸", "売買"],
+    "budget_max": ["8万円まで", "10万円まで", "12万円まで", "15万円まで", "20万円まで"],
+    "layout_preference": ["ワンルーム", "1K", "1DK", "1LDK", "2K/2DK", "2LDK", "3LDK+"],
+    "station_walk_max": ["徒歩5分以内", "徒歩7分以内", "徒歩10分以内", "徒歩15分以内"],
+    "move_in_date": ["できるだけ早く", "来月中", "2-3ヶ月以内"],
+}
+PLANNING_SLOT_PLACEHOLDERS = {
+    "listing_type": "賃貸 / 売買",
+    "target_area": "例: 中野 / 吉祥寺 / 横浜駅周辺",
+    "budget_max": "例: 12万円まで / 120000",
+    "layout_preference": "例: 1LDK / 2LDK",
+    "station_walk_max": "例: 徒歩10分以内",
+    "move_in_date": "例: 来月中 / できるだけ早く",
+    "must_conditions": "例: 2階以上 / ペット可 / RC造",
+    "nice_to_have": "例: 独立洗面台 / 在宅ワーク向け",
+}
+PLANNING_SLOT_INPUT_KIND = {
+    "listing_type": "single_choice_text",
+    "target_area": "single_choice_text",
+    "budget_max": "single_choice_text",
+    "layout_preference": "single_choice_text",
+    "station_walk_max": "single_choice_text",
+    "move_in_date": "single_choice_text",
+    "must_conditions": "text",
+    "nice_to_have": "text",
+}
+PLANNING_SLOT_KEYBOARD_HINT = {
+    "listing_type": "default",
+    "target_area": "default",
+    "budget_max": "numeric",
+    "layout_preference": "default",
+    "station_walk_max": "numeric",
+    "move_in_date": "default",
+    "must_conditions": "default",
+    "nice_to_have": "default",
+}
 
 
 # JP: textを正規化する。
@@ -53,6 +120,251 @@ def _dedupe_texts(values: list[Any], *, limit: int | None = None) -> list[str]:
         if limit is not None and len(deduped) >= limit:
             break
     return deduped
+
+
+# JP: slot labelを取得する。
+# EN: Get slot label.
+def _slot_label(slot: str) -> str:
+    return PLANNING_SLOT_LABELS.get(slot, slot)
+
+
+# JP: listing typeを正規化する。
+# EN: Normalize listing type.
+def _normalize_listing_type(value: Any) -> str | None:
+    text = _normalize_text(value)
+    if not text:
+        return None
+    lower = text.lower()
+    if any(token in text for token in ["賃貸", "家賃", "借り", "賃借"]) or "rent" in lower:
+        return "賃貸"
+    if any(token in text for token in ["売買", "購入", "買う", "分譲"]) or "buy" in lower:
+        return "売買"
+    return text
+
+
+# JP: budget valueを解析する。
+# EN: Parse budget value.
+def _parse_budget_value(value: Any) -> int | None:
+    text = _normalize_text(value)
+    if not text:
+        return None
+    compact = text.replace(",", "").replace("，", "")
+    if compact.isdigit():
+        amount = int(compact)
+        return amount if amount > 0 else None
+
+    match = None
+    if "万" in compact:
+        import re
+
+        match = re.search(r"(\d+(?:\.\d+)?)\s*万", compact)
+        if match:
+            return int(float(match.group(1)) * 10000)
+    return None
+
+
+# JP: station walkを解析する。
+# EN: Parse station walk.
+def _parse_station_walk_value(value: Any) -> int | None:
+    text = _normalize_text(value)
+    if not text:
+        return None
+    compact = text.replace("以内", "").replace("まで", "").replace("駅徒歩", "").replace("徒歩", "")
+    compact = compact.replace("分", "").strip()
+    if compact.isdigit():
+        minutes = int(compact)
+        return minutes if minutes > 0 else None
+    return None
+
+
+# JP: slot valueを正規化する。
+# EN: Normalize slot value.
+def _normalize_slot_value(slot: str, value: Any) -> Any:
+    if slot == "listing_type":
+        return _normalize_listing_type(value)
+    if slot == "budget_max":
+        return _parse_budget_value(value)
+    if slot == "station_walk_max":
+        return _parse_station_walk_value(value)
+    if slot in {"must_conditions", "nice_to_have"}:
+        if isinstance(value, list):
+            return _dedupe_texts(list(value), limit=6)
+        text = _normalize_text(value)
+        return [text] if text else []
+    text = _normalize_text(value)
+    return text or None
+
+
+# JP: slot valueが設定済みか判定する。
+# EN: Check whether slot value is present.
+def _has_slot_value(slot: str, user_memory: dict[str, Any]) -> bool:
+    value = user_memory.get(slot)
+    if slot in LIST_SLOT_KEYS:
+        return bool(value)
+    return value is not None and _normalize_text(value) != ""
+
+
+# JP: slot memoryをマージする。
+# EN: Merge slot memory.
+def _merge_slot_memory(base_memory: dict[str, Any], override_memory: dict[str, Any]) -> dict[str, Any]:
+    merged = _sanitize_slot_memory(base_memory)
+    override = _sanitize_slot_memory(override_memory)
+    for key in TEXT_SLOT_KEYS:
+        if override.get(key):
+            merged[key] = override.get(key)
+    for key in INTEGER_SLOT_KEYS:
+        if override.get(key) is not None:
+            merged[key] = override.get(key)
+    for key in LIST_SLOT_KEYS:
+        if override.get(key):
+            merged[key] = list(override.get(key) or [])
+    return merged
+
+
+# JP: planner answersを適用する。
+# EN: Apply planner answers.
+def _apply_planner_answers(
+    user_memory: dict[str, Any],
+    planner_answers: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    merged = _sanitize_slot_memory(user_memory)
+    for item in planner_answers or []:
+        if not isinstance(item, dict):
+            continue
+        slot = _normalize_text(item.get("slot"))
+        if slot not in ALL_SLOT_KEYS and slot != "listing_type":
+            continue
+        normalized = _normalize_slot_value(slot, item.get("value"))
+        if slot in LIST_SLOT_KEYS:
+            merged[slot] = normalized if isinstance(normalized, list) else []
+        elif slot in INTEGER_SLOT_KEYS:
+            merged[slot] = normalized if isinstance(normalized, int) else None
+        else:
+            merged[slot] = normalized
+    return merged
+
+
+# JP: planner answersを要約する。
+# EN: Summarize planner answers.
+def _summarize_planner_answers(planner_answers: list[dict[str, Any]] | None) -> str:
+    tokens: list[str] = []
+    for item in planner_answers or []:
+        if not isinstance(item, dict):
+            continue
+        slot = _normalize_text(item.get("slot"))
+        value = _normalize_text(item.get("value"))
+        if not slot or not value:
+            continue
+        tokens.append(f"{_slot_label(slot)}は{value}")
+    return "、".join(tokens)
+
+
+# JP: planner messageを構築する。
+# EN: Build planner message.
+def _build_planner_message(message: str, planner_answers: list[dict[str, Any]] | None) -> str:
+    normalized_message = _normalize_text(message)
+    answers_summary = _summarize_planner_answers(planner_answers)
+    if normalized_message and answers_summary:
+        return f"{normalized_message}\n{answers_summary}"
+    return normalized_message or answers_summary
+
+
+# JP: search intentを推定する。
+# EN: Infer search intent.
+def _infer_intent(message: str, user_memory: dict[str, Any], planner_answers: list[dict[str, Any]] | None) -> str:
+    if planner_answers:
+        return "search"
+    listing_type = _normalize_text(user_memory.get("listing_type"))
+    if listing_type in {"賃貸", "売買"}:
+        return "search"
+    normalized_message = _normalize_text(message)
+    if any(token in normalized_message for token in ["探したい", "部屋", "物件", "賃貸", "売買", "購入", "住みたい"]):
+        return "search"
+    return "general_question"
+
+
+# JP: required missing slotsを取得する。
+# EN: Get required missing slots.
+def _required_missing_slots(user_memory: dict[str, Any]) -> list[str]:
+    return [slot for slot in REQUIRED_PLANNING_SLOTS if not _has_slot_value(slot, user_memory)]
+
+
+# JP: budget tokenを整形する。
+# EN: Format budget token.
+def _format_budget_token(value: Any) -> str:
+    amount = _parse_budget_value(value)
+    if amount is None or amount <= 0:
+        return ""
+    if amount % 10000 == 0:
+        return f"{int(amount / 10000)}万円以下"
+    return f"{amount:,}円以下"
+
+
+# JP: base seed queriesを構築する。
+# EN: Build base seed queries.
+def _build_base_seed_queries(user_memory: dict[str, Any]) -> list[str]:
+    area = _normalize_text(user_memory.get("target_area"))
+    listing_type = _normalize_text(user_memory.get("listing_type"))
+    budget = _format_budget_token(user_memory.get("budget_max"))
+    layout = _normalize_text(user_memory.get("layout_preference"))
+    must_condition = " ".join(_dedupe_texts(list(user_memory.get("must_conditions") or []), limit=1))
+    nice_condition = " ".join(_dedupe_texts(list(user_memory.get("nice_to_have") or []), limit=1))
+
+    candidates = _dedupe_texts(
+        [
+            " ".join(part for part in [area, listing_type, budget, layout, must_condition] if part),
+            " ".join(part for part in [area, budget, layout, listing_type] if part),
+            " ".join(part for part in [area, layout, listing_type, nice_condition] if part),
+            " ".join(part for part in [area, listing_type, layout] if part),
+            " ".join(part for part in [area, listing_type, budget] if part),
+        ],
+        limit=5,
+    )
+    return [item for item in candidates if item]
+
+
+# JP: default research planを構築する。
+# EN: Build default research plan.
+def _default_research_plan(user_memory: dict[str, Any]) -> dict[str, Any]:
+    area = _normalize_text(user_memory.get("target_area"))
+    layout = _normalize_text(user_memory.get("layout_preference"))
+    listing_type = _normalize_text(user_memory.get("listing_type")) or "物件"
+    budget = _format_budget_token(user_memory.get("budget_max"))
+    summary_tokens = [token for token in [area, budget, layout, listing_type] if token]
+    summary = " / ".join(summary_tokens) if summary_tokens else "条件に合う候補を比較します。"
+    return {
+        "summary": f"{summary}を軸に候補を集めます。" if summary_tokens else "条件に合う候補を比較します。",
+        "goal": "条件に近い候補を比較し、問い合わせや次の確認に進める物件を絞り込みます。",
+        "strategy": [
+            "必須条件に合う候補を広めに集めて比較の土台を作ります。",
+            "詳細ページで不足情報や表記ゆれを確認します。",
+            "条件一致度と確認事項を見ながら候補を並べ替えます。",
+        ],
+        "rationale": "検索を広げすぎず、比較に必要な情報を先に揃えるためです。",
+    }
+
+
+# JP: default condition reasonsを構築する。
+# EN: Build default condition reasons.
+def _default_condition_reasons(user_memory: dict[str, Any]) -> dict[str, str]:
+    reasons = _blank_condition_reasons()
+    if _has_slot_value("listing_type", user_memory):
+        reasons["listing_type"] = "賃貸か売買かで見るべき候補が大きく変わるためです。"
+    if _has_slot_value("target_area", user_memory):
+        reasons["target_area"] = "生活圏を固定して候補を絞り込むためです。"
+    if _has_slot_value("budget_max", user_memory):
+        reasons["budget_max"] = "予算超過の候補を早めに外すためです。"
+    if _has_slot_value("layout_preference", user_memory):
+        reasons["layout_preference"] = "住み方に合う間取りを優先するためです。"
+    if _has_slot_value("station_walk_max", user_memory):
+        reasons["station_walk_max"] = "移動負担に直結する条件だからです。"
+    if _has_slot_value("move_in_date", user_memory):
+        reasons["move_in_date"] = "募集タイミングが合う候補を優先するためです。"
+    if _has_slot_value("must_conditions", user_memory):
+        reasons["must_conditions"] = "外せない条件なので優先的に確認するためです。"
+    if _has_slot_value("nice_to_have", user_memory):
+        reasons["nice_to_have"] = "候補の差分を比較する補助軸にするためです。"
+    return reasons
 
 
 # JP: blank slot memoryを処理する。
@@ -109,7 +421,7 @@ def _sanitize_slot_memory(raw_memory: Any) -> dict[str, Any]:
 def _sanitize_missing_slots(raw_missing_slots: Any) -> list[str]:
     return [
         slot
-        for slot in _dedupe_texts(list(raw_missing_slots or []), limit=3)
+        for slot in _dedupe_texts(list(raw_missing_slots or []), limit=4)
         if slot in ALL_SLOT_KEYS
     ]
 
@@ -352,18 +664,17 @@ def _llm_parse(
             "intent は search / risk_check / general_question のいずれかにする",
             "search では、実際に候補収集を始めるべきなら next_action を search_and_compare にする",
             "search だが曖昧すぎて候補収集の前に確認が必要なら next_action を missing_slots_question にする",
-            "missing_slots は 0〜3 件で、次に聞く価値が高い順に並べる",
+            "missing_slots は 0〜4 件で、必須項目を優先して並べる",
             "follow_up_questions は missing_slots と同じ順序・同じ slot だけを返す",
             "follow_up_questions の label は slot_reference の日本語ラベルに合わせる",
             "follow_up_questions の question は、例にない回答や自由入力でも答えやすい聞き方にする",
             "follow_up_questions の examples は候補の例示であり、網羅的な選択肢として扱わない",
             "examples は user_message や memory にない特定の地域・予算・条件へ誘導しない",
             "examples は固定候補に見えにくいよう、粒度や表現を少し分散させてよい",
-            "next_action が search_and_compare のときは seed_queries を 5〜8 件返す",
-            "seed_queries は current_user_memory.target_area と今回の user_message のみを根拠に生成する",
+            "next_action が search_and_compare のときは seed_queries を 3〜5 件返す",
+            "seed_queries は current_user_memory と今回の user_message を根拠に生成する",
             "seed_queries に profile_history_summary のエリア・条件は含めない（user_message に同じエリアが明示されている場合を除く）",
-            "seed_queries には同一エリアの言い換えを含め、必須条件を外した比較用クエリや予算を少し緩めた確認用クエリを 1 本含めてよい",
-            "seed_queries に別エリアへの拡張は入れない。近隣エリアの探索は検索システムが自動的に追加する",
+            "seed_queries は基本クエリだけに留め、近隣エリアや沿線の拡張は入れない",
             "next_action が missing_slots_question のときは seed_queries を空にしてよい",
             "research_plan はユーザー条件に即して summary / goal / strategy / rationale を返す",
             "condition_reasons は各条件が今回の検索で重要な理由を 1 文ずつ返し、該当しない key は空文字にする",
@@ -407,9 +718,10 @@ def _parse_planner_output(
     if intent not in INTENT_VALUES:
         intent = "general_question"
 
-    merged_memory = _sanitize_slot_memory(payload.get("user_memory"))
+    merged_memory = _merge_slot_memory(default_user_memory, payload.get("user_memory") or {})
     llm_returned_empty = not any(
         [
+            merged_memory.get("listing_type"),
             merged_memory.get("budget_max") is not None,
             merged_memory.get("target_area"),
             merged_memory.get("station_walk_max") is not None,
@@ -425,19 +737,13 @@ def _parse_planner_output(
     if llm_returned_empty and intent == "search":
         merged_memory = _sanitize_slot_memory(default_user_memory)
 
-    missing_slots = _sanitize_missing_slots(payload.get("missing_slots"))
-    follow_up_questions = _sanitize_follow_up_questions(payload.get("follow_up_questions"))
-    if missing_slots:
-        allowed_slots = set(missing_slots)
-        follow_up_questions = [
-            item for item in follow_up_questions if item["slot"] in allowed_slots
-        ]
-
     next_action = _normalize_text(payload.get("next_action"))
     if next_action not in NEXT_ACTION_VALUES:
         next_action = "guidance"
 
-    seed_queries = _dedupe_texts(list(payload.get("seed_queries") or []), limit=8)
+    missing_slots = _sanitize_missing_slots(payload.get("missing_slots"))
+    follow_up_questions = _sanitize_follow_up_questions(payload.get("follow_up_questions"))
+    seed_queries = _dedupe_texts(list(payload.get("seed_queries") or []), limit=5)
     research_plan = _sanitize_research_plan(payload.get("research_plan"))
     condition_reasons = _sanitize_condition_reasons(payload.get("condition_reasons"))
 
@@ -461,6 +767,121 @@ def _parse_planner_output(
     }
 
 
+# JP: heuristic planner outputを構築する。
+# EN: Build heuristic planner output.
+def _heuristic_planner_output(
+    *,
+    message: str,
+    user_memory: dict[str, Any],
+    planner_answers: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    intent = _infer_intent(message, user_memory, planner_answers)
+    return {
+        "intent": intent,
+        "plan": {
+            "budget_max": user_memory.get("budget_max"),
+            "target_area": user_memory.get("target_area"),
+            "station_walk_max": user_memory.get("station_walk_max"),
+            "move_in_date": user_memory.get("move_in_date"),
+            "layout_preference": user_memory.get("layout_preference"),
+            "listing_type": user_memory.get("listing_type"),
+        },
+        "missing_slots": [],
+        "follow_up_questions": [],
+        "next_action": "search_and_compare" if intent == "search" else "guidance",
+        "user_memory": _sanitize_slot_memory(user_memory),
+        "seed_queries": [],
+        "research_plan": _default_research_plan(user_memory) if intent == "search" else _blank_research_plan(),
+        "condition_reasons": _default_condition_reasons(user_memory),
+    }
+
+
+# JP: planner resultを確定する。
+# EN: Finalize planner result.
+def _finalize_planner_result(result: dict[str, Any]) -> dict[str, Any]:
+    intent = _normalize_text(result.get("intent"))
+    if intent not in INTENT_VALUES:
+        intent = "general_question"
+
+    user_memory = _sanitize_slot_memory(result.get("user_memory"))
+    follow_up_questions = _sanitize_follow_up_questions(result.get("follow_up_questions"))
+    research_plan = _sanitize_research_plan(result.get("research_plan"))
+    condition_reasons = _sanitize_condition_reasons(result.get("condition_reasons"))
+
+    if intent == "risk_check":
+        return {
+            **result,
+            "intent": "risk_check",
+            "plan": {
+                "budget_max": user_memory.get("budget_max"),
+                "target_area": user_memory.get("target_area"),
+                "station_walk_max": user_memory.get("station_walk_max"),
+                "move_in_date": user_memory.get("move_in_date"),
+                "layout_preference": user_memory.get("layout_preference"),
+                "listing_type": user_memory.get("listing_type"),
+            },
+            "missing_slots": [],
+            "follow_up_questions": [],
+            "next_action": "risk_check",
+            "user_memory": user_memory,
+            "seed_queries": [],
+            "research_plan": _blank_research_plan(),
+            "condition_reasons": _blank_condition_reasons(),
+        }
+
+    if intent != "search":
+        return {
+            **result,
+            "intent": "general_question",
+            "plan": {
+                "budget_max": user_memory.get("budget_max"),
+                "target_area": user_memory.get("target_area"),
+                "station_walk_max": user_memory.get("station_walk_max"),
+                "move_in_date": user_memory.get("move_in_date"),
+                "layout_preference": user_memory.get("layout_preference"),
+                "listing_type": user_memory.get("listing_type"),
+            },
+            "missing_slots": [],
+            "follow_up_questions": [],
+            "next_action": "guidance",
+            "user_memory": user_memory,
+            "seed_queries": [],
+            "research_plan": _blank_research_plan(),
+            "condition_reasons": _blank_condition_reasons(),
+        }
+
+    missing_slots = _required_missing_slots(user_memory)
+    optional_questions = [
+        item for item in follow_up_questions if item["slot"] not in REQUIRED_PLANNING_SLOTS
+    ]
+    base_queries = _build_base_seed_queries(user_memory) if not missing_slots else []
+    merged_research_plan = research_plan if any(research_plan.values()) else _default_research_plan(user_memory)
+    merged_condition_reasons = _default_condition_reasons(user_memory)
+    for key, value in condition_reasons.items():
+        if value:
+            merged_condition_reasons[key] = value
+
+    return {
+        **result,
+        "intent": "search",
+        "plan": {
+            "budget_max": user_memory.get("budget_max"),
+            "target_area": user_memory.get("target_area"),
+            "station_walk_max": user_memory.get("station_walk_max"),
+            "move_in_date": user_memory.get("move_in_date"),
+            "layout_preference": user_memory.get("layout_preference"),
+            "listing_type": user_memory.get("listing_type"),
+        },
+        "missing_slots": missing_slots,
+        "follow_up_questions": optional_questions,
+        "next_action": "missing_slots_question" if missing_slots else "search_and_compare",
+        "user_memory": user_memory,
+        "seed_queries": base_queries,
+        "research_plan": merged_research_plan,
+        "condition_reasons": merged_condition_reasons,
+    }
+
+
 # JP: search signalを検出する。
 # EN: Detect search signal.
 def detect_search_signal(message: str, planner_result: dict[str, Any] | None = None) -> bool:
@@ -477,18 +898,42 @@ def run_planner(
     user_memory: dict[str, Any],
     adapter: LLMAdapter | None,
     profile_memory: dict[str, Any] | None = None,
+    planner_answers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    merged_input_memory = _apply_planner_answers(user_memory, planner_answers)
+    planner_message = _build_planner_message(message, planner_answers)
+
     if adapter is None:
-        return _empty_planner_result(user_memory)
+        return _finalize_planner_result(
+            _heuristic_planner_output(
+                message=planner_message,
+                user_memory=merged_input_memory,
+                planner_answers=planner_answers,
+            )
+        )
 
     try:
-        payload = _llm_parse(message, user_memory, profile_memory, adapter)
+        payload = _llm_parse(planner_message, merged_input_memory, profile_memory, adapter)
     except PromptExamplesError:
         raise
     except Exception:
-        return _empty_planner_result(user_memory)
+        return _finalize_planner_result(
+            _heuristic_planner_output(
+                message=planner_message,
+                user_memory=merged_input_memory,
+                planner_answers=planner_answers,
+            )
+        )
 
     if not isinstance(payload, dict):
-        return _empty_planner_result(user_memory)
+        return _finalize_planner_result(
+            _heuristic_planner_output(
+                message=planner_message,
+                user_memory=merged_input_memory,
+                planner_answers=planner_answers,
+            )
+        )
 
-    return _parse_planner_output(payload, default_user_memory=user_memory)
+    return _finalize_planner_result(
+        _parse_planner_output(payload, default_user_memory=merged_input_memory)
+    )

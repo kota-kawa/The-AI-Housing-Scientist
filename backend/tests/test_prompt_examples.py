@@ -32,12 +32,14 @@ def test_planner_prompt_examples_golden_cases_cover_core_slot_patterns():
 
     generic = examples["generic_search_needs_core_slots"]["output"]
     assert generic["next_action"] == "missing_slots_question"
-    assert generic["missing_slots"] == ["target_area", "budget_max", "station_walk_max"]
+    assert generic["missing_slots"] == ["target_area", "budget_max", "layout_preference"]
+    assert generic["user_memory"]["listing_type"] == "賃貸"
     assert len(generic["follow_up_questions"]) == 3
     assert "例以外でも大丈夫" in generic["follow_up_questions"][0]["question"]
     assert "ざっくりでも大丈夫" in generic["follow_up_questions"][1]["question"]
 
     explicit = examples["explicit_area_budget_and_structure"]["output"]
+    assert explicit["user_memory"]["listing_type"] == "賃貸"
     assert explicit["user_memory"]["target_area"] == "町田"
     assert explicit["user_memory"]["budget_max"] == 100000
     assert explicit["user_memory"]["must_conditions"] == ["RC造"]
@@ -49,6 +51,7 @@ def test_planner_prompt_examples_golden_cases_cover_core_slot_patterns():
     assert any("11万円以下" in query for query in explicit["seed_queries"])
 
     merged = examples["memory_merge_with_must_and_nice_conditions"]["output"]
+    assert merged["user_memory"]["listing_type"] == "賃貸"
     assert merged["user_memory"]["target_area"] == "中野"
     assert merged["user_memory"]["budget_max"] == 140000
     assert merged["user_memory"]["station_walk_max"] == 10

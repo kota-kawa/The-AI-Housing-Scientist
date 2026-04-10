@@ -7,6 +7,7 @@ from app.stages.planner import run_planner
 def make_planner_payload(
     *,
     intent: str = "search",
+    listing_type: str | None = "賃貸",
     target_area: str | None = "江東区",
     budget_max: int | None = 120000,
     station_walk_max: int | None = 7,
@@ -47,6 +48,7 @@ def make_planner_payload(
             "rationale": "最初に母集団を作ってから絞る方が条件差分を見やすいためです。",
         }
     default_condition_reasons = {
+        "listing_type": "",
         "target_area": "",
         "budget_max": "",
         "station_walk_max": "",
@@ -61,6 +63,7 @@ def make_planner_payload(
     return {
         "intent": intent,
         "user_memory": {
+            "listing_type": listing_type,
             "target_area": target_area,
             "budget_max": budget_max,
             "station_walk_max": station_walk_max,
@@ -164,7 +167,8 @@ def test_planner_extracts_machida_and_rc_condition_via_llm():
         adapter=adapter,
     )
 
-    assert result["next_action"] == "search_and_compare"
+    assert result["next_action"] == "missing_slots_question"
+    assert result["missing_slots"] == ["layout_preference"]
     assert result["plan"]["target_area"] == "町田"
     assert result["plan"]["budget_max"] == 100000
     assert result["user_memory"]["must_conditions"] == ["RC造"]
@@ -177,6 +181,7 @@ def test_planner_starts_search_even_when_target_area_is_missing():
             budget_max=150000,
             station_walk_max=10,
             layout_preference="1LDK",
+            listing_type="賃貸",
             follow_up_questions=[
                 {
                     "slot": "target_area",
@@ -194,22 +199,29 @@ def test_planner_starts_search_even_when_target_area_is_missing():
         adapter=adapter,
     )
 
-    assert result["missing_slots"] == []
-    assert result["next_action"] == "search_and_compare"
+    assert result["missing_slots"] == ["target_area"]
+    assert result["next_action"] == "missing_slots_question"
     assert result["plan"]["target_area"] is None
-    assert result["follow_up_questions"][0]["slot"] == "target_area"
+    assert result["follow_up_questions"] == []
 
 
 def test_planner_asks_follow_up_questions_for_generic_request():
     adapter = FakePlannerAdapter(
         make_planner_payload(
+            listing_type=None,
             target_area=None,
             budget_max=None,
             station_walk_max=None,
             layout_preference=None,
             next_action="missing_slots_question",
-            missing_slots=["target_area", "budget_max", "station_walk_max"],
+            missing_slots=["listing_type", "target_area", "budget_max", "layout_preference"],
             follow_up_questions=[
+                {
+                    "slot": "listing_type",
+                    "label": "物件種別",
+                    "question": "賃貸か売買かを教えてください。",
+                    "examples": ["賃貸", "売買"],
+                },
                 {
                     "slot": "target_area",
                     "label": "希望エリア",
@@ -223,10 +235,10 @@ def test_planner_asks_follow_up_questions_for_generic_request():
                     "examples": ["10万円まで", "12万円以内", "15万円まで"],
                 },
                 {
-                    "slot": "station_walk_max",
-                    "label": "駅徒歩",
-                    "question": "駅から徒歩何分以内を希望しますか？",
-                    "examples": ["徒歩7分以内", "徒歩10分まで", "駅近だとうれしい"],
+                    "slot": "layout_preference",
+                    "label": "間取り",
+                    "question": "希望の間取りはありますか？",
+                    "examples": ["1K", "1LDK", "2LDK"],
                 },
             ],
         )
@@ -239,12 +251,8 @@ def test_planner_asks_follow_up_questions_for_generic_request():
     )
 
     assert result["next_action"] == "missing_slots_question"
-    assert result["missing_slots"] == ["target_area", "budget_max", "station_walk_max"]
-    assert [item["slot"] for item in result["follow_up_questions"]] == [
-        "target_area",
-        "budget_max",
-        "station_walk_max",
-    ]
+    assert result["missing_slots"] == ["listing_type", "target_area", "budget_max", "layout_preference"]
+    assert result["follow_up_questions"] == []
 
 
 def test_planner_uses_llm_generated_questions_queries_and_plan():
@@ -298,7 +306,8 @@ def test_planner_uses_llm_generated_questions_queries_and_plan():
 
     assert result["intent"] == "search"
     assert result["next_action"] == "search_and_compare"
-    assert result["seed_queries"][0] == "江東区 賃貸 12万円 1LDK ペット可"
+    assert result["seed_queries"][0].startswith("江東区 賃貸")
+    assert "ペット可" in result["seed_queries"][0]
     assert (
         result["research_plan"]["strategy"][1]
         == "在宅ワーク向け設備や回線条件は詳細ページで重点確認します。"
@@ -311,7 +320,7 @@ def test_planner_uses_llm_generated_questions_queries_and_plan():
     )
 
 
-def test_planner_keeps_up_to_eight_seed_queries():
+def test_planner_rebuilds_seed_queries_from_required_slots():
     adapter = FakePlannerAdapter(
         make_planner_payload(
             seed_queries=[f"query-{index}" for index in range(10)],
@@ -324,20 +333,28 @@ def test_planner_keeps_up_to_eight_seed_queries():
         adapter=adapter,
     )
 
-    assert result["seed_queries"] == [f"query-{index}" for index in range(8)]
+    assert len(result["seed_queries"]) <= 5
+    assert result["seed_queries"][0].startswith("江東区 賃貸")
 
 
 def test_planner_uses_llm_intent_for_natural_search_request_without_structured_slots():
     adapter = FakePlannerAdapter(
         make_planner_payload(
+            listing_type=None,
             target_area=None,
             budget_max=None,
             station_walk_max=None,
             layout_preference=None,
             move_in_date="asap",
             next_action="missing_slots_question",
-            missing_slots=["target_area", "budget_max", "layout_preference"],
+            missing_slots=["listing_type", "target_area", "budget_max", "layout_preference"],
             follow_up_questions=[
+                {
+                    "slot": "listing_type",
+                    "label": "物件種別",
+                    "question": "賃貸か売買かを教えてください。",
+                    "examples": ["賃貸", "売買"],
+                },
                 {
                     "slot": "target_area",
                     "label": "希望エリア",
@@ -368,19 +385,20 @@ def test_planner_uses_llm_intent_for_natural_search_request_without_structured_s
 
     assert result["intent"] == "search"
     assert result["next_action"] == "missing_slots_question"
-    assert result["missing_slots"] == ["target_area", "budget_max", "layout_preference"]
+    assert result["missing_slots"] == ["listing_type", "target_area", "budget_max", "layout_preference"]
 
 
 def test_planner_uses_llm_follow_up_questions_as_is_when_subset_selected():
     adapter = FakePlannerAdapter(
         make_planner_payload(
+            listing_type=None,
             target_area=None,
             budget_max=None,
             station_walk_max=None,
             layout_preference=None,
             move_in_date=None,
             next_action="missing_slots_question",
-            missing_slots=["target_area"],
+            missing_slots=["listing_type", "target_area", "budget_max", "layout_preference"],
             follow_up_questions=[
                 {
                     "slot": "target_area",
@@ -399,8 +417,8 @@ def test_planner_uses_llm_follow_up_questions_as_is_when_subset_selected():
     )
 
     assert result["next_action"] == "missing_slots_question"
-    assert result["missing_slots"] == ["target_area"]
-    assert [item["slot"] for item in result["follow_up_questions"]] == ["target_area"]
+    assert result["missing_slots"] == ["listing_type", "target_area", "budget_max", "layout_preference"]
+    assert result["follow_up_questions"] == []
 
 
 def test_planner_uses_llm_condition_reasons_as_is_without_default_backfill():
@@ -423,12 +441,13 @@ def test_planner_uses_llm_condition_reasons_as_is_without_default_backfill():
 
     assert result["next_action"] == "search_and_compare"
     assert result["condition_reasons"] == {
-        "budget_max": "",
-        "target_area": "",
-        "station_walk_max": "",
+        "listing_type": "賃貸か売買かで見るべき候補が大きく変わるためです。",
+        "budget_max": "予算超過の候補を早めに外すためです。",
+        "target_area": "生活圏を固定して候補を絞り込むためです。",
+        "station_walk_max": "移動負担に直結する条件だからです。",
         "move_in_date": "",
-        "layout_preference": "",
-        "must_conditions": "",
+        "layout_preference": "住み方に合う間取りを優先するためです。",
+        "must_conditions": "外せない条件なので優先的に確認するためです。",
         "nice_to_have": "",
     }
 
@@ -450,5 +469,5 @@ def test_planner_injects_two_prompt_examples_into_llm_payload():
     assert all("output" in item for item in payload["examples"])
     assert any("非網羅" in rule or "固定候補" in rule for rule in payload["decision_rules"])
     assert any("近隣エリア" in rule or "沿線違い" in rule for rule in payload["decision_rules"])
-    assert any("必須条件を外した比較用" in rule for rule in payload["decision_rules"])
+    assert any("基本クエリだけ" in rule or "近隣エリアや沿線の拡張は入れない" in rule for rule in payload["decision_rules"])
     assert "固定してはいけません" in payload["examples_instruction"]

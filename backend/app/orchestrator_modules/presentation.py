@@ -725,6 +725,7 @@ class OrchestratorPresentationMixin:
         if not response.status_label:
             status_map: dict[str, str] = {
                 "awaiting_profile_resume": "前回条件の引き継ぎ確認",
+                "awaiting_plan_inputs": "検索前の条件入力",
                 "awaiting_user_input": "追加条件の回答待ち",
                 "awaiting_plan_confirmation": "調査計画の承認待ち",
                 "research_queued": "調査キュー登録済み",

@@ -4,11 +4,100 @@ from typing import Any
 
 from app.llm.base import LLMAdapter
 from app.models import ChatMessageResponse, UIBlock
+from app.stages.planner import (
+    PLANNING_SLOT_EXAMPLES,
+    PLANNING_SLOT_INPUT_KIND,
+    PLANNING_SLOT_KEYBOARD_HINT,
+    PLANNING_SLOT_LABELS,
+    PLANNING_SLOT_PLACEHOLDERS,
+    PLANNING_SLOT_QUESTIONS,
+    QUESTION_SLOT_ORDER,
+)
 
 from .shared import RESEARCH_STAGE_ORDER, _generate_llm_plan_presentation
 
 
 class OrchestratorPlanningMixin:
+    # JP: textを正規化する。
+    # EN: Normalize text.
+    def _normalize_planning_text(self, value: Any) -> str:
+        return " ".join(str(value or "").split()).strip()
+
+    # JP: profile area候補を集める。
+    # EN: Collect profile area suggestions.
+    def _profile_area_examples(self, profile_memory: dict[str, Any] | None) -> list[str]:
+        profile_memory = profile_memory or {}
+        suggestions: list[str] = []
+        for entry in list(profile_memory.get("search_history", []) or [])[-5:]:
+            user_memory = entry.get("user_memory", {}) or {}
+            area = self._normalize_planning_text(user_memory.get("target_area"))
+            if area and area not in suggestions:
+                suggestions.append(area)
+            if len(suggestions) >= 3:
+                break
+        if suggestions:
+            return suggestions
+        return ["中野", "吉祥寺", "横浜駅周辺"]
+
+    # JP: slot examplesを取得する。
+    # EN: Get slot examples.
+    def _planning_slot_examples(
+        self,
+        slot: str,
+        *,
+        profile_memory: dict[str, Any] | None = None,
+    ) -> list[str]:
+        if slot == "target_area":
+            return self._profile_area_examples(profile_memory)
+        return list(PLANNING_SLOT_EXAMPLES.get(slot, []))
+
+    # JP: current answerを構築する。
+    # EN: Build current answer display.
+    def _planning_current_answer(self, slot: str, user_memory: dict[str, Any]) -> str:
+        value = user_memory.get(slot)
+        if isinstance(value, list):
+            return " / ".join(str(item) for item in value if str(item).strip())
+        if slot == "budget_max" and value:
+            amount = int(value)
+            return f"{int(amount / 10000)}万円まで" if amount % 10000 == 0 else f"{amount:,}円まで"
+        if slot == "station_walk_max" and value:
+            return f"徒歩{int(value)}分以内"
+        return self._normalize_planning_text(value)
+
+    # JP: planning questionsを構築する。
+    # EN: Build planning questions.
+    def _build_planning_questions(
+        self,
+        *,
+        user_memory: dict[str, Any],
+        slots: list[str],
+        required: bool,
+        profile_memory: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        questions: list[dict[str, Any]] = []
+        for slot in QUESTION_SLOT_ORDER:
+            if slot not in slots:
+                continue
+            current_value = self._planning_current_answer(slot, user_memory)
+            examples = self._planning_slot_examples(slot, profile_memory=profile_memory)
+            selected_example = current_value if current_value and current_value in examples else ""
+            free_text = "" if selected_example else current_value
+            questions.append(
+                {
+                    "slot": slot,
+                    "label": PLANNING_SLOT_LABELS.get(slot, slot),
+                    "question": PLANNING_SLOT_QUESTIONS.get(slot, ""),
+                    "examples": examples,
+                    "required": required,
+                    "input_kind": PLANNING_SLOT_INPUT_KIND.get(slot, "text"),
+                    "text_placeholder": PLANNING_SLOT_PLACEHOLDERS.get(slot, ""),
+                    "keyboard_hint": PLANNING_SLOT_KEYBOARD_HINT.get(slot, "default"),
+                    "selected_example": selected_example,
+                    "free_text": free_text,
+                }
+            )
+        return questions
+
     # JP: tree prune reason labelを処理する。
     # EN: Process tree prune reason label.
     def _tree_prune_reason_label(self, reason: str) -> str:
@@ -354,42 +443,64 @@ class OrchestratorPlanningMixin:
         self,
         user_memory: dict[str, Any],
         condition_reasons: dict[str, str] | None = None,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         condition_reasons = condition_reasons or {}
-        conditions: list[dict[str, str]] = []
+        conditions: list[dict[str, Any]] = []
 
         # JP: add conditionを処理する。
         # EN: Process add condition.
-        def add_condition(key: str, label: str, value: str) -> None:
-            item = {"label": label, "value": value}
+        def add_condition(key: str, label: str, value: str, *, priority: str) -> None:
+            item = {"label": label, "value": value, "priority": priority, "changed": False}
             reason = str(condition_reasons.get(key) or "").strip()
             if reason:
                 item["reason"] = reason
             conditions.append(item)
 
+        if user_memory.get("listing_type"):
+            add_condition(
+                "listing_type",
+                "物件種別",
+                str(user_memory["listing_type"]),
+                priority="required",
+            )
         if user_memory.get("target_area"):
-            add_condition("target_area", "希望エリア", str(user_memory["target_area"]))
+            add_condition("target_area", "希望エリア", str(user_memory["target_area"]), priority="required")
         if user_memory.get("budget_max"):
-            add_condition("budget_max", "家賃上限", self._format_money(user_memory["budget_max"]))
+            add_condition(
+                "budget_max",
+                "家賃上限",
+                self._format_money(user_memory["budget_max"]),
+                priority="required",
+            )
         if user_memory.get("layout_preference"):
-            add_condition("layout_preference", "間取り", str(user_memory["layout_preference"]))
+            add_condition(
+                "layout_preference",
+                "間取り",
+                str(user_memory["layout_preference"]),
+                priority="required",
+            )
         if user_memory.get("station_walk_max"):
             add_condition(
-                "station_walk_max", "駅徒歩", self._format_walk(user_memory["station_walk_max"])
+                "station_walk_max",
+                "駅徒歩",
+                self._format_walk(user_memory["station_walk_max"]),
+                priority="preferred",
             )
         if user_memory.get("move_in_date"):
-            add_condition("move_in_date", "入居時期", str(user_memory["move_in_date"]))
+            add_condition("move_in_date", "入居時期", str(user_memory["move_in_date"]), priority="context")
         if user_memory.get("must_conditions"):
             add_condition(
                 "must_conditions",
                 "必須条件",
                 " / ".join(str(item) for item in user_memory["must_conditions"]),
+                priority="required",
             )
         if user_memory.get("nice_to_have"):
             add_condition(
                 "nice_to_have",
                 "あると良い条件",
                 " / ".join(str(item) for item in user_memory["nice_to_have"]),
+                priority="preferred",
             )
         return conditions
 

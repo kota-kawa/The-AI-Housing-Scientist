@@ -2594,6 +2594,9 @@ export default function StructuredBlock({
             const selectedExample = toDisplayText(item.selected_example);
             const freeText = toDisplayText(item.free_text);
             const answerValue = freeText || selectedExample;
+            const textPlaceholder =
+              toDisplayText(item.text_placeholder) || getQuestionInputPlaceholder(label);
+            const keyboardHint = toDisplayText(item.keyboard_hint);
 
             return (
               <div
@@ -2632,8 +2635,9 @@ export default function StructuredBlock({
                     value={answerValue}
                     disabled={disabled}
                     rows={2}
+                    inputMode={keyboardHint === "numeric" ? "numeric" : "text"}
                     onChange={(event) => onQuestionInputChange?.(idx, event.target.value)}
-                    placeholder={getQuestionInputPlaceholder(label)}
+                    placeholder={textPlaceholder}
                     className="min-h-[72px] w-full resize-y rounded-2xl border border-emerald-200 bg-emerald-50/45 px-3 py-2 text-sm leading-6 text-ink outline-none transition placeholder:text-emerald-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:opacity-55"
                   />
                 </div>

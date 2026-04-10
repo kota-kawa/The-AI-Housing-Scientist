@@ -7,6 +7,7 @@ import {
   LLMCapabilities,
   LLMConfig,
   LLMRouteKey,
+  PlannerAnswer,
   SessionLLMConfig,
   UIBlock,
   confirmAction,
@@ -35,11 +36,16 @@ type ChecklistEntry = {
 };
 
 type QuestionEntry = {
+  slot?: string;
   label?: string;
   question?: string;
   examples?: string[];
   selected_example?: string;
   free_text?: string;
+  required?: boolean;
+  input_kind?: string;
+  text_placeholder?: string;
+  keyboard_hint?: string;
 };
 
 type CardEntry = {
@@ -66,6 +72,17 @@ const SAMPLE_PROMPTS: string[] = [
   "築20年以内、保証人不要、家賃8万円台で安心して住める物件を教えて",
   "在宅ワーク向けに、書斎が取れる広めの間取りを3件比較したい",
 ];
+
+const PLANNER_SLOT_LABELS: Record<string, string> = {
+  listing_type: "物件種別",
+  target_area: "希望エリア",
+  budget_max: "家賃上限",
+  layout_preference: "間取り",
+  station_walk_max: "駅徒歩",
+  move_in_date: "入居時期",
+  must_conditions: "必須条件",
+  nice_to_have: "あると良い条件",
+};
 
 /**
  * 日本語: API応答をUI表示用のアシスタントメッセージ形式へ変換します。
@@ -125,6 +142,9 @@ function toStatusLabel(payload: ChatMessageResponse): string {
   }
   if (payload.status === "awaiting_user_input") {
     return "追加条件の回答待ち";
+  }
+  if (payload.status === "awaiting_plan_inputs") {
+    return "検索前の条件入力";
   }
   if (payload.status === "awaiting_plan_confirmation") {
     return "調査計画の承認待ち";
@@ -518,6 +538,9 @@ export default function App() {
     if (responseState === "awaiting_contract_text") {
       return "契約書・重要事項説明・初期費用表の文面を貼り付けてください…";
     }
+    if (responseState === "awaiting_plan_inputs") {
+      return "希望条件を自由入力でも追加できます…";
+    }
     if (responseState === "awaiting_plan_confirmation") {
       return "条件を追加すると、調査計画を更新できます…";
     }
@@ -608,8 +631,8 @@ export default function App() {
    * 日本語: 入力文字列を送信し、ユーザー/アシスタント双方のメッセージ状態を更新します。
    * English: Sends input text and updates both user and assistant message state.
    */
-  const submitMessage = async (messageText: string) => {
-    if (!sessionId || !messageText.trim() || loading || isResearchBusy) {
+  const submitMessage = async (messageText: string, plannerAnswers: PlannerAnswer[] = []) => {
+    if (!sessionId || (!messageText.trim() && plannerAnswers.length === 0) || loading || isResearchBusy) {
       return;
     }
 
@@ -624,13 +647,17 @@ export default function App() {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      text: userText,
+      text:
+        userText ||
+        plannerAnswers
+          .map((item) => `${PLANNER_SLOT_LABELS[item.slot] ?? item.slot}: ${item.value}`)
+          .join(" / "),
     };
     forceAutoScrollRef.current = true;
     setMessages((prev) => [...prev, userMessage]);
 
     try {
-      const response = await sendMessage(sessionId, userText);
+      const response = await sendMessage(sessionId, userText, undefined, plannerAnswers);
       appendAssistantResponse(response);
       setResponseState(response.status);
       setStatus(toStatusLabel(response));
@@ -954,12 +981,22 @@ export default function App() {
         return label ? `${label}は${answer}` : answer;
       })
       .filter((item): item is string => Boolean(item));
+    const plannerAnswers = items
+      .map((item) => {
+        const answer = (item.free_text ?? item.selected_example ?? "").trim();
+        const slot = (item.slot ?? "").trim();
+        if (!answer || !slot) {
+          return null;
+        }
+        return { slot, value: answer };
+      })
+      .filter((item): item is PlannerAnswer => Boolean(item));
 
-    if (selectedAnswers.length === 0) {
+    if (selectedAnswers.length === 0 && plannerAnswers.length === 0) {
       return;
     }
 
-    void submitMessage(selectedAnswers.join("、"));
+    void submitMessage(selectedAnswers.join("、"), plannerAnswers);
   };
 
   /**
