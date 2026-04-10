@@ -6,7 +6,6 @@ from app.config import ProviderName
 from app.db import utc_now_iso
 from app.llm_config import route_config_for
 from app.models import ChatMessageResponse, UIBlock
-from app.profile_memory import merge_learned_preferences, summarize_memory_labels
 from app.stages import run_communication
 from app.stages.planner import REQUIRED_PLANNING_SLOTS, detect_search_signal, run_planner
 from app.stages.risk_check import looks_like_contract_text
@@ -98,27 +97,17 @@ class OrchestratorActionsMixin:
         latest_job = self.db.get_research_job(latest_job_id) if latest_job_id else None
 
         if action_type == "resume_profile_memory":
-            profile = self.db.get_profile(session["profile_id"])
-            if profile is None:
-                raise RuntimeError("profile not found")
-
-            restored_user_memory = profile["user_memory"]
             task_memory["profile_resume_pending"] = False
             task_memory["status"] = "awaiting_plan_inputs"
-            self.db.update_memories(session_id, restored_user_memory, task_memory)
+            self.db.update_memories(session_id, {}, task_memory)
 
-            labels = summarize_memory_labels(restored_user_memory)
-            message = (
-                f"前回の条件を引き継ぎました。現在の条件は {' / '.join(labels[:5])} です。"
-                if labels
-                else "前回の条件を引き継ぎました。必要なら新しい条件を追加してください。"
-            )
+            message = "前回の条件は引き継がず、新しい条件で住まい探しを始めます。"
             response = ChatMessageResponse(
                 status="awaiting_plan_inputs",
                 assistant_message=message,
                 missing_slots=[],
                 next_action="await_search_input",
-                blocks=[UIBlock(type="text", title="引き継いだ条件", content={"body": message})],
+                blocks=[UIBlock(type="text", title="新しい検索を開始", content={"body": message})],
                 pending_confirmation=False,
                 pending_action=None,
             )
@@ -337,44 +326,6 @@ class OrchestratorActionsMixin:
             task_memory["property_reactions"] = updated_reactions
             if reaction == "exclude" and task_memory.get("selected_property_id") == property_id:
                 task_memory["selected_property_id"] = None
-
-            profile_user_memory = None
-            if session["profile_id"] and reaction in {"favorite", "exclude"}:
-                profile_adapter = self._get_adapter_for_route(
-                    llm_config=llm_config,
-                    route_key="planner",
-                    session_id=session_id,
-                    interaction_type="profile",
-                )
-                profile_user_memory = self._sync_profile_after_reaction(
-                    profile_id=session["profile_id"],
-                    property_snapshot=property_snapshot,
-                    reaction=reaction,
-                    adapter=profile_adapter,
-                    strategy_context={
-                        "selected_branch_id": str(task_memory.get("selected_branch_id") or ""),
-                        "selected_path_tags": list(
-                            dict.fromkeys(
-                                str(tag).strip()
-                                for node in task_memory.get("selected_path", []) or []
-                                for tag in node.get("strategy_tags", []) or []
-                                if str(tag).strip()
-                            )
-                        ),
-                        "latest_strategy_episode_id": str(
-                            task_memory.get("latest_strategy_episode_id") or ""
-                        ),
-                    },
-                )
-            if profile_user_memory is not None:
-                user_memory = merge_learned_preferences(
-                    {
-                        key: value
-                        for key, value in user_memory.items()
-                        if key != "learned_preferences"
-                    },
-                    profile_user_memory.get("learned_preferences", {}) or {},
-                )
 
             self.db.update_memories(session_id, user_memory, task_memory)
 

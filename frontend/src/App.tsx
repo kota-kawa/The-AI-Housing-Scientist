@@ -53,7 +53,6 @@ type CardEntry = {
   compare_selected?: boolean;
 };
 
-const PROFILE_STORAGE_KEY = "housing_scientist_profile_id";
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 120;
 const DEFAULT_BACKGROUND_IMAGE = 'url("/housing-scientist.png")';
 const SEARCH_BACKGROUND_IMAGE = 'url("/search.png")';
@@ -392,16 +391,13 @@ export default function App() {
      */
     const bootstrap = async () => {
       try {
-        const storedProfileId =
-          window.localStorage.getItem(PROFILE_STORAGE_KEY) ?? crypto.randomUUID();
         const [session, preflight, capabilities] = await Promise.all([
-          createSession(storedProfileId),
+          createSession(undefined, true),
           fetchPreflight(),
           fetchLlmCapabilities(),
         ]);
         const sessionLlmConfig = await fetchSessionLlmConfig(session.session_id);
         setSessionId(session.session_id);
-        window.localStorage.setItem(PROFILE_STORAGE_KEY, session.profile_id);
         setLlmCapabilities(capabilities);
         setLlmConfig(sessionLlmConfig);
         setLlmDraft(cloneLlmConfig(sessionLlmConfig));
@@ -831,11 +827,9 @@ export default function App() {
     forceAutoScrollRef.current = true;
 
     try {
-      const profileId = window.localStorage.getItem(PROFILE_STORAGE_KEY) ?? undefined;
-      const session = await createSession(profileId, true);
+      const session = await createSession(undefined, true);
       const sessionLlmConfig = await fetchSessionLlmConfig(session.session_id);
       setSessionId(session.session_id);
-      window.localStorage.setItem(PROFILE_STORAGE_KEY, session.profile_id);
       setInput("");
       setLlmConfig(sessionLlmConfig);
       setLlmDraft(cloneLlmConfig(sessionLlmConfig));

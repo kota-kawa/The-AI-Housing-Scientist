@@ -328,7 +328,7 @@ class Database:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO profiles(
+                INSERT OR IGNORE INTO profiles(
                     id,
                     user_memory_json,
                     profile_memory_json,

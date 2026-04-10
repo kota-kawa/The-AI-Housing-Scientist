@@ -528,23 +528,10 @@ class OrchestratorResearchMixin:
             final_report_result.get("report_markdown") or ""
         ).strip()
 
-        session = self.db.get_session(session_id)
-        profile_id = session["profile_id"] if session is not None else ""
         updated_user_memory = approved_plan.get("user_memory_snapshot", user_memory)
-        if profile_id:
-            updated_user_memory = self._sync_profile_after_search(
-                profile_id=profile_id,
-                user_memory=updated_user_memory,
-                query=execution_result.query,
-                adapter=research_adapter,
-                search_outcome={
-                    "selected_branch_id": execution_result.selected_branch_id,
-                    "selected_path": execution_result.selected_path,
-                    "search_tree_summary": execution_result.search_tree_summary,
-                    "readiness": execution_result.offline_evaluation.get("readiness", ""),
-                    "top_issues": execution_result.failure_summary.get("top_issues", []),
-                },
-            )
+        updated_user_memory = {
+            key: value for key, value in updated_user_memory.items() if key != "learned_preferences"
+        }
 
         task_memory["status"] = "research_completed"
         task_memory["awaiting_contract_text"] = False

@@ -117,13 +117,13 @@ def get_llm_capabilities() -> LLMCapabilitiesResponse:
 # EN: Create session.
 @app.post("/api/chat/sessions", response_model=CreateSessionResponse)
 def create_session(body: CreateSessionRequest | None = None) -> CreateSessionResponse:
-    profile_id, _ = app.state.db.get_or_create_profile(body.profile_id if body else None)
-    session_id, created_at = app.state.db.create_session(profile_id=profile_id)
+    # Always start from an isolated profile so previous sessions never influence a new session.
+    session_id, created_at = app.state.db.create_session(profile_id=None)
+    session = app.state.db.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=500, detail="session creation failed")
+    profile_id = session["profile_id"]
     initial_response = None
-    if not (body.fresh_start if body else False):
-        initial_response = app.state.orchestrator.build_session_initial_response(session_id)
-    if initial_response is not None:
-        app.state.db.add_message(session_id, "assistant", initial_response.model_dump())
     return CreateSessionResponse(
         session_id=session_id,
         profile_id=profile_id,

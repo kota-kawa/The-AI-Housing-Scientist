@@ -420,7 +420,7 @@ def test_orchestrator_uses_llm_generated_plan_content(tmp_path: Path):
     assert must_condition["reason"] == "ペット可は候補数が少ないため優先度が高い条件です。"
 
 
-def test_profile_memory_is_available_across_sessions(tmp_path: Path):
+def test_profile_memory_is_not_available_across_sessions(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
     db.init()
@@ -452,13 +452,16 @@ def test_profile_memory_is_available_across_sessions(tmp_path: Path):
 
     assert reaction_response.status == "research_completed"
 
+    profile = db.get_profile(profile_id)
+    assert profile is not None
+    assert profile["user_memory"] == {}
+    assert profile["profile_memory"]["search_history"] == []
+    assert profile["profile_memory"]["reaction_history"] == []
+
     second_session_id, _ = db.create_session(profile_id=profile_id)
     initial_response = orchestrator.build_session_initial_response(second_session_id)
 
-    assert initial_response is not None
-    assert initial_response.status == "awaiting_profile_resume"
-    assert initial_response.assistant_message == "前回の条件を引き継ぎますか？"
-    assert any("江東区" in str(block.content.get("body", "")) for block in initial_response.blocks)
+    assert initial_response is None
 
 
 def test_orchestrator_uses_llm_plan_presentation_for_plan_copy(tmp_path: Path):
@@ -650,7 +653,7 @@ def test_research_summary_prompt_includes_branch_tradeoffs_and_followups(tmp_pat
     assert "selected_path" in adapter.last_report_user
 
 
-def test_fresh_start_session_skips_profile_resume_prompt(tmp_path: Path):
+def test_create_session_endpoint_always_starts_isolated_profile(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
     db.init()
@@ -689,7 +692,7 @@ def test_fresh_start_session_skips_profile_resume_prompt(tmp_path: Path):
         CreateSessionRequest(profile_id=profile_id, fresh_start=True)
     )
 
-    assert response.profile_id == profile_id
+    assert response.profile_id != profile_id
     assert response.initial_response is None
 
 
@@ -726,7 +729,7 @@ def test_retry_and_reaction_feed_strategy_memory(tmp_path: Path):
     profile = db.get_profile(profile_id)
     assert profile is not None
     strategy_memory = profile["profile_memory"].get("strategy_memory", {})
-    assert strategy_memory["preferred_strategy_tags"]
+    assert strategy_memory == {}
 
     retry_response = orchestrator.execute_action(
         session_id=session_id,

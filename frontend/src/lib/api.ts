@@ -144,8 +144,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /**
- * 日本語: チャットセッションを作成し、必要なら前回プロフィールを引き継ぎます。
- * English: Creates a chat session and optionally resumes with a previous profile.
+ * 日本語: チャットセッションを作成します。バックエンド側では常に新規プロフィールで開始します。
+ * English: Creates a chat session. The backend always starts with an isolated profile.
  */
 export async function createSession(
   profileId?: string,
