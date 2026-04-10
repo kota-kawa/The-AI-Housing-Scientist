@@ -53,6 +53,9 @@ LLM_EXTRACTION_CONFIDENCE_THRESHOLD = 0.35
 # JP: 賃貸物件の家賃として妥当な最低金額（円）。これ未満は抽出エラーとみなす。
 # EN: Minimum plausible monthly rent (yen). Values below this are treated as extraction errors.
 MIN_PLAUSIBLE_RENT = 5000
+# JP: 賃貸物件の家賃として妥当な最高金額（円）。これ超過は売買価格の誤抽出とみなす。
+# EN: Maximum plausible monthly rent (yen). Values above this are treated as sale price misextraction.
+MAX_PLAUSIBLE_RENT = 1_000_000
 
 
 # JP: textを正規化する。
@@ -161,17 +164,21 @@ def _extract_rent(text: str) -> int:
     if match_mixed:
         return int(match_mixed.group(1)) * 10000 + int(match_mixed.group(2))
 
-    for pattern in [
-        rf"{rent_label_prefix}(\d+(?:\.\d+)?)\s*万",
-        rf"{rent_label_prefix}(\d{{2,3}}(?:,\d{{3}})?)\s*円",
-    ]:
-        match = re.search(pattern, normalized)
-        if not match:
-            continue
-        raw = match.group(1).replace(",", "")
-        if raw.isdigit():
-            return int(raw)
-        return int(float(raw) * 10000)
+    # JP: ラベル付き万パターン（例: 家賃4万 → 40000）
+    # EN: Labeled 万 pattern (e.g. 家賃4万 → 40000)
+    match_man = re.search(
+        rf"{rent_label_prefix}(\d+(?:\.\d+)?)\s*万", normalized
+    )
+    if match_man:
+        return int(float(match_man.group(1)) * 10000)
+
+    # JP: ラベル付き円パターン（例: 家賃120,000円 → 120000）
+    # EN: Labeled 円 pattern (e.g. 家賃120,000円 → 120000)
+    match_yen = re.search(
+        rf"{rent_label_prefix}(\d{{2,3}}(?:,\d{{3}})?)\s*円", normalized
+    )
+    if match_yen:
+        return int(match_yen.group(1).replace(",", ""))
 
     for match in re.finditer(r"(\d+(?:\.\d+)?)\s*万", normalized):
         window_start = max(0, match.start() - 10)
@@ -439,8 +446,8 @@ def _build_fallback_property(
     station_walk_min = _extract_station_walk(combined)
 
     # JP: 明らかに異常な家賃値は抽出失敗として扱い、LLMに再抽出させる。
-    # EN: Treat implausibly low rent as extraction failure so LLM can re-extract.
-    if 0 < rent < MIN_PLAUSIBLE_RENT:
+    # EN: Treat implausible rent as extraction failure so LLM can re-extract.
+    if rent > 0 and not (MIN_PLAUSIBLE_RENT <= rent <= MAX_PLAUSIBLE_RENT):
         rent = 0
 
     llm_fields, _ = _extract_property_fields_with_llm(
@@ -457,7 +464,7 @@ def _build_fallback_property(
     )
 
     llm_rent = int(llm_fields.get("rent") or 0)
-    if 0 < llm_rent < MIN_PLAUSIBLE_RENT:
+    if llm_rent > 0 and not (MIN_PLAUSIBLE_RENT <= llm_rent <= MAX_PLAUSIBLE_RENT):
         llm_rent = 0
 
     return PropertyNormalized(
@@ -534,8 +541,8 @@ def _build_detail_property(
     )
 
     # JP: 明らかに異常な家賃値は抽出失敗として扱い、LLMに再抽出させる。
-    # EN: Treat implausibly low rent as extraction failure so LLM can re-extract.
-    if 0 < rent < MIN_PLAUSIBLE_RENT:
+    # EN: Treat implausible rent as extraction failure so LLM can re-extract.
+    if rent > 0 and not (MIN_PLAUSIBLE_RENT <= rent <= MAX_PLAUSIBLE_RENT):
         rent = 0
 
     llm_fields, _ = _extract_property_fields_with_llm(
@@ -552,7 +559,7 @@ def _build_detail_property(
         text=text,
     )
     llm_rent = int(llm_fields.get("rent") or 0)
-    if 0 < llm_rent < MIN_PLAUSIBLE_RENT:
+    if llm_rent > 0 and not (MIN_PLAUSIBLE_RENT <= llm_rent <= MAX_PLAUSIBLE_RENT):
         llm_rent = 0
     layout = layout or str(llm_fields.get("layout") or "")
     area_m2 = area_m2 or float(llm_fields.get("area_m2") or 0.0)

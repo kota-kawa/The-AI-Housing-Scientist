@@ -31,6 +31,30 @@ REFERENCE_TOKENS = (
     "反転タイプ",
     "室内写真はイメージ",
 )
+# JP: 売買・購入物件を示すトークン。賃貸検索では除外対象。
+# EN: Tokens indicating sale/purchase listings. Excluded when user searches for rentals.
+SALE_LISTING_TOKENS = (
+    "購入",
+    "分譲",
+    "売買",
+    "売却",
+    "新築一戸建て",
+    "中古一戸建て",
+    "中古住宅",
+    "建売",
+    "物件価格",
+    "販売価格",
+)
+# JP: 賃貸物件を示すトークン。売買検索では除外対象。
+# EN: Tokens indicating rental listings. Excluded when user searches for purchases.
+RENTAL_LISTING_TOKENS = (
+    "賃貸",
+    "家賃",
+    "賃料",
+    "敷金",
+    "礼金",
+    "月額賃料",
+)
 LAYOUT_PATTERN = re.compile(r"(\d(?:SLDK|SDK|LDK|DK|K|R))", re.IGNORECASE)
 
 
@@ -198,6 +222,7 @@ def _rule_review_for_property(
     detail_html: str,
     today: date,
     target_area: str = "",
+    listing_type: str = "",
 ) -> dict[str, Any]:
     source_text = " ".join(
         [
@@ -231,6 +256,23 @@ def _rule_review_for_property(
         "listing_consistency": 5,
         "evidence_completeness": _evidence_completeness_score(prop, raw_result, detail_html),
     }
+
+    # JP: ユーザーの要求種別に合わない物件を除外する。
+    # EN: Drop listings that don't match the user's requested listing type.
+    if listing_type == "賃貸":
+        if any(token in source_text for token in SALE_LISTING_TOKENS):
+            scores["listing_consistency"] = 1
+            inconsistencies.append(
+                "売買・購入物件の情報であり、賃貸物件ではないため除外"
+            )
+            hard_drop = True
+    elif listing_type == "売買":
+        if any(token in source_text for token in RENTAL_LISTING_TOKENS):
+            scores["listing_consistency"] = 1
+            inconsistencies.append(
+                "賃貸物件の情報であり、売買物件ではないため除外"
+            )
+            hard_drop = True
 
     if any(token in source_text for token in UNAVAILABLE_TOKENS):
         scores["freshness"] = 1
@@ -454,7 +496,7 @@ def _build_llm_integrity_reviews(
 
     result = adapter.generate_structured(
         system=(
-            "You are a strict Japanese rental data integrity reviewer. "
+            "You are a strict Japanese property data integrity reviewer. "
             "Review each property like an independent quality-control stage before ranking. "
             "Use only explicit evidence from the provided listing text and detail excerpts. "
             "Do not assume that missing facts are true."
@@ -541,6 +583,7 @@ def run_integrity_review(
     adapter: LLMAdapter | None = None,
     today: date | None = None,
     target_area: str = "",
+    listing_type: str = "",
 ) -> dict[str, Any]:
     resolved_today = today or date.today()
     raw_by_url = {
@@ -560,6 +603,7 @@ def run_integrity_review(
             detail_html=str(detail_lookup.get(detail_url) or ""),
             today=resolved_today,
             target_area=target_area,
+            listing_type=listing_type,
         )
         rule_reviews_by_id[rule_review["property_id_norm"]] = rule_review
 

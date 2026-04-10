@@ -156,6 +156,7 @@ class AgentManagerTreeMixin:
         layout = str(user_memory.get("layout_preference") or "").strip()
         budget = int(user_memory.get("budget_max") or 0)
         walk = int(user_memory.get("station_walk_max") or 0)
+        lt = str(user_memory.get("listing_type") or "").strip()
         must_conditions = [
             str(item).strip()
             for item in user_memory.get("must_conditions", []) or []
@@ -171,61 +172,62 @@ class AgentManagerTreeMixin:
         if operator == "tighten_match":
             queries.extend(
                 [
-                    self._compose_query(area, layout, " ".join(must_conditions[:2]), "賃貸"),
+                    self._compose_query(area, layout, " ".join(must_conditions[:2]), lt),
                     self._compose_query(
-                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "賃貸"
+                        area, layout, f"{int(budget / 10000)}万円" if budget else "", lt
                     ),
-                    self._compose_query(area, layout, f"徒歩{walk}分" if walk else "", "賃貸"),
+                    self._compose_query(area, layout, f"徒歩{walk}分" if walk else "", lt),
                 ]
             )
         elif operator == "relax_for_coverage":
             queries.extend(
                 [
-                    self._compose_query(area, "賃貸"),
-                    self._compose_query(area, "住みやすい", "賃貸"),
-                    self._compose_query(area, " ".join(nice_to_have[:2]), "賃貸"),
+                    self._compose_query(area, lt),
+                    self._compose_query(area, "住みやすい", lt),
+                    self._compose_query(area, " ".join(nice_to_have[:2]), lt),
                 ]
             )
         elif operator == "source_diversify":
+            lt_info = f"{lt}情報" if lt else "物件情報"
             queries.extend(
                 [
-                    self._compose_query(area, layout, "賃貸情報"),
-                    self._compose_query(area, layout, "募集", "賃貸"),
-                    self._compose_query(area, "不動産", "賃貸"),
+                    self._compose_query(area, layout, lt_info),
+                    self._compose_query(area, layout, "募集", lt),
+                    self._compose_query(area, "不動産", lt),
                 ]
             )
         elif operator == "detail_first":
             queries.extend(
                 [
                     self._compose_query(
-                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "設備", "賃貸"
+                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "設備", lt
                     ),
-                    self._compose_query(area, layout, "詳細", "賃貸"),
-                    self._compose_query(area, "初期費用", "賃貸"),
+                    self._compose_query(area, layout, "詳細", lt),
+                    self._compose_query(area, "初期費用", lt),
                 ]
             )
         elif operator == "schema_first":
             queries.extend(
                 [
-                    self._compose_query(area, layout, "設備", "賃貸"),
-                    self._compose_query(area, layout, "間取り", "賃貸"),
-                    self._compose_query(area, "徒歩", "賃貸"),
+                    self._compose_query(area, layout, "設備", lt),
+                    self._compose_query(area, layout, "間取り", lt),
+                    self._compose_query(area, "徒歩", lt),
                 ]
             )
         elif operator == "exploit_best":
             queries.extend(
                 [
                     self._compose_query(
-                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "駅近", "賃貸"
+                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "駅近", lt
                     ),
-                    self._compose_query(area, layout, "候補", "賃貸"),
+                    self._compose_query(area, layout, "候補", lt),
                 ]
             )
         elif operator == "explore_adjacent":
             queries.extend(
                 [
-                    self._compose_query(area, " ".join(nice_to_have[:2]), "住みやすい", "賃貸"),
-                    self._compose_query(area, layout, "広め", "賃貸"),
+                    self._compose_query(area, " ".join(nice_to_have[:2]), "住みやすい", lt),
+                    self._compose_query(area, layout, "広め", lt),
                 ]
             )
 

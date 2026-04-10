@@ -77,9 +77,10 @@ def _rewrite_query_for_brave(adapter: LLMAdapter, query: str) -> str:
     try:
         result = adapter.generate_text(
             system=(
-                "Convert the Japanese rental search query into space-separated keywords "
-                "optimized for Brave Search. Extract: area, layout (e.g. 1LDK), budget (e.g. 12万円以下), "
-                "station walk (e.g. 駅徒歩7分以内), and any must-conditions. "
+                "Convert the Japanese property search query into space-separated keywords "
+                "optimized for Brave Search. Extract: area, listing type (賃貸/売買), "
+                "layout (e.g. 1LDK), budget, station walk (e.g. 駅徒歩7分以内), "
+                "and any must-conditions. Preserve the listing type keyword as-is. "
                 "Output only the keyword string, no explanation."
             ),
             user=f"クエリ: {query}",

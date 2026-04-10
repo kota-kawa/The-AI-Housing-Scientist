@@ -31,7 +31,7 @@ NEXT_ACTION_VALUES = (
     "risk_check",
     "guidance",
 )
-TEXT_SLOT_KEYS = {"target_area", "move_in_date", "layout_preference"}
+TEXT_SLOT_KEYS = {"target_area", "move_in_date", "layout_preference", "listing_type"}
 INTEGER_SLOT_KEYS = {"budget_max", "station_walk_max"}
 LIST_SLOT_KEYS = {"must_conditions", "nice_to_have"}
 
@@ -64,6 +64,7 @@ def _blank_slot_memory() -> dict[str, Any]:
         "station_walk_max": None,
         "move_in_date": None,
         "layout_preference": None,
+        "listing_type": None,
         "must_conditions": [],
         "nice_to_have": [],
     }
@@ -177,6 +178,7 @@ def _empty_planner_result(user_memory: dict[str, Any]) -> dict[str, Any]:
             "station_walk_max": merged_memory.get("station_walk_max"),
             "move_in_date": merged_memory.get("move_in_date"),
             "layout_preference": merged_memory.get("layout_preference"),
+            "listing_type": merged_memory.get("listing_type"),
         },
         "missing_slots": [],
         "follow_up_questions": [],
@@ -248,6 +250,7 @@ def _planner_schema() -> dict[str, Any]:
             "station_walk_max": {"type": ["integer", "null"]},
             "move_in_date": {"type": ["string", "null"]},
             "layout_preference": {"type": ["string", "null"]},
+            "listing_type": {"type": ["string", "null"]},
             "must_conditions": {"type": "array", "items": {"type": "string"}},
             "nice_to_have": {"type": "array", "items": {"type": "string"}},
         },
@@ -257,6 +260,7 @@ def _planner_schema() -> dict[str, Any]:
             "station_walk_max",
             "move_in_date",
             "layout_preference",
+            "listing_type",
             "must_conditions",
             "nice_to_have",
         ],
@@ -340,6 +344,7 @@ def _llm_parse(
             "move_in_date": {"label": "入居時期", "meaning": "すぐなら asap"},
             "must_conditions": {"label": "必須条件", "meaning": "外せない条件"},
             "nice_to_have": {"label": "あると良い条件", "meaning": "できれば欲しい条件"},
+            "listing_type": {"label": "物件種別", "meaning": "賃貸 or 売買（ユーザーの意図から判定、明示なければ null）"},
         },
         "decision_rules": [
             "最新メッセージと current_user_memory を統合した user_memory を返す",
@@ -366,6 +371,7 @@ def _llm_parse(
             "『できれば』『あったらいい』『理想』『〜だとうれしい』は nice_to_have",
             "地名や駅名は『町田』『三軒茶屋』『武蔵小杉』のように接尾辞がなくても target_area に入れる",
             "RC / SRC / 鉄筋コンクリート / 鉄骨 / 木造 など建物構造も条件として扱う",
+            "listing_type はユーザーのメッセージから物件種別を判定する。「賃貸」「家賃」「借りる」等は '賃貸'、「購入」「売買」「買う」「分譲」等は '売買' にする。明示がなければ null",
             "与えられたメッセージや memory にない制約・設備は発明しない",
         ],
         "examples_instruction": (
@@ -379,9 +385,10 @@ def _llm_parse(
     }
     return adapter.generate_structured(
         system=(
-            "You are a Japanese rental planner responsible for the entire planning decision. "
+            "You are a Japanese property search planner responsible for the entire planning decision. "
             "Infer intent, merge memory, choose the next action, decide which conditions are missing, "
             "write follow-up questions, generate seed queries, and draft the research plan. "
+            "Detect the listing type (賃貸/売買) from the user message and set listing_type accordingly. "
             "Treat follow-up examples as non-exhaustive hints, never as exhaustive options. "
             "Return only structured data grounded in the provided message and memory."
         ),
@@ -442,6 +449,7 @@ def _parse_planner_output(
             "station_walk_max": merged_memory.get("station_walk_max"),
             "move_in_date": merged_memory.get("move_in_date"),
             "layout_preference": merged_memory.get("layout_preference"),
+            "listing_type": merged_memory.get("listing_type"),
         },
         "missing_slots": missing_slots,
         "follow_up_questions": follow_up_questions,

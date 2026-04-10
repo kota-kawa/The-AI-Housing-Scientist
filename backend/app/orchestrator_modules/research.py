@@ -81,6 +81,7 @@ class OrchestratorResearchMixin:
         layout = str(user_memory.get("layout_preference") or "").strip()
         budget = int(user_memory.get("budget_max") or 0)
         walk = int(user_memory.get("station_walk_max") or 0)
+        listing_type_keyword = str(user_memory.get("listing_type") or "").strip()
         must_conditions = [
             _normalize_query_text(item)
             for item in user_memory.get("must_conditions", []) or []
@@ -110,22 +111,22 @@ class OrchestratorResearchMixin:
 
         if area:
             strict_candidates.append(
-                _compose_query(area, "賃貸", budget_token, layout, walk_token, core_must, core_nice)
+                _compose_query(area, listing_type_keyword, budget_token, layout, walk_token, core_must, core_nice)
             )
         if area or layout:
-            signal_candidates.append(_compose_query(area, layout, "住みやすい", "賃貸", core_nice))
+            signal_candidates.append(_compose_query(area, layout, "住みやすい", listing_type_keyword, core_nice))
         if walk:
-            signal_candidates.append(_compose_query(area, "駅近", walk_token, "賃貸", layout))
+            signal_candidates.append(_compose_query(area, "駅近", walk_token, listing_type_keyword, layout))
         if must_conditions:
-            strict_candidates.append(_compose_query(area, layout, core_must, "賃貸", budget_token))
+            strict_candidates.append(_compose_query(area, layout, core_must, listing_type_keyword, budget_token))
             relaxed_candidates.append(
-                _compose_query(area, "賃貸", budget_token, layout, walk_token, core_nice)
+                _compose_query(area, listing_type_keyword, budget_token, layout, walk_token, core_nice)
             )
         if nice_to_have:
-            signal_candidates.append(_compose_query(area, layout, core_nice, "賃貸", budget_token))
+            signal_candidates.append(_compose_query(area, layout, core_nice, listing_type_keyword, budget_token))
         if budget:
             relaxed_candidates.append(
-                _compose_query(area, "賃貸", relaxed_budget_token, layout, walk_token, core_must)
+                _compose_query(area, listing_type_keyword, relaxed_budget_token, layout, walk_token, core_must)
             )
 
         if area:
@@ -141,13 +142,13 @@ class OrchestratorResearchMixin:
                     for nearby in nearby_areas[:2]:
                         nearby_candidates.append(
                             _compose_query(
-                                nearby, "賃貸", budget_token, layout, core_must or core_nice
+                                nearby, listing_type_keyword, budget_token, layout, core_must or core_nice
                             )
                         )
                 else:
                     nearby_candidates.append(
                         _compose_query(
-                            f"{area}周辺", "賃貸", budget_token, layout, core_must or core_nice
+                            f"{area}周辺", listing_type_keyword, budget_token, layout, core_must or core_nice
                         )
                     )
 
@@ -160,11 +161,11 @@ class OrchestratorResearchMixin:
                 if line_hints:
                     for line in line_hints[:2]:
                         line_candidates.append(
-                            _compose_query(line, area, "賃貸", budget_token, layout, core_must)
+                            _compose_query(line, area, listing_type_keyword, budget_token, layout, core_must)
                         )
                 else:
                     line_candidates.append(
-                        _compose_query(area, "沿線", "賃貸", budget_token, layout)
+                        _compose_query(area, "沿線", listing_type_keyword, budget_token, layout)
                     )
 
         candidates: list[str] = []

@@ -726,11 +726,14 @@ class AgentManagerToolingMixin:
         raw_results: list[dict[str, Any]],
         detail_html_map: dict[str, str],
     ) -> dict[str, Any]:
-        target_area = str(self._active_user_memory().get("target_area") or "").strip()
+        user_mem = self._active_user_memory()
+        target_area = str(user_mem.get("target_area") or "").strip()
+        listing_type = str(user_mem.get("listing_type") or "").strip()
         return run_integrity_review(
             normalized_properties=normalized_properties,
             raw_results=raw_results,
             detail_html_map=detail_html_map,
             adapter=self.research_adapter,
             target_area=target_area,
+            listing_type=listing_type,
         )
