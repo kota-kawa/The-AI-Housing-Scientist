@@ -1059,11 +1059,7 @@ class AgentManagerTreeMixin:
                     f"{plan.label} / 残った"
                     f" {len(integrity_result.get('normalized_properties', []))}件を条件一致度で並べています。"
                 )
-                + (
-                    " LLMで選定理由も整えています。"
-                    if self.research_adapter is not None
-                    else ""
-                ),
+                + (" LLMで選定理由も整えています。" if self.research_adapter is not None else ""),
             )
             ranking_result = self.toolbox.run(
                 "rank",
@@ -1860,9 +1856,7 @@ class AgentManagerTreeMixin:
                 stage_name="tree_search",
                 progress_percent=82,
                 current_action="探索分岐を要約中",
-                detail=(
-                    "各分岐の候補・リスクを圧縮し、最終候補の比較材料を作っています。"
-                ),
+                detail=("各分岐の候補・リスクを圧縮し、最終候補の比較材料を作っています。"),
             )
             self._attach_branch_result_summaries(state)
             state.selected_branch_summary = (

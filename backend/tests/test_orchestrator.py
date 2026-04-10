@@ -412,9 +412,7 @@ def test_orchestrator_uses_llm_generated_plan_content(tmp_path: Path):
         plan_block.content["rationale"]
         == "希少条件があるため、母集団を先に確保してから絞り込む進め方を取ります。"
     )
-    assert (
-        "江東区" in plan_block.content["seed_queries"][1]
-    )
+    assert "江東区" in plan_block.content["seed_queries"][1]
     assert "賃貸" in plan_block.content["seed_queries"][1]
     must_condition = next(
         item for item in plan_block.content["conditions"] if item["label"] == "必須条件"
@@ -659,15 +657,15 @@ def test_fresh_start_session_skips_profile_resume_prompt(tmp_path: Path):
     orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
     install_fake_route_adapters(
         orchestrator,
-            planner_adapter=FakePlannerRouteAdapter(
-                make_planner_payload(
-                    target_area="吉祥寺",
-                    budget_max=120000,
-                    station_walk_max=7,
-                    layout_preference="1LDK",
-                    nice_to_have=["在宅ワーク向け"],
-                )
-            ),
+        planner_adapter=FakePlannerRouteAdapter(
+            make_planner_payload(
+                target_area="吉祥寺",
+                budget_max=120000,
+                station_walk_max=7,
+                layout_preference="1LDK",
+                nice_to_have=["在宅ワーク向け"],
+            )
+        ),
     )
 
     profile_id, _ = db.get_or_create_profile("local-profile-2")

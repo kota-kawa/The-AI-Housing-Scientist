@@ -166,17 +166,13 @@ def _extract_rent(text: str) -> int:
 
     # JP: ラベル付き万パターン（例: 家賃4万 → 40000）
     # EN: Labeled 万 pattern (e.g. 家賃4万 → 40000)
-    match_man = re.search(
-        rf"{rent_label_prefix}(\d+(?:\.\d+)?)\s*万", normalized
-    )
+    match_man = re.search(rf"{rent_label_prefix}(\d+(?:\.\d+)?)\s*万", normalized)
     if match_man:
         return int(float(match_man.group(1)) * 10000)
 
     # JP: ラベル付き円パターン（例: 家賃120,000円 → 120000）
     # EN: Labeled 円 pattern (e.g. 家賃120,000円 → 120000)
-    match_yen = re.search(
-        rf"{rent_label_prefix}(\d{{2,3}}(?:,\d{{3}})?)\s*円", normalized
-    )
+    match_yen = re.search(rf"{rent_label_prefix}(\d{{2,3}}(?:,\d{{3}})?)\s*円", normalized)
     if match_yen:
         return int(match_yen.group(1).replace(",", ""))
 

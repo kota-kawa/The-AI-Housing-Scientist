@@ -111,22 +111,42 @@ class OrchestratorResearchMixin:
 
         if area:
             strict_candidates.append(
-                _compose_query(area, listing_type_keyword, budget_token, layout, walk_token, core_must, core_nice)
+                _compose_query(
+                    area,
+                    listing_type_keyword,
+                    budget_token,
+                    layout,
+                    walk_token,
+                    core_must,
+                    core_nice,
+                )
             )
         if area or layout:
-            signal_candidates.append(_compose_query(area, layout, "住みやすい", listing_type_keyword, core_nice))
+            signal_candidates.append(
+                _compose_query(area, layout, "住みやすい", listing_type_keyword, core_nice)
+            )
         if walk:
-            signal_candidates.append(_compose_query(area, "駅近", walk_token, listing_type_keyword, layout))
+            signal_candidates.append(
+                _compose_query(area, "駅近", walk_token, listing_type_keyword, layout)
+            )
         if must_conditions:
-            strict_candidates.append(_compose_query(area, layout, core_must, listing_type_keyword, budget_token))
+            strict_candidates.append(
+                _compose_query(area, layout, core_must, listing_type_keyword, budget_token)
+            )
             relaxed_candidates.append(
-                _compose_query(area, listing_type_keyword, budget_token, layout, walk_token, core_nice)
+                _compose_query(
+                    area, listing_type_keyword, budget_token, layout, walk_token, core_nice
+                )
             )
         if nice_to_have:
-            signal_candidates.append(_compose_query(area, layout, core_nice, listing_type_keyword, budget_token))
+            signal_candidates.append(
+                _compose_query(area, layout, core_nice, listing_type_keyword, budget_token)
+            )
         if budget:
             relaxed_candidates.append(
-                _compose_query(area, listing_type_keyword, relaxed_budget_token, layout, walk_token, core_must)
+                _compose_query(
+                    area, listing_type_keyword, relaxed_budget_token, layout, walk_token, core_must
+                )
             )
 
         if area:
@@ -142,13 +162,21 @@ class OrchestratorResearchMixin:
                     for nearby in nearby_areas[:2]:
                         nearby_candidates.append(
                             _compose_query(
-                                nearby, listing_type_keyword, budget_token, layout, core_must or core_nice
+                                nearby,
+                                listing_type_keyword,
+                                budget_token,
+                                layout,
+                                core_must or core_nice,
                             )
                         )
                 else:
                     nearby_candidates.append(
                         _compose_query(
-                            f"{area}周辺", listing_type_keyword, budget_token, layout, core_must or core_nice
+                            f"{area}周辺",
+                            listing_type_keyword,
+                            budget_token,
+                            layout,
+                            core_must or core_nice,
                         )
                     )
 
@@ -161,7 +189,9 @@ class OrchestratorResearchMixin:
                 if line_hints:
                     for line in line_hints[:2]:
                         line_candidates.append(
-                            _compose_query(line, area, listing_type_keyword, budget_token, layout, core_must)
+                            _compose_query(
+                                line, area, listing_type_keyword, budget_token, layout, core_must
+                            )
                         )
                 else:
                     line_candidates.append(
@@ -320,7 +350,9 @@ class OrchestratorResearchMixin:
         follow_up_questions = planner_result.get("follow_up_questions", [])
 
         if planner_result["missing_slots"]:
-            assistant_text = "検索前に、まず大枠の条件を入力してください。選択肢でも自由入力でも進められます。"
+            assistant_text = (
+                "検索前に、まず大枠の条件を入力してください。選択肢でも自由入力でも進められます。"
+            )
             task_memory["status"] = "awaiting_plan_inputs"
             task_memory["awaiting_contract_text"] = False
             task_memory["draft_research_plan"] = None

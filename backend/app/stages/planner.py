@@ -206,7 +206,9 @@ def _has_slot_value(slot: str, user_memory: dict[str, Any]) -> bool:
 
 # JP: slot memoryをマージする。
 # EN: Merge slot memory.
-def _merge_slot_memory(base_memory: dict[str, Any], override_memory: dict[str, Any]) -> dict[str, Any]:
+def _merge_slot_memory(
+    base_memory: dict[str, Any], override_memory: dict[str, Any]
+) -> dict[str, Any]:
     merged = _sanitize_slot_memory(base_memory)
     override = _sanitize_slot_memory(override_memory)
     for key in TEXT_SLOT_KEYS:
@@ -271,14 +273,19 @@ def _build_planner_message(message: str, planner_answers: list[dict[str, Any]] |
 
 # JP: search intentを推定する。
 # EN: Infer search intent.
-def _infer_intent(message: str, user_memory: dict[str, Any], planner_answers: list[dict[str, Any]] | None) -> str:
+def _infer_intent(
+    message: str, user_memory: dict[str, Any], planner_answers: list[dict[str, Any]] | None
+) -> str:
     if planner_answers:
         return "search"
     listing_type = _normalize_text(user_memory.get("listing_type"))
     if listing_type in {"賃貸", "売買"}:
         return "search"
     normalized_message = _normalize_text(message)
-    if any(token in normalized_message for token in ["探したい", "部屋", "物件", "賃貸", "売買", "購入", "住みたい"]):
+    if any(
+        token in normalized_message
+        for token in ["探したい", "部屋", "物件", "賃貸", "売買", "購入", "住みたい"]
+    ):
         return "search"
     return "general_question"
 
@@ -307,7 +314,9 @@ def _build_base_seed_queries(user_memory: dict[str, Any]) -> list[str]:
     listing_type = _normalize_text(user_memory.get("listing_type"))
     budget = _format_budget_token(user_memory.get("budget_max"))
     layout = _normalize_text(user_memory.get("layout_preference"))
-    must_condition = " ".join(_dedupe_texts(list(user_memory.get("must_conditions") or []), limit=1))
+    must_condition = " ".join(
+        _dedupe_texts(list(user_memory.get("must_conditions") or []), limit=1)
+    )
     nice_condition = " ".join(_dedupe_texts(list(user_memory.get("nice_to_have") or []), limit=1))
 
     candidates = _dedupe_texts(
@@ -333,7 +342,9 @@ def _default_research_plan(user_memory: dict[str, Any]) -> dict[str, Any]:
     summary_tokens = [token for token in [area, budget, layout, listing_type] if token]
     summary = " / ".join(summary_tokens) if summary_tokens else "条件に合う候補を比較します。"
     return {
-        "summary": f"{summary}を軸に候補を集めます。" if summary_tokens else "条件に合う候補を比較します。",
+        "summary": f"{summary}を軸に候補を集めます。"
+        if summary_tokens
+        else "条件に合う候補を比較します。",
         "goal": "条件に近い候補を比較し、問い合わせや次の確認に進める物件を絞り込みます。",
         "strategy": [
             "必須条件に合う候補を広めに集めて比較の土台を作ります。",
@@ -656,7 +667,10 @@ def _llm_parse(
             "move_in_date": {"label": "入居時期", "meaning": "すぐなら asap"},
             "must_conditions": {"label": "必須条件", "meaning": "外せない条件"},
             "nice_to_have": {"label": "あると良い条件", "meaning": "できれば欲しい条件"},
-            "listing_type": {"label": "物件種別", "meaning": "賃貸 or 売買（ユーザーの意図から判定、明示なければ null）"},
+            "listing_type": {
+                "label": "物件種別",
+                "meaning": "賃貸 or 売買（ユーザーの意図から判定、明示なければ null）",
+            },
         },
         "decision_rules": [
             "最新メッセージと current_user_memory を統合した user_memory を返す",
@@ -791,7 +805,9 @@ def _heuristic_planner_output(
         "next_action": "search_and_compare" if intent == "search" else "guidance",
         "user_memory": _sanitize_slot_memory(user_memory),
         "seed_queries": [],
-        "research_plan": _default_research_plan(user_memory) if intent == "search" else _blank_research_plan(),
+        "research_plan": _default_research_plan(user_memory)
+        if intent == "search"
+        else _blank_research_plan(),
         "condition_reasons": _default_condition_reasons(user_memory),
     }
 
@@ -855,7 +871,9 @@ def _finalize_planner_result(result: dict[str, Any]) -> dict[str, Any]:
         item for item in follow_up_questions if item["slot"] not in REQUIRED_PLANNING_SLOTS
     ]
     base_queries = _build_base_seed_queries(user_memory) if not missing_slots else []
-    merged_research_plan = research_plan if any(research_plan.values()) else _default_research_plan(user_memory)
+    merged_research_plan = (
+        research_plan if any(research_plan.values()) else _default_research_plan(user_memory)
+    )
     merged_condition_reasons = _default_condition_reasons(user_memory)
     for key, value in condition_reasons.items():
         if value:

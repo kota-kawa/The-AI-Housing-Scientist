@@ -251,7 +251,12 @@ def test_planner_asks_follow_up_questions_for_generic_request():
     )
 
     assert result["next_action"] == "missing_slots_question"
-    assert result["missing_slots"] == ["listing_type", "target_area", "budget_max", "layout_preference"]
+    assert result["missing_slots"] == [
+        "listing_type",
+        "target_area",
+        "budget_max",
+        "layout_preference",
+    ]
     assert result["follow_up_questions"] == []
 
 
@@ -385,7 +390,12 @@ def test_planner_uses_llm_intent_for_natural_search_request_without_structured_s
 
     assert result["intent"] == "search"
     assert result["next_action"] == "missing_slots_question"
-    assert result["missing_slots"] == ["listing_type", "target_area", "budget_max", "layout_preference"]
+    assert result["missing_slots"] == [
+        "listing_type",
+        "target_area",
+        "budget_max",
+        "layout_preference",
+    ]
 
 
 def test_planner_uses_llm_follow_up_questions_as_is_when_subset_selected():
@@ -417,7 +427,12 @@ def test_planner_uses_llm_follow_up_questions_as_is_when_subset_selected():
     )
 
     assert result["next_action"] == "missing_slots_question"
-    assert result["missing_slots"] == ["listing_type", "target_area", "budget_max", "layout_preference"]
+    assert result["missing_slots"] == [
+        "listing_type",
+        "target_area",
+        "budget_max",
+        "layout_preference",
+    ]
     assert result["follow_up_questions"] == []
 
 
@@ -469,5 +484,8 @@ def test_planner_injects_two_prompt_examples_into_llm_payload():
     assert all("output" in item for item in payload["examples"])
     assert any("非網羅" in rule or "固定候補" in rule for rule in payload["decision_rules"])
     assert any("近隣エリア" in rule or "沿線違い" in rule for rule in payload["decision_rules"])
-    assert any("基本クエリだけ" in rule or "近隣エリアや沿線の拡張は入れない" in rule for rule in payload["decision_rules"])
+    assert any(
+        "基本クエリだけ" in rule or "近隣エリアや沿線の拡張は入れない" in rule
+        for rule in payload["decision_rules"]
+    )
     assert "固定してはいけません" in payload["examples_instruction"]

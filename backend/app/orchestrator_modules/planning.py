@@ -464,7 +464,9 @@ class OrchestratorPlanningMixin:
                 priority="required",
             )
         if user_memory.get("target_area"):
-            add_condition("target_area", "希望エリア", str(user_memory["target_area"]), priority="required")
+            add_condition(
+                "target_area", "希望エリア", str(user_memory["target_area"]), priority="required"
+            )
         if user_memory.get("budget_max"):
             add_condition(
                 "budget_max",
@@ -487,7 +489,9 @@ class OrchestratorPlanningMixin:
                 priority="preferred",
             )
         if user_memory.get("move_in_date"):
-            add_condition("move_in_date", "入居時期", str(user_memory["move_in_date"]), priority="context")
+            add_condition(
+                "move_in_date", "入居時期", str(user_memory["move_in_date"]), priority="context"
+            )
         if user_memory.get("must_conditions"):
             add_condition(
                 "must_conditions",
