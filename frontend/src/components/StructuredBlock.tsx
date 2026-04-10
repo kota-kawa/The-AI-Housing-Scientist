@@ -157,6 +157,10 @@ const TONES: Record<UIBlock["type"], BlockTone> = {
 
 /* ---------- Icons ---------- */
 
+/**
+ * 日本語: テキストブロック用アイコンを描画します。
+ * English: Renders the icon for text blocks.
+ */
 function TextIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -170,6 +174,10 @@ function TextIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: 物件カードブロック用アイコンを描画します。
+ * English: Renders the icon for property card blocks.
+ */
 function CardsIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -184,6 +192,10 @@ function CardsIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: テーブルブロック用アイコンを描画します。
+ * English: Renders the icon for table blocks.
+ */
 function TableIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -193,6 +205,10 @@ function TableIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: チェックリストブロック用アイコンを描画します。
+ * English: Renders the icon for checklist blocks.
+ */
 function ChecklistIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -208,6 +224,10 @@ function ChecklistIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: 警告ブロック用アイコンを描画します。
+ * English: Renders the icon for warning blocks.
+ */
 function WarningIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -227,6 +247,10 @@ function WarningIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: 質問ブロック用アイコンを描画します。
+ * English: Renders the icon for question blocks.
+ */
 function QuestionIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -243,6 +267,10 @@ function QuestionIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: アクションブロック用アイコンを描画します。
+ * English: Renders the icon for action blocks.
+ */
 function ActionIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -257,6 +285,10 @@ function ActionIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: 計画ブロック用アイコンを描画します。
+ * English: Renders the icon for plan blocks.
+ */
 function PlanIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -279,6 +311,10 @@ function PlanIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: タイムラインブロック用アイコンを描画します。
+ * English: Renders the icon for timeline blocks.
+ */
 function TimelineIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -295,6 +331,10 @@ function TimelineIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: 探索ツリーブロック用アイコンを描画します。
+ * English: Renders the icon for tree exploration blocks.
+ */
 function TreeIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -313,6 +353,10 @@ function TreeIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: 参照ソースブロック用アイコンを描画します。
+ * English: Renders the icon for evidence/source blocks.
+ */
 function SourceIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -334,6 +378,10 @@ function SourceIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: チェック済み状態を示すマークアイコンを描画します。
+ * English: Renders the checkmark icon for completed states.
+ */
 function CheckmarkIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -348,6 +396,10 @@ function CheckmarkIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: 徒歩情報を示す人物アイコンを描画します。
+ * English: Renders the walking icon used for station distance.
+ */
 function WalkIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -363,6 +415,10 @@ function WalkIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: スコア表示用の星アイコンを描画します。
+ * English: Renders the star icon used for score badges.
+ */
 function StarIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className={className}>
@@ -371,6 +427,10 @@ function StarIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: ポジティブ理由を示すプラス円アイコンを描画します。
+ * English: Renders the plus-circle icon for positive reasons.
+ */
 function PlusCircleIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -380,6 +440,10 @@ function PlusCircleIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   );
 }
 
+/**
+ * 日本語: ネガティブ理由を示すマイナス円アイコンを描画します。
+ * English: Renders the minus-circle icon for negative reasons.
+ */
 function MinusCircleIcon({ className = "h-3.5 w-3.5" }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
@@ -474,6 +538,10 @@ type TreeLayoutEdge = {
   failed: boolean;
 };
 
+/**
+ * 日本語: 任意値を画面表示用の文字列へ正規化します。
+ * English: Normalizes unknown values into display-safe strings.
+ */
 function toDisplayText(value: unknown): string {
   if (value === null || value === undefined) {
     return "";
@@ -481,19 +549,35 @@ function toDisplayText(value: unknown): string {
   return String(value);
 }
 
+/**
+ * 日本語: 任意値を有限の数値へ変換し、失敗時はnullを返します。
+ * English: Converts unknown values to finite numbers, or null if invalid.
+ */
 function toDisplayNumber(value: unknown): number | null {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }
 
+/**
+ * 日本語: 任意値をレコード配列へ安全に変換します。
+ * English: Safely coerces unknown values into a record array.
+ */
 function toRecordArray(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value) ? (value as Array<Record<string, unknown>>) : [];
 }
 
+/**
+ * 日本語: 任意配列を空文字除外済みの文字列配列へ変換します。
+ * English: Converts an unknown array into a filtered string array.
+ */
 function toStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => toDisplayText(item)).filter(Boolean) : [];
 }
 
+/**
+ * 日本語: 0-1スケールの値を百分率ラベルへ整形します。
+ * English: Formats a 0-1 value into a percent label.
+ */
 function toPercentLabel(value: number | null, digits: number = 0): string {
   if (value === null) {
     return "";
@@ -501,6 +585,10 @@ function toPercentLabel(value: number | null, digits: number = 0): string {
   return `${(value * 100).toFixed(digits)}%`;
 }
 
+/**
+ * 日本語: 質問ラベルに応じた入力補助プレースホルダーを返します。
+ * English: Returns a contextual placeholder for question input fields.
+ */
 function getQuestionInputPlaceholder(label: string): string {
   if (label.includes("徒歩")) {
     return "例: 徒歩12分まで、バス便でも可";
@@ -514,6 +602,10 @@ function getQuestionInputPlaceholder(label: string): string {
   return "選択肢にない条件があれば自由に入力";
 }
 
+/**
+ * 日本語: 数値配列の平均値を返し、空配列は0にします。
+ * English: Returns the arithmetic mean, defaulting to 0 for empty arrays.
+ */
 function average(values: number[]): number {
   if (values.length === 0) {
     return 0;
@@ -521,6 +613,10 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+/**
+ * 日本語: 文字列から再現可能な擬似ハッシュ値を生成します。
+ * English: Generates a deterministic hash-like number from text.
+ */
 function hashText(value: string): number {
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -529,6 +625,10 @@ function hashText(value: string): number {
   return hash;
 }
 
+/**
+ * 日本語: SVG内に埋め込む文字列をエスケープします。
+ * English: Escapes text for safe SVG embedding.
+ */
 function escapeSvgText(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -538,6 +638,10 @@ function escapeSvgText(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
+/**
+ * 日本語: プレースホルダー画像用にテキストを短い行へ分割します。
+ * English: Splits text into short lines for placeholder image captions.
+ */
 function splitTextForPlaceholder(value: string, maxLength: number = 14): string[] {
   const normalized = value.trim();
   if (!normalized) {
@@ -550,6 +654,10 @@ function splitTextForPlaceholder(value: string, maxLength: number = 14): string[
   return chunks.slice(0, 2);
 }
 
+/**
+ * 日本語: 物件情報からフォールバック用SVG画像データURLを生成します。
+ * English: Builds a fallback SVG data URL from property metadata.
+ */
 function buildPropertyPlaceholderImage({
   title,
   layout,
@@ -616,6 +724,10 @@ function buildPropertyPlaceholderImage({
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
+/**
+ * 日本語: 物件画像URLを返し、未設定なら自動生成プレースホルダーを返します。
+ * English: Resolves a property image URL or falls back to generated placeholder art.
+ */
 function resolvePropertyImage(item: Record<string, unknown>): string {
   const imageUrl = toDisplayText(item.image_url).trim();
   if (imageUrl) {
@@ -628,6 +740,10 @@ function resolvePropertyImage(item: Record<string, unknown>): string {
   });
 }
 
+/**
+ * 日本語: Markdown本文を統一スタイルで描画します。
+ * English: Renders markdown content with a consistent component style set.
+ */
 function MarkdownBody({ body }: { body: string }) {
   return (
     <div className="markdown-body text-[14px] leading-7 text-ink">
@@ -695,6 +811,10 @@ function MarkdownBody({ body }: { body: string }) {
   );
 }
 
+/**
+ * 日本語: 剪定ノードを親ノード単位で集約し、要約情報を作成します。
+ * English: Aggregates pruned nodes by parent and builds summary metadata.
+ */
 function buildTreePruneSummary(nodes: TreeNodeItem[]): Map<number, TreePruneSummary> {
   const summaryByParent = new Map<number, TreePruneSummary>();
   for (const node of nodes) {
@@ -719,6 +839,10 @@ function buildTreePruneSummary(nodes: TreeNodeItem[]): Map<number, TreePruneSumm
 
 /* ---------- Section header ---------- */
 
+/**
+ * 日本語: ブロック種別に応じた見出しと件数バッジを描画します。
+ * English: Renders a block header with tone, icon, and optional count badge.
+ */
 function SectionHeader({ block, count }: { block: UIBlock; count?: number }) {
   const tone = TONES[block.type];
   const Icon = TYPE_ICONS[block.type];
@@ -749,6 +873,10 @@ function SectionHeader({ block, count }: { block: UIBlock; count?: number }) {
 
 /* ---------- Property card ---------- */
 
+/**
+ * 日本語: 単一物件カードを描画し、比較/アクション操作を受け付けます。
+ * English: Renders a property card with compare and action controls.
+ */
 function PropertyCard({
   item,
   index,
@@ -979,6 +1107,10 @@ function PropertyCard({
   );
 }
 
+/**
+ * 日本語: ツリーノード状態に対応する配色と表示ラベルを返します。
+ * English: Maps tree node status to visual tokens and display label.
+ */
 function treeStatusMeta(status: string) {
   if (status === "completed") {
     return {
@@ -1034,6 +1166,10 @@ function treeStatusMeta(status: string) {
   };
 }
 
+/**
+ * 日本語: ノード種別・状態・スコアに応じて描画半径を決定します。
+ * English: Computes node radius from kind, status, and score context.
+ */
 function treeNodeRadius(node: TreeNodeItem): number {
   if (node.kind === "root") {
     return 30;
@@ -1057,6 +1193,10 @@ function treeNodeRadius(node: TreeNodeItem): number {
   return radius;
 }
 
+/**
+ * 日本語: ツリーノード群から座標・辺情報を計算してダイアグラムレイアウトを構築します。
+ * English: Builds diagram layout coordinates and edges from tree nodes.
+ */
 function buildTreeDiagramLayout(nodes: TreeNodeItem[]): {
   nodes: TreeLayoutNode[];
   edges: TreeLayoutEdge[];
@@ -1091,6 +1231,10 @@ function buildTreeDiagramLayout(nodes: TreeNodeItem[]): {
   let leafIndex = 0;
   const positioned = new Map<number, TreeLayoutNode>();
 
+  /**
+   * 日本語: 子ノードを再帰配置し、現在ノードのY座標を返します。
+   * English: Recursively places children and returns the node's Y coordinate.
+   */
   const placeNode = (node: TreeNodeItem): number => {
     const children = childrenByParent.get(node.id) ?? [];
     let y = marginY + leafIndex * yStep;
@@ -1162,6 +1306,10 @@ function buildTreeDiagramLayout(nodes: TreeNodeItem[]): {
   return { nodes: layoutNodes, edges, width, height, depths };
 }
 
+/**
+ * 日本語: ノード詳細をホバー用ツールチップ文へ整形します。
+ * English: Formats node details into a hover tooltip string.
+ */
 function buildTreeNodeTooltip(node: TreeNodeItem, pruneSummary?: TreePruneSummary): string {
   const status = treeStatusMeta(node.status).label;
   const parts = [node.label || node.branch_id || "探索ノード", `${status} / depth ${node.depth}`];
@@ -1187,6 +1335,10 @@ function buildTreeNodeTooltip(node: TreeNodeItem, pruneSummary?: TreePruneSummar
   return parts.join("\n");
 }
 
+/**
+ * 日本語: ツリー図のノード凡例アイテムを描画します。
+ * English: Renders a node legend item for the tree diagram.
+ */
 function TreeLegendItem({
   color,
   accent,
@@ -1255,6 +1407,10 @@ function TreeLegendItem({
   );
 }
 
+/**
+ * 日本語: ツリー図のエッジ凡例アイテムを描画します。
+ * English: Renders an edge legend item for the tree diagram.
+ */
 function TreeEdgeLegendItem({
   color,
   label,
@@ -1281,6 +1437,10 @@ function TreeEdgeLegendItem({
   );
 }
 
+/**
+ * 日本語: 探索ツリー全体の可視化パネルを描画します。
+ * English: Renders the full exploration tree visualization panel.
+ */
 function TreeDiagram({
   nodes,
   stats,
@@ -1682,6 +1842,10 @@ function TreeDiagram({
   );
 }
 
+/**
+ * 日本語: タイムライン段階の状態表示色とラベルを返します。
+ * English: Returns color and label metadata for timeline stage status.
+ */
 function timelineStatusMeta(status: string) {
   if (status === "completed") {
     return {
@@ -1719,6 +1883,10 @@ function timelineStatusMeta(status: string) {
   };
 }
 
+/**
+ * 日本語: 段階インデックスとラベルからタイムライン種別を推定します。
+ * English: Infers timeline stage kind from label and index.
+ */
 function timelineStageKind(index: number, label: string): "plan" | "tree" | "synthesize" {
   if (label.includes("探索")) {
     return "tree";
@@ -1735,6 +1903,10 @@ function timelineStageKind(index: number, label: string): "plan" | "tree" | "syn
   return "plan";
 }
 
+/**
+ * 日本語: タイムライン段階の中心グリフを状態付きで描画します。
+ * English: Draws the central timeline stage glyph with state styling.
+ */
 function TimelineStageGlyph({
   kind,
   status,
@@ -1858,6 +2030,10 @@ function TimelineStageGlyph({
   );
 }
 
+/**
+ * 日本語: 調査進行の3段階タイムライン可視化を描画します。
+ * English: Renders the three-step research progress timeline diagram.
+ */
 function TimelineDiagram({
   items,
   progress,
@@ -2024,6 +2200,10 @@ function TimelineDiagram({
 
 /* ---------- Block dispatcher ---------- */
 
+/**
+ * 日本語: ブロック種別ごとに適切なUIを選択して描画します。
+ * English: Dispatches each block type to its corresponding UI renderer.
+ */
 export default function StructuredBlock({
   block,
   disabled = false,

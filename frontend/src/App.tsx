@@ -67,6 +67,10 @@ const SAMPLE_PROMPTS: string[] = [
   "在宅ワーク向けに、書斎が取れる広めの間取りを3件比較したい",
 ];
 
+/**
+ * 日本語: API応答をUI表示用のアシスタントメッセージ形式へ変換します。
+ * English: Converts an API response into the UI assistant message shape.
+ */
 function toAssistantMessage(payload: ChatMessageResponse): Message {
   return {
     id: crypto.randomUUID(),
@@ -78,6 +82,10 @@ function toAssistantMessage(payload: ChatMessageResponse): Message {
   };
 }
 
+/**
+ * 日本語: LLM設定を編集用にディープコピーします。
+ * English: Deep-clones LLM config for safe local editing.
+ */
 function cloneLlmConfig(config: LLMConfig): LLMConfig {
   return {
     preset: config.preset,
@@ -90,6 +98,10 @@ function cloneLlmConfig(config: LLMConfig): LLMConfig {
   };
 }
 
+/**
+ * 日本語: プリセット識別子を表示ラベルへ整形します。
+ * English: Formats a preset identifier into a display label.
+ */
 function formatPresetLabel(preset: string): string {
   if (preset === "default") {
     return "Default";
@@ -100,6 +112,10 @@ function formatPresetLabel(preset: string): string {
   return preset;
 }
 
+/**
+ * 日本語: 応答状態からユーザー向けステータス文言を決定します。
+ * English: Resolves a user-facing status label from response state.
+ */
 function toStatusLabel(payload: ChatMessageResponse): string {
   if (payload.status_label) {
     return payload.status_label;
@@ -140,6 +156,10 @@ function toStatusLabel(payload: ChatMessageResponse): string {
   return "処理完了";
 }
 
+/**
+ * 日本語: 開閉状態に応じて回転するシェブロンアイコンを描画します。
+ * English: Renders a chevron icon that rotates based on open state.
+ */
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg
@@ -159,6 +179,10 @@ function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
+/**
+ * 日本語: 送信ボタン用の矢印アイコンを描画します。
+ * English: Renders the arrow icon used for the send button.
+ */
 function SendIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="h-5 w-5">
@@ -173,6 +197,10 @@ function SendIcon() {
   );
 }
 
+/**
+ * 日本語: 新規セッション作成ボタン用のアイコンを描画します。
+ * English: Renders the icon used for creating a new session.
+ */
 function NewSessionIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="h-5 w-5">
@@ -196,6 +224,10 @@ function NewSessionIcon() {
   );
 }
 
+/**
+ * 日本語: ヘッダーやバッジで使うスパークルアイコンを描画します。
+ * English: Renders the sparkle icon used in headers and badges.
+ */
 function SparkleIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
@@ -215,6 +247,10 @@ function SparkleIcon({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
+/**
+ * 日本語: アプリ側アバターとして使う家アイコンを描画します。
+ * English: Renders the house logo icon used as the app avatar.
+ */
 function HouseLogoIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
@@ -229,6 +265,10 @@ function HouseLogoIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
+/**
+ * 日本語: ユーザー側メッセージのアバターアイコンを描画します。
+ * English: Renders the avatar icon used for user messages.
+ */
 function UserAvatarIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
@@ -243,6 +283,10 @@ function UserAvatarIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
+/**
+ * 日本語: チャット画面全体の状態管理と操作ハンドラを提供するメインコンポーネントです。
+ * English: Main chat component that owns state and user interaction handlers.
+ */
 export default function App() {
   const [sessionId, setSessionId] = useState<string>("");
   const [input, setInput] = useState<string>("");
@@ -278,6 +322,10 @@ export default function App() {
     return () => observer.disconnect();
   }, []);
 
+  /**
+   * 日本語: 画面最下部までスクロールし、キャンセル関数を返します。
+   * English: Scrolls to the page bottom and returns a cancellation callback.
+   */
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
     const frame = window.requestAnimationFrame(() => {
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
@@ -286,6 +334,10 @@ export default function App() {
     return () => window.cancelAnimationFrame(frame);
   };
 
+  /**
+   * 日本語: 末尾メッセージを優先して見せるようにスクロール位置を調整します。
+   * English: Scrolls to reveal the latest message with viewport-aware positioning.
+   */
   const scrollToLatest = (behavior: ScrollBehavior = "smooth") => {
     const frame = window.requestAnimationFrame(() => {
       const lastMsg = lastMessageRef.current;
@@ -303,6 +355,10 @@ export default function App() {
     return () => window.cancelAnimationFrame(frame);
   };
 
+  /**
+   * 日本語: 現在スクロール位置が下端に近いかを計測して保持します。
+   * English: Tracks whether the current viewport is near the bottom.
+   */
   const refreshViewportPosition = () => {
     const scrollRoot = document.documentElement;
     const distanceFromBottom = scrollRoot.scrollHeight - (window.scrollY + window.innerHeight);
@@ -310,6 +366,10 @@ export default function App() {
   };
 
   useEffect(() => {
+    /**
+     * 日本語: 初期セッション作成、事前チェック取得、LLM設定読み込みをまとめて行います。
+     * English: Bootstraps the app by loading session, preflight, and LLM settings.
+     */
     const bootstrap = async () => {
       try {
         const storedProfileId =
@@ -355,6 +415,10 @@ export default function App() {
 
   useEffect(() => {
     if (!openModelDropdown) return;
+    /**
+     * 日本語: モデル選択ドロップダウン外クリック時にメニューを閉じます。
+     * English: Closes the model dropdown when clicking outside.
+     */
     const handle = () => setOpenModelDropdown(null);
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
@@ -362,6 +426,10 @@ export default function App() {
 
   useEffect(() => {
     refreshViewportPosition();
+    /**
+     * 日本語: スクロール/リサイズ時に下端近接状態を再計算します。
+     * English: Recomputes bottom proximity on scroll and resize events.
+     */
     const handleViewportChange = () => refreshViewportPosition();
     window.addEventListener("scroll", handleViewportChange, { passive: true });
     window.addEventListener("resize", handleViewportChange);
@@ -400,6 +468,10 @@ export default function App() {
     let cancelled = false;
     let timerId: number | undefined;
 
+    /**
+     * 日本語: 調査ジョブ進捗をポーリングし、対象メッセージを逐次更新します。
+     * English: Polls research progress and incrementally updates the target message.
+     */
     const poll = async () => {
       try {
         const researchState = await fetchResearchState(sessionId);
@@ -517,6 +589,10 @@ export default function App() {
       .join(" / ");
   }, [llmCapabilities, llmConfig]);
 
+  /**
+   * 日本語: アシスタント応答をメッセージ一覧へ追加し、必要なら調査追跡IDを更新します。
+   * English: Appends assistant output and updates active research tracking when needed.
+   */
   const appendAssistantResponse = (payload: ChatMessageResponse) => {
     const assistantMessage = toAssistantMessage(payload);
     forceAutoScrollRef.current = true;
@@ -528,6 +604,10 @@ export default function App() {
     }
   };
 
+  /**
+   * 日本語: 入力文字列を送信し、ユーザー/アシスタント双方のメッセージ状態を更新します。
+   * English: Sends input text and updates both user and assistant message state.
+   */
   const submitMessage = async (messageText: string) => {
     if (!sessionId || !messageText.trim() || loading || isResearchBusy) {
       return;
@@ -562,6 +642,10 @@ export default function App() {
     }
   };
 
+  /**
+   * 日本語: 指定ルートのモデルを下書き設定へ反映し、プリセットをcustom化します。
+   * English: Updates a route model in draft config and marks preset as custom.
+   */
   const handleLlmRouteModelChange = (routeKey: LLMRouteKey, model: string) => {
     if (!llmDraft) {
       return;
@@ -576,6 +660,10 @@ export default function App() {
     });
   };
 
+  /**
+   * 日本語: 下書きLLM設定を既定プリセットへ戻します。
+   * English: Resets draft LLM configuration to default preset values.
+   */
   const handleResetLlmConfig = () => {
     if (!llmCapabilities) {
       return;
@@ -583,6 +671,10 @@ export default function App() {
     setLlmDraft(cloneLlmConfig(llmCapabilities.default_config));
   };
 
+  /**
+   * 日本語: 下書きLLM設定をAPIへ保存し、画面側の設定状態を同期します。
+   * English: Persists draft LLM settings and synchronizes local config state.
+   */
   const handleSaveLlmConfig = async () => {
     if (!sessionId || !llmDraft || !llmConfig) {
       return;
@@ -601,6 +693,10 @@ export default function App() {
     }
   };
 
+  /**
+   * 日本語: ブロックから渡された任意アクションを実行して会話状態を更新します。
+   * English: Executes a block action and updates conversation state.
+   */
   const handleActionExecute = async (action: ActionDescriptor) => {
     if (!sessionId || loading) {
       return;
@@ -624,15 +720,27 @@ export default function App() {
     }
   };
 
+  /**
+   * 日本語: 現在入力欄の内容を送信処理へ委譲します。
+   * English: Delegates current textarea content to the send flow.
+   */
   const submitInput = async () => {
     await submitMessage(input);
   };
 
+  /**
+   * 日本語: フォーム送信の既定動作を止めてアプリ内送信を実行します。
+   * English: Prevents native form submit and triggers app-level submission.
+   */
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     void submitInput();
   };
 
+  /**
+   * 日本語: IME変換中を除き、Enter単押しでメッセージ送信を実行します。
+   * English: Sends on Enter (without Shift) unless IME composition is active.
+   */
   const onTextareaKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -640,6 +748,10 @@ export default function App() {
     }
   };
 
+  /**
+   * 日本語: 保留中アクションに対する承認/却下を送信します。
+   * English: Sends approval or rejection for the current pending action.
+   */
   const handleConfirm = async (approved: boolean) => {
     if (!sessionId || !pendingAction || loading) {
       return;
@@ -661,11 +773,19 @@ export default function App() {
     }
   };
 
+  /**
+   * 日本語: サンプルプロンプトを入力欄へ反映し、直ちに編集可能状態にします。
+   * English: Applies a sample prompt to input and focuses the textarea.
+   */
   const handlePromptPick = (prompt: string) => {
     setInput(prompt);
     textareaRef.current?.focus();
   };
 
+  /**
+   * 日本語: 新規セッションを作成して会話・設定・表示状態を初期化します。
+   * English: Creates a fresh session and resets conversation/config UI state.
+   */
   const handleNewSession = async () => {
     if (loading) {
       return;
@@ -705,6 +825,10 @@ export default function App() {
     }
   };
 
+  /**
+   * 日本語: 質問ブロックのサンプル回答選択をトグルし、自由入力欄と同期します。
+   * English: Toggles a suggested answer and keeps free-text input in sync.
+   */
   const handleQuestionSuggestionToggle = (
     messageId: string,
     blockIndex: number,
@@ -751,6 +875,10 @@ export default function App() {
     );
   };
 
+  /**
+   * 日本語: 質問ブロックの自由入力を更新し、必要に応じて選択候補状態も調整します。
+   * English: Updates question free-text and adjusts selected example when applicable.
+   */
   const handleQuestionInputChange = (
     messageId: string,
     blockIndex: number,
@@ -802,6 +930,10 @@ export default function App() {
     );
   };
 
+  /**
+   * 日本語: 質問ブロックの回答を1つの送信用テキストへまとめて送信します。
+   * English: Aggregates question answers into one message and submits it.
+   */
   const handleQuestionExecute = (messageId: string, blockIndex: number) => {
     const message = messages.find((item) => item.id === messageId);
     const block = message?.blocks?.[blockIndex];
@@ -830,6 +962,10 @@ export default function App() {
     void submitMessage(selectedAnswers.join("、"));
   };
 
+  /**
+   * 日本語: チェックリスト項目の完了状態を切り替えます。
+   * English: Toggles completion state for a checklist item.
+   */
   const handleChecklistToggle = (messageId: string, blockIndex: number, itemIndex: number) => {
     setMessages((prev) =>
       prev.map((message) => {
@@ -862,6 +998,10 @@ export default function App() {
     );
   };
 
+  /**
+   * 日本語: 比較対象カードの選択状態を切り替えます。
+   * English: Toggles selected state for a comparable property card.
+   */
   const handleCardCompareToggle = (messageId: string, blockIndex: number, itemIndex: number) => {
     setMessages((prev) =>
       prev.map((message) => {
@@ -896,6 +1036,10 @@ export default function App() {
     );
   };
 
+  /**
+   * 日本語: 選択中カードを比較アクションとして送信し、比較結果を反映します。
+   * English: Sends selected cards for comparison and applies returned results.
+   */
   const handleCompareExecute = async (messageId: string, blockIndex: number) => {
     if (!sessionId || loading) {
       return;

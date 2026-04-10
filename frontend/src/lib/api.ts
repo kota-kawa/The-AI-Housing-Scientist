@@ -115,6 +115,10 @@ export type ResearchState = {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+/**
+ * 日本語: APIリクエストを共通化し、失敗時はdetail優先のエラーを投げます。
+ * English: Sends a shared API request and throws a detail-first error on failures.
+ */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -134,6 +138,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * 日本語: チャットセッションを作成し、必要なら前回プロフィールを引き継ぎます。
+ * English: Creates a chat session and optionally resumes with a previous profile.
+ */
 export async function createSession(
   profileId?: string,
   freshStart: boolean = false
@@ -144,10 +152,18 @@ export async function createSession(
   });
 }
 
+/**
+ * 日本語: 指定セッションの状態と履歴を取得します。
+ * English: Fetches state and message history for the given session.
+ */
 export async function fetchSession(sessionId: string): Promise<SessionState> {
   return request<SessionState>(`/api/chat/sessions/${sessionId}`);
 }
 
+/**
+ * 日本語: ユーザーメッセージを送信して、最新のアシスタント応答を取得します。
+ * English: Sends a user message and returns the latest assistant response.
+ */
 export async function sendMessage(
   sessionId: string,
   message: string,
@@ -159,6 +175,10 @@ export async function sendMessage(
   });
 }
 
+/**
+ * 日本語: 保留中アクションの承認/却下を送信します。
+ * English: Submits approval or rejection for a pending action.
+ */
 export async function confirmAction(
   sessionId: string,
   actionType: string,
@@ -170,6 +190,10 @@ export async function confirmAction(
   });
 }
 
+/**
+ * 日本語: 指定アクションを任意ペイロード付きで実行します。
+ * English: Executes the specified action with an optional payload.
+ */
 export async function runAction(
   sessionId: string,
   actionType: string,
@@ -181,18 +205,34 @@ export async function runAction(
   });
 }
 
+/**
+ * 日本語: システム事前チェック結果（接続性・鍵状態）を取得します。
+ * English: Retrieves preflight health details such as connectivity and key status.
+ */
 export async function fetchPreflight(): Promise<PreflightReport> {
   return request<PreflightReport>("/api/system/preflight");
 }
 
+/**
+ * 日本語: 利用可能なLLMモデルとルート定義を取得します。
+ * English: Fetches available LLM models and route definitions.
+ */
 export async function fetchLlmCapabilities(): Promise<LLMCapabilities> {
   return request<LLMCapabilities>("/api/system/llm-capabilities");
 }
 
+/**
+ * 日本語: セッション単位のLLM設定を読み込みます。
+ * English: Loads session-scoped LLM configuration.
+ */
 export async function fetchSessionLlmConfig(sessionId: string): Promise<SessionLLMConfig> {
   return request<SessionLLMConfig>(`/api/chat/sessions/${sessionId}/llm-config`);
 }
 
+/**
+ * 日本語: セッションのLLM設定を保存し、確定済み設定を返します。
+ * English: Saves session LLM configuration and returns the persisted settings.
+ */
 export async function saveSessionLlmConfig(
   sessionId: string,
   payload: LLMConfig
@@ -203,6 +243,10 @@ export async function saveSessionLlmConfig(
   });
 }
 
+/**
+ * 日本語: 調査ジョブの進捗と最新応答を取得します。
+ * English: Retrieves research job progress and the latest response.
+ */
 export async function fetchResearchState(sessionId: string): Promise<ResearchState> {
   return request<ResearchState>(`/api/chat/sessions/${sessionId}/research`);
 }
