@@ -1176,7 +1176,13 @@ export default function App() {
             return (
               <article
                 key={message.id}
-                ref={isLast ? (el: HTMLElement | null) => { lastMessageRef.current = el; } : undefined}
+                ref={
+                  isLast
+                    ? (el: HTMLElement | null) => {
+                        lastMessageRef.current = el;
+                      }
+                    : undefined
+                }
                 className={`flex animate-rise items-start gap-3 ${isUser ? "flex-row-reverse" : ""}`}
               >
                 <div

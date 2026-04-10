@@ -154,9 +154,7 @@ class OrchestratorResearchMixin:
             # seed_queries に沿線クエリが既に含まれている場合は追加しない（二重追加防止）
             line_tokens = line_hints[:2] if line_hints else [f"{area}沿線"]
             seeds_cover_lines = any(
-                token.lower() in q.lower()
-                for token in line_tokens
-                for q in normalized_seed_queries
+                token.lower() in q.lower() for token in line_tokens for q in normalized_seed_queries
             )
             if not seeds_cover_lines:
                 if line_hints:
