@@ -411,7 +411,9 @@ def _rule_review_for_property(
         else:
             drop_reason_class = "integrity_drop"
     review_status = "dropped" if hard_drop or trust_score < 55 else "rankable"
-    if review_status == "rankable" and any("未確認" in item or "欠落" in item for item in inconsistencies):
+    if review_status == "rankable" and any(
+        "未確認" in item or "欠落" in item for item in inconsistencies
+    ):
         review_status = "needs_confirmation"
 
     return {
@@ -624,8 +626,10 @@ def _merge_reviews(
     drop_reason_class = str(rule_review.get("drop_reason_class") or "").strip()
     if should_drop and not drop_reason_class:
         drop_reason_class = "llm_drop" if llm_review.get("should_drop") else "integrity_drop"
-    review_status = "dropped" if should_drop else str(
-        rule_review.get("review_status") or llm_review.get("review_status") or "rankable"
+    review_status = (
+        "dropped"
+        if should_drop
+        else str(rule_review.get("review_status") or llm_review.get("review_status") or "rankable")
     )
 
     return {

@@ -215,7 +215,9 @@ def test_integrity_review_drops_explicit_must_condition_mismatch():
                 "extra_snippets": [],
             }
         ],
-        detail_html_map={"https://example.com/p1": "<html><body>1階 オートロックなし</body></html>"},
+        detail_html_map={
+            "https://example.com/p1": "<html><body>1階 オートロックなし</body></html>"
+        },
         must_conditions=["2階以上", "オートロック"],
         today=date(2026, 4, 9),
     )

@@ -197,7 +197,9 @@ def test_final_report_fallback_says_no_recommendation_without_candidates():
                     "label": "strict",
                     "branch_result_summary": {
                         "物件候補リスト": [],
-                        "共通リスク": ["検索ヒットはあるが、整合性レビュー後に推薦可能候補が残っていない"],
+                        "共通リスク": [
+                            "検索ヒットはあるが、整合性レビュー後に推薦可能候補が残っていない"
+                        ],
                         "未解決の調査項目": ["対象エリア・間取り・must条件を固定した再検索"],
                     },
                 },

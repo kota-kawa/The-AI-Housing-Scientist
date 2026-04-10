@@ -423,8 +423,10 @@ def evaluate_final_result(
         and structured_ratio_metric >= _metric_value(0.6, name="structured_ratio")
     ):
         readiness = "high"
-    elif visible_count >= 1 and selected_normalized_count >= 1 and detail_coverage_metric >= _metric_value(
-        0.3, name="detail_coverage"
+    elif (
+        visible_count >= 1
+        and selected_normalized_count >= 1
+        and detail_coverage_metric >= _metric_value(0.3, name="detail_coverage")
     ):
         readiness = "medium"
 

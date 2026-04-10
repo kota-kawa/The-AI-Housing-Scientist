@@ -280,7 +280,9 @@ def _build_node_snapshot(branch_node: dict[str, Any]) -> dict[str, Any]:
                     or "整合性レビューで推薦対象から除外",
                     max_chars=180,
                 ),
-                "source_node": str(branch_node.get("label") or branch_node.get("branch_id") or "node"),
+                "source_node": str(
+                    branch_node.get("label") or branch_node.get("branch_id") or "node"
+                ),
             }
             for prop in dropped_properties[:MAX_REJECTIONS]
         ],

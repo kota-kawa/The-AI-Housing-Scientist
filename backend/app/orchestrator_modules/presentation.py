@@ -40,7 +40,9 @@ class OrchestratorPresentationMixin:
                 "layout": prop.get("layout", ""),
                 "area": self._format_area(prop.get("area_m2", 0)),
                 "why_selected": item.get("why_selected") or item.get("reason") or "",
-                "why_not_selected": item.get("why_not_selected") or item.get("rejection_reason") or "",
+                "why_not_selected": item.get("why_not_selected")
+                or item.get("rejection_reason")
+                or "",
                 "feature_tags": prop.get("features", [])[:3],
                 "reaction_state": reaction_state,
             }
@@ -90,9 +92,7 @@ class OrchestratorPresentationMixin:
             prop = by_id.get(property_id) or item
             rows.append(
                 {
-                    "building_name": prop.get("building_name")
-                    or item.get("title")
-                    or "候補物件",
+                    "building_name": prop.get("building_name") or item.get("title") or "候補物件",
                     "score": item.get("score", ""),
                     "rent": self._format_money(prop.get("rent")),
                     "layout": prop.get("layout", "要確認"),

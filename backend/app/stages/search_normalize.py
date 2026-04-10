@@ -466,9 +466,7 @@ def _extract_floor_levels(text: str) -> tuple[int, int]:
         total = int(total_match.group(1))
     if floor <= 0:
         generic_match = re.search(r"(\d{1,2})\s*階", normalized)
-        if generic_match and (
-            not total_match or generic_match.start() != total_match.start()
-        ):
+        if generic_match and (not total_match or generic_match.start() != total_match.start()):
             floor = int(generic_match.group(1))
     return floor, total
 
@@ -486,11 +484,7 @@ def _extract_autolock(text: str) -> bool | None:
 # EN: Extract contract condition snippets.
 def _extract_contract_terms(text: str) -> dict[str, str]:
     source = _clean_html_fragment(text)
-    sentences = [
-        item.strip()
-        for item in re.split(r"[。.\n]", source)
-        if item.strip()
-    ]
+    sentences = [item.strip() for item in re.split(r"[。.\n]", source) if item.strip()]
     terms: dict[str, str] = {}
     token_map = {
         "renewal_fee": "更新料",
@@ -803,9 +797,7 @@ def _build_fallback_property(
         features=features,
         floor_level=floor_level or int(llm_fields.get("floor_level") or 0),
         total_floors=total_floors or int(llm_fields.get("total_floors") or 0),
-        has_autolock=has_autolock
-        if has_autolock is not None
-        else llm_fields.get("has_autolock"),
+        has_autolock=has_autolock if has_autolock is not None else llm_fields.get("has_autolock"),
         contract_terms=contract_terms or dict(llm_fields.get("contract_terms") or {}),
         field_evidence=dict(llm_fields.get("field_evidence") or {}),
         field_confidence={
@@ -903,7 +895,13 @@ def _build_detail_property(
     key_money_raw = _extract_html_field(detail_html, "key_money") or key_money_label
     station_walk_raw = _extract_html_field(detail_html, "station_walk_min") or station_walk_label
 
-    address = address_raw or address_label or _json_ld_address(json_ld_payloads) or _extract_address(text) or "住所要確認"
+    address = (
+        address_raw
+        or address_label
+        or _json_ld_address(json_ld_payloads)
+        or _extract_address(text)
+        or "住所要確認"
+    )
     layout = (
         _extract_layout(layout_raw)
         or _extract_layout(layout_label)
@@ -921,7 +919,9 @@ def _build_detail_property(
     rent = (
         int(rent_raw)
         if str(rent_raw).isdigit()
-        else _extract_money_amount(str(rent_raw)) or _json_ld_price(json_ld_payloads) or _extract_rent(text)
+        else _extract_money_amount(str(rent_raw))
+        or _json_ld_price(json_ld_payloads)
+        or _extract_rent(text)
     )
     management_fee = (
         int(management_fee_raw)
@@ -936,7 +936,8 @@ def _build_detail_property(
     key_money = (
         int(key_money_raw)
         if str(key_money_raw).isdigit()
-        else _extract_money_amount(str(key_money_raw)) or _extract_deposit_or_key_money(text, "礼金")
+        else _extract_money_amount(str(key_money_raw))
+        or _extract_deposit_or_key_money(text, "礼金")
     )
     station_walk_min = (
         int(station_walk_raw)
@@ -1000,20 +1001,37 @@ def _build_detail_property(
         " ".join([contract_text, text, " ".join(features)])
     ) or dict(llm_fields.get("contract_terms") or {})
 
-    remember("building_name", building_name, building_label_evidence or "data-field: building_name", 0.95)
+    remember(
+        "building_name", building_name, building_label_evidence or "data-field: building_name", 0.95
+    )
     remember("address", address, address_evidence or "data-field/json-ld/detail text: address", 0.9)
     remember("layout", layout, layout_evidence or "data-field/detail text: layout", 0.9)
     remember("area_m2", area_m2, area_evidence or "data-field/detail text: area_m2", 0.9)
     remember("rent", rent, rent_evidence or "data-field/json-ld/detail text: rent", 0.9)
-    remember("management_fee", management_fee, management_fee_evidence or "data-field/table: management_fee", 0.9)
+    remember(
+        "management_fee",
+        management_fee,
+        management_fee_evidence or "data-field/table: management_fee",
+        0.9,
+    )
     remember("deposit", deposit, deposit_evidence or "data-field/table: deposit", 0.85)
     remember("key_money", key_money, key_money_evidence or "data-field/table: key_money", 0.85)
-    remember("station_walk_min", station_walk_min, station_walk_evidence or "data-field/detail text: station_walk_min", 0.9)
+    remember(
+        "station_walk_min",
+        station_walk_min,
+        station_walk_evidence or "data-field/detail text: station_walk_min",
+        0.9,
+    )
     remember("floor_level", floor_level, floor_evidence or "table/detail text: floor_level", 0.85)
     remember("has_autolock", has_autolock, autolock_evidence or "detail text: オートロック", 0.8)
     for field_name, evidence in dict(llm_fields.get("field_evidence") or {}).items():
         if str(field_name).strip() and str(evidence).strip():
-            remember(str(field_name), llm_fields.get(str(field_name), "llm"), str(evidence), llm_confidence)
+            remember(
+                str(field_name),
+                llm_fields.get(str(field_name), "llm"),
+                str(evidence),
+                llm_confidence,
+            )
 
     prop = PropertyNormalized(
         property_id_norm=property_id_norm,

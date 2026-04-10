@@ -287,7 +287,9 @@ def _build_fallback_report(
         top_reason = str(top_candidate.get("reason") or "条件一致度が高い候補です。")
         recommendation_text = f"{top_name} を推奨します。{top_reason}"
     else:
-        recommendation_text = "推奨物件なし。現時点では問い合わせ推奨まで十分に整理できた候補がありません。"
+        recommendation_text = (
+            "推奨物件なし。現時点では問い合わせ推奨まで十分に整理できた候補がありません。"
+        )
         if research_summary:
             recommendation_text += f"\n\n調査サマリー: {research_summary}"
 

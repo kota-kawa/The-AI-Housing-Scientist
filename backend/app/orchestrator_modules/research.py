@@ -448,9 +448,7 @@ class OrchestratorResearchMixin:
         follow_up_questions = planner_result.get("follow_up_questions", [])
 
         if planner_result["missing_slots"]:
-            assistant_text = (
-                "検索に必要な条件を入力してください。未定の項目は後で追加できます。"
-            )
+            assistant_text = "検索に必要な条件を入力してください。未定の項目は後で追加できます。"
             task_memory["status"] = "awaiting_plan_inputs"
             task_memory["awaiting_contract_text"] = False
             task_memory["draft_research_plan"] = None
@@ -672,11 +670,12 @@ class OrchestratorResearchMixin:
 
         current_user_memory, task_memory = self.db.get_memories(session_id)
         task_memory["last_final_report"] = execution_result.final_report_markdown
-        can_mark_session_completed = (
-            str(task_memory.get("last_research_job_id") or "") == job_id
-            and str(task_memory.get("status") or "")
-            in {"search_results_ready", "research_completed"}
-        )
+        can_mark_session_completed = str(
+            task_memory.get("last_research_job_id") or ""
+        ) == job_id and str(task_memory.get("status") or "") in {
+            "search_results_ready",
+            "research_completed",
+        }
         if can_mark_session_completed:
             task_memory["status"] = "research_completed"
         self.db.update_memories(session_id, current_user_memory, task_memory)
