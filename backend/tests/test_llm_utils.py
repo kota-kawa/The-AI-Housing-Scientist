@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.llm.utils import build_current_date_context, with_current_date_context
 
@@ -17,4 +17,3 @@ def test_with_current_date_context_appends_context_to_system_prompt():
     result = with_current_date_context("system prompt", source)
 
     assert result == "system prompt\n\n現在の日付は 2026年4月9日（木）です。"
-UTC = timezone.utc

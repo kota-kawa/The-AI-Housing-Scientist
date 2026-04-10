@@ -632,7 +632,12 @@ export default function App() {
    * English: Sends input text and updates both user and assistant message state.
    */
   const submitMessage = async (messageText: string, plannerAnswers: PlannerAnswer[] = []) => {
-    if (!sessionId || (!messageText.trim() && plannerAnswers.length === 0) || loading || isResearchBusy) {
+    if (
+      !sessionId ||
+      (!messageText.trim() && plannerAnswers.length === 0) ||
+      loading ||
+      isResearchBusy
+    ) {
       return;
     }
 

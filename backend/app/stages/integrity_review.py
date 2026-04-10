@@ -266,13 +266,12 @@ def _rule_review_for_property(
                 "売買・購入物件の情報であり、賃貸物件ではないため除外"
             )
             hard_drop = True
-    elif listing_type == "売買":
-        if any(token in source_text for token in RENTAL_LISTING_TOKENS):
-            scores["listing_consistency"] = 1
-            inconsistencies.append(
-                "賃貸物件の情報であり、売買物件ではないため除外"
-            )
-            hard_drop = True
+    elif listing_type == "売買" and any(token in source_text for token in RENTAL_LISTING_TOKENS):
+        scores["listing_consistency"] = 1
+        inconsistencies.append(
+            "賃貸物件の情報であり、売買物件ではないため除外"
+        )
+        hard_drop = True
 
     if any(token in source_text for token in UNAVAILABLE_TOKENS):
         scores["freshness"] = 1

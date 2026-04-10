@@ -87,7 +87,7 @@ class ChatMessageRequest(BaseModel):
     provider: Literal["openai", "gemini", "groq", "claude"] | None = None
 
     @model_validator(mode="after")
-    def validate_message_or_answers(self) -> "ChatMessageRequest":
+    def validate_message_or_answers(self) -> ChatMessageRequest:
         has_message = bool(self.message.strip())
         has_answers = bool(self.planner_answers)
         if not has_message and not has_answers:

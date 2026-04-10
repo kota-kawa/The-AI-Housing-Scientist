@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 import sqlite3
@@ -1248,4 +1248,3 @@ class Database:
             "finished_at": row["finished_at"],
             "updated_at": row["updated_at"],
         }
-UTC = timezone.utc
