@@ -45,11 +45,30 @@ class OrchestratorPlanningMixin:
         self,
         slot: str,
         *,
+        user_memory: dict[str, Any] | None = None,
         profile_memory: dict[str, Any] | None = None,
     ) -> list[str]:
         if slot == "target_area":
             return self._profile_area_examples(profile_memory)
+        if slot == "budget_max":
+            listing_type = self._normalize_planning_text((user_memory or {}).get("listing_type"))
+            if listing_type == "売買":
+                return ["3000万円まで", "4000万円まで", "5000万円まで", "6000万円まで"]
         return list(PLANNING_SLOT_EXAMPLES.get(slot, []))
+
+    # JP: planning質問のLLM生成文言をslot単位で引ける形にする。
+    # EN: Index LLM-generated planning question copy by slot.
+    def _planning_question_overrides(
+        self, follow_up_questions: list[dict[str, Any]] | None
+    ) -> dict[str, dict[str, Any]]:
+        overrides: dict[str, dict[str, Any]] = {}
+        for item in follow_up_questions or []:
+            if not isinstance(item, dict):
+                continue
+            slot = self._normalize_planning_text(item.get("slot"))
+            if slot and slot not in overrides:
+                overrides[slot] = item
+        return overrides
 
     # JP: current answerを構築する。
     # EN: Build current answer display.
@@ -73,26 +92,43 @@ class OrchestratorPlanningMixin:
         slots: list[str],
         required: bool,
         profile_memory: dict[str, Any] | None = None,
+        follow_up_questions: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         questions: list[dict[str, Any]] = []
+        overrides = self._planning_question_overrides(follow_up_questions)
         for slot in QUESTION_SLOT_ORDER:
             if slot not in slots:
                 continue
             current_value = self._planning_current_answer(slot, user_memory)
-            examples = self._planning_slot_examples(slot, profile_memory=profile_memory)
+            override = overrides.get(slot, {})
+            raw_examples = override.get("examples")
+            override_examples = [
+                self._normalize_planning_text(example)
+                for example in (raw_examples if isinstance(raw_examples, list) else [])
+                if self._normalize_planning_text(example)
+            ]
+            examples = override_examples or self._planning_slot_examples(
+                slot, user_memory=user_memory, profile_memory=profile_memory
+            )
             selected_example = current_value if current_value and current_value in examples else ""
+            selected_examples = [selected_example] if selected_example else []
             free_text = "" if selected_example else current_value
             questions.append(
                 {
                     "slot": slot,
-                    "label": PLANNING_SLOT_LABELS.get(slot, slot),
-                    "question": PLANNING_SLOT_QUESTIONS.get(slot, ""),
+                    "label": PLANNING_SLOT_LABELS.get(slot, slot)
+                    if slot == "budget_max"
+                    else self._normalize_planning_text(override.get("label"))
+                    or PLANNING_SLOT_LABELS.get(slot, slot),
+                    "question": self._normalize_planning_text(override.get("question"))
+                    or PLANNING_SLOT_QUESTIONS.get(slot, ""),
                     "examples": examples,
                     "required": required,
                     "input_kind": PLANNING_SLOT_INPUT_KIND.get(slot, "text"),
                     "text_placeholder": PLANNING_SLOT_PLACEHOLDERS.get(slot, ""),
                     "keyboard_hint": PLANNING_SLOT_KEYBOARD_HINT.get(slot, "default"),
                     "selected_example": selected_example,
+                    "selected_examples": selected_examples,
                     "free_text": free_text,
                 }
             )
@@ -416,9 +452,9 @@ class OrchestratorPlanningMixin:
         intro = (
             "検索精度を上げるため、分かるものだけ追加入力してください。"
             if optional
-            else "検索を始めるため、まずは次の条件を教えてください。"
+            else "検索に必要な条件です。未定の項目は後で追加できます。"
         )
-        title = "追加で確認したい条件" if optional else "検索前に確認したい条件"
+        title = "検索精度を上げる追加条件" if optional else "検索に必要な条件"
         return UIBlock(
             type="question",
             title=title,
@@ -470,7 +506,7 @@ class OrchestratorPlanningMixin:
         if user_memory.get("budget_max"):
             add_condition(
                 "budget_max",
-                "家賃上限",
+                "予算上限",
                 self._format_money(user_memory["budget_max"]),
                 priority="required",
             )
@@ -479,7 +515,7 @@ class OrchestratorPlanningMixin:
                 "layout_preference",
                 "間取り",
                 str(user_memory["layout_preference"]),
-                priority="required",
+                priority="preferred",
             )
         if user_memory.get("station_walk_max"):
             add_condition(

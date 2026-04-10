@@ -19,14 +19,12 @@
         "station_walk_max": null,
         "move_in_date": null,
         "layout_preference": null,
-        "listing_type": "賃貸",
         "must_conditions": [],
         "nice_to_have": []
       },
       "missing_slots": [
         "target_area",
-        "budget_max",
-        "layout_preference"
+        "budget_max"
       ],
       "follow_up_questions": [
         {
@@ -37,26 +35,20 @@
         },
         {
           "slot": "budget_max",
-          "label": "家賃上限",
-          "question": "家賃の上限はどれくらいを想定していますか？ ざっくりでも大丈夫です。",
+          "label": "予算上限",
+          "question": "予算の上限はどれくらいを想定していますか？ ざっくりでも大丈夫です。",
           "examples": ["10万円まで", "管理費込みで12万円台", "条件次第で15万円まで"]
-        },
-        {
-          "slot": "layout_preference",
-          "label": "間取り",
-          "question": "希望の間取りを教えてください。例にない間取りでも大丈夫です。",
-          "examples": ["1K", "1LDK", "2LDK"]
         }
       ],
       "next_action": "missing_slots_question",
       "seed_queries": [],
       "research_plan": {
-        "summary": "まずは検索の軸になるエリア、予算、駅距離を固めます。",
+        "summary": "まずは検索の軸になるエリアと予算を固めます。",
         "goal": "候補比較に進める最低限の条件を揃えることです。",
         "strategy": [
           "エリアか沿線を確認して検索範囲を決めます。",
           "予算上限を確認して明確に外れる候補を減らします。",
-          "駅距離の許容範囲を確認して通勤負担を調整します。"
+          "間取りや駅距離は任意条件として後から調整できます。"
         ],
         "rationale": "条件が広すぎる段階で候補を集めると比較軸がぶれやすいためです。"
       },
@@ -66,7 +58,7 @@
         "target_area": "生活圏が決まらないと検索範囲を適切に切れないためです。",
         "station_walk_max": "",
         "move_in_date": "",
-        "layout_preference": "間取りが決まると比較対象の粒度が揃うためです。",
+        "layout_preference": "",
         "must_conditions": "",
         "nice_to_have": ""
       }

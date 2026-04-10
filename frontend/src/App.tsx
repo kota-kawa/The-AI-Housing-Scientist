@@ -41,6 +41,7 @@ type QuestionEntry = {
   question?: string;
   examples?: string[];
   selected_example?: string;
+  selected_examples?: string[];
   free_text?: string;
   required?: boolean;
   input_kind?: string;
@@ -75,13 +76,28 @@ const SAMPLE_PROMPTS: string[] = [
 const PLANNER_SLOT_LABELS: Record<string, string> = {
   listing_type: "物件種別",
   target_area: "希望エリア",
-  budget_max: "家賃上限",
+  budget_max: "予算上限",
   layout_preference: "間取り",
   station_walk_max: "駅徒歩",
   move_in_date: "入居時期",
   must_conditions: "必須条件",
   nice_to_have: "あると良い条件",
 };
+
+function getQuestionSelectedExamples(item: QuestionEntry): string[] {
+  if (Array.isArray(item.selected_examples)) {
+    return item.selected_examples.map((example) => example.trim()).filter(Boolean);
+  }
+  const selectedExample = item.selected_example?.trim();
+  return selectedExample ? [selectedExample] : [];
+}
+
+function getQuestionAnswerText(item: QuestionEntry): string {
+  const tokens = [...getQuestionSelectedExamples(item), item.free_text?.trim() ?? ""].filter(
+    Boolean
+  );
+  return Array.from(new Set(tokens)).join("、");
+}
 
 /**
  * 日本語: API応答をUI表示用のアシスタントメッセージ形式へ変換します。
@@ -143,7 +159,7 @@ function toStatusLabel(payload: ChatMessageResponse): string {
     return "追加条件の回答待ち";
   }
   if (payload.status === "awaiting_plan_inputs") {
-    return "検索前の条件入力";
+    return "検索条件を入力";
   }
   if (payload.status === "awaiting_plan_confirmation") {
     return "調査計画の承認待ち";
@@ -884,12 +900,14 @@ export default function App() {
                 if (currentItemIndex !== itemIndex) {
                   return item;
                 }
-                const currentAnswer = (item.free_text ?? item.selected_example ?? "").trim();
-                const nextSelected = currentAnswer === example ? undefined : example;
+                const selectedExamples = getQuestionSelectedExamples(item);
+                const nextSelectedExamples = selectedExamples.includes(example)
+                  ? selectedExamples.filter((selected) => selected !== example)
+                  : [...selectedExamples, example];
                 return {
                   ...item,
-                  selected_example: nextSelected,
-                  free_text: nextSelected ?? "",
+                  selected_example: nextSelectedExamples[0],
+                  selected_examples: nextSelectedExamples,
                 };
               }),
             },
@@ -935,16 +953,9 @@ export default function App() {
                   return item;
                 }
 
-                const examples = Array.isArray(item.examples) ? item.examples : [];
-                const normalizedValue = value.trim();
-
                 return {
                   ...item,
                   free_text: value,
-                  selected_example:
-                    normalizedValue && examples.includes(normalizedValue)
-                      ? normalizedValue
-                      : undefined,
                 };
               }),
             },
@@ -970,9 +981,18 @@ export default function App() {
     const items = Array.isArray(block.content.items)
       ? (block.content.items as QuestionEntry[])
       : [];
+    const isBlocking = block.content.mode === "blocking";
+    const answeredCount = items.filter((item) => {
+      const answer = getQuestionAnswerText(item);
+      return Boolean(answer);
+    }).length;
+    if (isBlocking && answeredCount < items.length) {
+      return;
+    }
+
     const selectedAnswers = items
       .map((item) => {
-        const answer = (item.free_text ?? item.selected_example ?? "").trim();
+        const answer = getQuestionAnswerText(item);
         if (!answer) {
           return "";
         }
@@ -982,7 +1002,7 @@ export default function App() {
       .filter((item): item is string => Boolean(item));
     const plannerAnswers = items
       .map((item) => {
-        const answer = (item.free_text ?? item.selected_example ?? "").trim();
+        const answer = getQuestionAnswerText(item);
         const slot = (item.slot ?? "").trim();
         if (!answer || !slot) {
           return null;

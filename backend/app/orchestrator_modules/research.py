@@ -351,7 +351,7 @@ class OrchestratorResearchMixin:
 
         if planner_result["missing_slots"]:
             assistant_text = (
-                "検索前に、まず大枠の条件を入力してください。選択肢でも自由入力でも進められます。"
+                "検索に必要な条件を入力してください。未定の項目は後で追加できます。"
             )
             task_memory["status"] = "awaiting_plan_inputs"
             task_memory["awaiting_contract_text"] = False
@@ -366,6 +366,7 @@ class OrchestratorResearchMixin:
                 slots=list(planner_result["missing_slots"]),
                 required=True,
                 profile_memory=profile_memory,
+                follow_up_questions=planner_result.get("required_follow_up_questions", []),
             )
             blocks = [
                 self._build_question_block(
@@ -406,7 +407,13 @@ class OrchestratorResearchMixin:
         blocks = [self._build_plan_block(draft_plan)]
         optional_slots = [
             slot
-            for slot in ["station_walk_max", "move_in_date", "must_conditions", "nice_to_have"]
+            for slot in [
+                "layout_preference",
+                "station_walk_max",
+                "move_in_date",
+                "must_conditions",
+                "nice_to_have",
+            ]
             if not _has_slot_value(slot, updated_user_memory)
         ]
         optional_questions = self._build_planning_questions(
@@ -414,6 +421,7 @@ class OrchestratorResearchMixin:
             slots=optional_slots,
             required=False,
             profile_memory=profile_memory,
+            follow_up_questions=follow_up_questions,
         )
         if follow_up_questions and not optional_questions:
             optional_questions = follow_up_questions

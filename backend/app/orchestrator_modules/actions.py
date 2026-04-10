@@ -189,7 +189,13 @@ class OrchestratorActionsMixin:
             )
             optional_questions = self._build_planning_questions(
                 user_memory=user_memory,
-                slots=["station_walk_max", "move_in_date", "must_conditions", "nice_to_have"],
+                slots=[
+                    "layout_preference",
+                    "station_walk_max",
+                    "move_in_date",
+                    "must_conditions",
+                    "nice_to_have",
+                ],
                 required=False,
                 profile_memory=profile_memory,
             )

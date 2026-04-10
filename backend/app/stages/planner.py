@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.llm.base import LLMAdapter
@@ -15,7 +16,7 @@ FOLLOW_UP_SLOT_ORDER = [
     "move_in_date",
 ]
 FOLLOW_UP_OPTIONAL_SLOTS = ["must_conditions", "nice_to_have"]
-REQUIRED_PLANNING_SLOTS = ("listing_type", "target_area", "budget_max", "layout_preference")
+REQUIRED_PLANNING_SLOTS = ("listing_type", "target_area", "budget_max")
 SEARCH_SIGNAL_KEYS = (
     "budget_max",
     "target_area",
@@ -38,6 +39,7 @@ TEXT_SLOT_KEYS = {"target_area", "move_in_date", "layout_preference", "listing_t
 INTEGER_SLOT_KEYS = {"budget_max", "station_walk_max"}
 LIST_SLOT_KEYS = {"must_conditions", "nice_to_have"}
 QUESTION_SLOT_ORDER = list(REQUIRED_PLANNING_SLOTS) + [
+    "layout_preference",
     "station_walk_max",
     "move_in_date",
     "must_conditions",
@@ -47,7 +49,7 @@ QUESTION_SLOT_ORDER = list(REQUIRED_PLANNING_SLOTS) + [
 PLANNING_SLOT_LABELS = {
     "listing_type": "物件種別",
     "target_area": "希望エリア",
-    "budget_max": "家賃上限",
+    "budget_max": "予算上限",
     "layout_preference": "間取り",
     "station_walk_max": "駅徒歩",
     "move_in_date": "入居時期",
@@ -57,8 +59,8 @@ PLANNING_SLOT_LABELS = {
 PLANNING_SLOT_QUESTIONS = {
     "listing_type": "まずは賃貸か売買かを選んでください。",
     "target_area": "どのエリアや駅を中心に探したいですか？",
-    "budget_max": "家賃や購入予算の上限はどれくらいですか？",
-    "layout_preference": "希望の間取りを教えてください。",
+    "budget_max": "予算の上限はどれくらいですか？",
+    "layout_preference": "希望の間取りがあれば教えてください。未定なら「こだわらない」でも大丈夫です。",
     "station_walk_max": "駅からの距離はどの程度を優先しますか？",
     "move_in_date": "いつ頃から住み始めたいですか？",
     "must_conditions": "外せない条件があれば教えてください。",
@@ -67,15 +69,24 @@ PLANNING_SLOT_QUESTIONS = {
 PLANNING_SLOT_EXAMPLES = {
     "listing_type": ["賃貸", "売買"],
     "budget_max": ["8万円まで", "10万円まで", "12万円まで", "15万円まで", "20万円まで"],
-    "layout_preference": ["ワンルーム", "1K", "1DK", "1LDK", "2K/2DK", "2LDK", "3LDK+"],
+    "layout_preference": [
+        "こだわらない",
+        "ワンルーム",
+        "1K",
+        "1DK",
+        "1LDK",
+        "2K/2DK",
+        "2LDK",
+        "3LDK+",
+    ],
     "station_walk_max": ["徒歩5分以内", "徒歩7分以内", "徒歩10分以内", "徒歩15分以内"],
     "move_in_date": ["できるだけ早く", "来月中", "2-3ヶ月以内"],
 }
 PLANNING_SLOT_PLACEHOLDERS = {
     "listing_type": "賃貸 / 売買",
     "target_area": "例: 中野 / 吉祥寺 / 横浜駅周辺",
-    "budget_max": "例: 12万円まで / 120000",
-    "layout_preference": "例: 1LDK / 2LDK",
+    "budget_max": "例: 12万円まで / 4000万円まで",
+    "layout_preference": "例: こだわらない / 1LDK / 2LDK",
     "station_walk_max": "例: 徒歩10分以内",
     "move_in_date": "例: 来月中 / できるだけ早く",
     "must_conditions": "例: 2階以上 / ペット可 / RC造",
@@ -120,6 +131,17 @@ def _dedupe_texts(values: list[Any], *, limit: int | None = None) -> list[str]:
         if limit is not None and len(deduped) >= limit:
             break
     return deduped
+
+
+# JP: 複数選択UIから来た区切り文字付きテキストを分割する。
+# EN: Split delimited text submitted by multi-select UI chips.
+def _split_answer_tokens(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return _dedupe_texts(value)
+    text = _normalize_text(value)
+    if not text:
+        return []
+    return _dedupe_texts(re.split(r"\s*(?:、|,|/|／|\n)\s*", text))
 
 
 # JP: slot labelを取得する。
@@ -182,15 +204,17 @@ def _parse_station_walk_value(value: Any) -> int | None:
 def _normalize_slot_value(slot: str, value: Any) -> Any:
     if slot == "listing_type":
         return _normalize_listing_type(value)
+    if slot == "layout_preference":
+        text = _normalize_text(value)
+        if text in {"こだわらない", "指定なし", "未定", "おまかせ"}:
+            return None
+        return text or None
     if slot == "budget_max":
         return _parse_budget_value(value)
     if slot == "station_walk_max":
         return _parse_station_walk_value(value)
     if slot in {"must_conditions", "nice_to_have"}:
-        if isinstance(value, list):
-            return _dedupe_texts(list(value), limit=6)
-        text = _normalize_text(value)
-        return [text] if text else []
+        return _split_answer_tokens(value)[:6]
     text = _normalize_text(value)
     return text or None
 
@@ -661,7 +685,7 @@ def _llm_parse(
         "profile_history_summary": _summarize_profile_history(profile_memory),
         "slot_reference": {
             "target_area": {"label": "希望エリア", "meaning": "探したいエリアや駅"},
-            "budget_max": {"label": "家賃上限", "meaning": "家賃上限（円）"},
+            "budget_max": {"label": "予算上限", "meaning": "家賃または購入予算の上限（円）"},
             "station_walk_max": {"label": "駅徒歩", "meaning": "駅徒歩の上限（分）"},
             "layout_preference": {"label": "間取り", "meaning": "希望間取り"},
             "move_in_date": {"label": "入居時期", "meaning": "すぐなら asap"},
@@ -678,8 +702,10 @@ def _llm_parse(
             "intent は search / risk_check / general_question のいずれかにする",
             "search では、実際に候補収集を始めるべきなら next_action を search_and_compare にする",
             "search だが曖昧すぎて候補収集の前に確認が必要なら next_action を missing_slots_question にする",
-            "missing_slots は 0〜4 件で、必須項目を優先して並べる",
-            "follow_up_questions は missing_slots と同じ順序・同じ slot だけを返す",
+            "missing_slots は 0〜3 件で、候補収集に必要な物件種別・エリア・予算だけにする",
+            "layout_preference は任意条件として扱い、未定・こだわらない場合は missing_slots に入れない",
+            "next_action が missing_slots_question の follow_up_questions は missing_slots と同じ順序・同じ slot だけを返す",
+            "next_action が search_and_compare の follow_up_questions は任意で追加できる条件だけを返す",
             "follow_up_questions の label は slot_reference の日本語ラベルに合わせる",
             "follow_up_questions の question は、例にない回答や自由入力でも答えやすい聞き方にする",
             "follow_up_questions の examples は候補の例示であり、網羅的な選択肢として扱わない",
@@ -802,6 +828,7 @@ def _heuristic_planner_output(
         },
         "missing_slots": [],
         "follow_up_questions": [],
+        "required_follow_up_questions": [],
         "next_action": "search_and_compare" if intent == "search" else "guidance",
         "user_memory": _sanitize_slot_memory(user_memory),
         "seed_queries": [],
@@ -838,6 +865,7 @@ def _finalize_planner_result(result: dict[str, Any]) -> dict[str, Any]:
             },
             "missing_slots": [],
             "follow_up_questions": [],
+            "required_follow_up_questions": [],
             "next_action": "risk_check",
             "user_memory": user_memory,
             "seed_queries": [],
@@ -859,6 +887,7 @@ def _finalize_planner_result(result: dict[str, Any]) -> dict[str, Any]:
             },
             "missing_slots": [],
             "follow_up_questions": [],
+            "required_follow_up_questions": [],
             "next_action": "guidance",
             "user_memory": user_memory,
             "seed_queries": [],
@@ -867,6 +896,9 @@ def _finalize_planner_result(result: dict[str, Any]) -> dict[str, Any]:
         }
 
     missing_slots = _required_missing_slots(user_memory)
+    required_questions = [
+        item for item in follow_up_questions if item["slot"] in set(missing_slots)
+    ]
     optional_questions = [
         item for item in follow_up_questions if item["slot"] not in REQUIRED_PLANNING_SLOTS
     ]
@@ -892,6 +924,7 @@ def _finalize_planner_result(result: dict[str, Any]) -> dict[str, Any]:
         },
         "missing_slots": missing_slots,
         "follow_up_questions": optional_questions,
+        "required_follow_up_questions": required_questions,
         "next_action": "missing_slots_question" if missing_slots else "search_and_compare",
         "user_memory": user_memory,
         "seed_queries": base_queries,

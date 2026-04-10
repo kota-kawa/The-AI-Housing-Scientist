@@ -167,8 +167,8 @@ def test_planner_extracts_machida_and_rc_condition_via_llm():
         adapter=adapter,
     )
 
-    assert result["next_action"] == "missing_slots_question"
-    assert result["missing_slots"] == ["layout_preference"]
+    assert result["next_action"] == "search_and_compare"
+    assert result["missing_slots"] == []
     assert result["plan"]["target_area"] == "町田"
     assert result["plan"]["budget_max"] == 100000
     assert result["user_memory"]["must_conditions"] == ["RC造"]
@@ -214,7 +214,7 @@ def test_planner_asks_follow_up_questions_for_generic_request():
             station_walk_max=None,
             layout_preference=None,
             next_action="missing_slots_question",
-            missing_slots=["listing_type", "target_area", "budget_max", "layout_preference"],
+            missing_slots=["listing_type", "target_area", "budget_max"],
             follow_up_questions=[
                 {
                     "slot": "listing_type",
@@ -230,15 +230,9 @@ def test_planner_asks_follow_up_questions_for_generic_request():
                 },
                 {
                     "slot": "budget_max",
-                    "label": "家賃上限",
-                    "question": "家賃の上限はいくらですか？",
+                    "label": "予算上限",
+                    "question": "予算の上限はいくらですか？",
                     "examples": ["10万円まで", "12万円以内", "15万円まで"],
-                },
-                {
-                    "slot": "layout_preference",
-                    "label": "間取り",
-                    "question": "希望の間取りはありますか？",
-                    "examples": ["1K", "1LDK", "2LDK"],
                 },
             ],
         )
@@ -255,8 +249,8 @@ def test_planner_asks_follow_up_questions_for_generic_request():
         "listing_type",
         "target_area",
         "budget_max",
-        "layout_preference",
     ]
+    assert result["required_follow_up_questions"][0]["slot"] == "listing_type"
     assert result["follow_up_questions"] == []
 
 
@@ -352,7 +346,7 @@ def test_planner_uses_llm_intent_for_natural_search_request_without_structured_s
             layout_preference=None,
             move_in_date="asap",
             next_action="missing_slots_question",
-            missing_slots=["listing_type", "target_area", "budget_max", "layout_preference"],
+            missing_slots=["listing_type", "target_area", "budget_max"],
             follow_up_questions=[
                 {
                     "slot": "listing_type",
@@ -368,15 +362,9 @@ def test_planner_uses_llm_intent_for_natural_search_request_without_structured_s
                 },
                 {
                     "slot": "budget_max",
-                    "label": "家賃上限",
-                    "question": "家賃はどこまで見ますか？",
+                    "label": "予算上限",
+                    "question": "予算はどこまで見ますか？",
                     "examples": ["10万円まで", "12万円以内", "管理費込みで14万円以下"],
-                },
-                {
-                    "slot": "layout_preference",
-                    "label": "間取り",
-                    "question": "一人暮らし向けの間取り希望はありますか？",
-                    "examples": ["1K", "1DK", "1LDK"],
                 },
             ],
         )
@@ -394,7 +382,6 @@ def test_planner_uses_llm_intent_for_natural_search_request_without_structured_s
         "listing_type",
         "target_area",
         "budget_max",
-        "layout_preference",
     ]
 
 
@@ -408,7 +395,7 @@ def test_planner_uses_llm_follow_up_questions_as_is_when_subset_selected():
             layout_preference=None,
             move_in_date=None,
             next_action="missing_slots_question",
-            missing_slots=["listing_type", "target_area", "budget_max", "layout_preference"],
+            missing_slots=["listing_type", "target_area", "budget_max"],
             follow_up_questions=[
                 {
                     "slot": "target_area",
@@ -431,7 +418,6 @@ def test_planner_uses_llm_follow_up_questions_as_is_when_subset_selected():
         "listing_type",
         "target_area",
         "budget_max",
-        "layout_preference",
     ]
     assert result["follow_up_questions"] == []
 

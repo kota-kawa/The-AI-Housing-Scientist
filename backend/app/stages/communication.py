@@ -227,7 +227,7 @@ def run_communication(
             "message_draft": "候補物件がないため、問い合わせ文はまだ作成できません。",
             "check_items": [
                 "希望エリアを具体化する",
-                "家賃上限を決める",
+                "予算上限を決める",
                 "駅徒歩条件を決める",
             ],
             "pending_action": None,

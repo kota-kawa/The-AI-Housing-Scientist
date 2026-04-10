@@ -2573,10 +2573,23 @@ export default function StructuredBlock({
   if (block.type === "question") {
     const items = (block.content.items as Array<Record<string, unknown>>) ?? [];
     const intro = toDisplayText(block.content.intro);
-    const selectedCount = items.filter((item) => {
-      const answer = toDisplayText(item.free_text) || toDisplayText(item.selected_example);
-      return Boolean(answer.trim());
+    const answeredCount = items.filter((item) => {
+      const selectedExamples = toStringArray(item.selected_examples);
+      const selectedExample = toDisplayText(item.selected_example);
+      const freeText = toDisplayText(item.free_text);
+      return Boolean(selectedExamples.length || selectedExample || freeText.trim());
     }).length;
+    const remainingCount = Math.max(items.length - answeredCount, 0);
+    const isBlocking = toDisplayText(block.content.mode) === "blocking";
+    const canSubmit = answeredCount > 0 && (!isBlocking || remainingCount === 0);
+    const progressText =
+      answeredCount === 0
+        ? isBlocking
+          ? "条件を入力すると、まとめて送信できます。"
+          : "分かる条件だけ入力すると、ここから反映できます。"
+        : isBlocking && remainingCount > 0
+          ? `あと${remainingCount}項目入力すると、条件を送信できます。`
+          : `${answeredCount}/${items.length}項目入力済みです。内容を確認して送信してください。`;
     const tone = TONES.question;
     return (
       <section
@@ -2591,9 +2604,15 @@ export default function StructuredBlock({
             const examples = Array.isArray(item.examples)
               ? item.examples.map((example) => toDisplayText(example)).filter(Boolean)
               : [];
+            const selectedExamples = toStringArray(item.selected_examples);
             const selectedExample = toDisplayText(item.selected_example);
+            const activeExamples =
+              selectedExamples.length > 0
+                ? selectedExamples
+                : selectedExample
+                  ? [selectedExample]
+                  : [];
             const freeText = toDisplayText(item.free_text);
-            const answerValue = freeText || selectedExample;
             const textPlaceholder =
               toDisplayText(item.text_placeholder) || getQuestionInputPlaceholder(label);
             const keyboardHint = toDisplayText(item.keyboard_hint);
@@ -2613,11 +2632,11 @@ export default function StructuredBlock({
                       <button
                         key={example}
                         type="button"
-                        aria-pressed={answerValue.trim() === example}
+                        aria-pressed={activeExamples.includes(example)}
                         disabled={disabled}
                         onClick={() => onQuestionSuggestionToggle?.(idx, example)}
                         className={`rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-55 ${
-                          answerValue.trim() === example
+                          activeExamples.includes(example)
                             ? "border-emerald-700 bg-emerald-700 text-white shadow-sm"
                             : "border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100"
                         }`}
@@ -2629,10 +2648,10 @@ export default function StructuredBlock({
                 )}
                 <div className="mt-3">
                   <label className="mb-1 block text-[11px] font-semibold text-emerald-700">
-                    選択肢にない場合は自由入力
+                    自由入力・補足
                   </label>
                   <textarea
-                    value={answerValue}
+                    value={freeText}
                     disabled={disabled}
                     rows={2}
                     inputMode={keyboardHint === "numeric" ? "numeric" : "text"}
@@ -2645,18 +2664,14 @@ export default function StructuredBlock({
             );
           })}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-white/80 px-3 py-3">
-            <p className="text-xs font-medium text-emerald-800">
-              {selectedCount > 0
-                ? `${selectedCount}件選択中です。内容を確認して実行してください。`
-                : "候補選択または自由入力をすると、ここからまとめて送信できます。"}
-            </p>
+            <p className="text-xs font-medium text-emerald-800">{progressText}</p>
             <button
               type="button"
-              disabled={disabled || selectedCount === 0}
+              disabled={disabled || !canSubmit}
               onClick={onQuestionExecute}
               className="rounded-full border border-emerald-700 bg-emerald-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-100 disabled:text-emerald-400"
             >
-              実行する
+              {isBlocking ? "条件を送信" : "追加条件を反映"}
             </button>
           </div>
         </div>

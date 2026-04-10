@@ -32,9 +32,9 @@ def test_planner_prompt_examples_golden_cases_cover_core_slot_patterns():
 
     generic = examples["generic_search_needs_core_slots"]["output"]
     assert generic["next_action"] == "missing_slots_question"
-    assert generic["missing_slots"] == ["target_area", "budget_max", "layout_preference"]
+    assert generic["missing_slots"] == ["target_area", "budget_max"]
     assert generic["user_memory"]["listing_type"] == "賃貸"
-    assert len(generic["follow_up_questions"]) == 3
+    assert len(generic["follow_up_questions"]) == 2
     assert "例以外でも大丈夫" in generic["follow_up_questions"][0]["question"]
     assert "ざっくりでも大丈夫" in generic["follow_up_questions"][1]["question"]
 
