@@ -22,7 +22,7 @@ def build_settings(database_path: str, *, with_keys: bool = False) -> Settings:
         claude_api_key="claude-key" if with_keys else "",
         brave_search_api_key="",
         openai_model="gpt-5.4-mini",
-        gemini_model="gemini-3-flash",
+        gemini_model="gemini-2.5-flash",
         groq_model_primary="openai/gpt-oss-120b",
         groq_model_secondary="qwen/qwen3-32b",
         claude_model="claude-sonnet-4-6",
@@ -100,7 +100,7 @@ def test_session_llm_config_defaults_and_custom_update(tmp_path: Path, monkeypat
         "_list_models_for_provider",
         lambda provider: {
             "openai": ["gpt-5.4-mini"],
-            "gemini": ["gemini-3-flash"],
+            "gemini": ["gemini-2.5-flash"],
             "groq": ["openai/gpt-oss-120b"],
             "claude": ["claude-sonnet-4-6"],
         }[provider],
@@ -110,11 +110,11 @@ def test_session_llm_config_defaults_and_custom_update(tmp_path: Path, monkeypat
     assert default_config["routes"]["planner"]["model"] == "gpt-5.4-mini"
     assert default_config["routes"]["research_default"]["model"] == "gpt-5.4-mini"
     assert default_config["routes"]["communication"]["model"] == "claude-sonnet-4-6"
-    assert default_config["routes"]["risk_check"]["model"] == "gemini-3-flash"
+    assert default_config["routes"]["risk_check"]["model"] == "gemini-2.5-flash"
     capabilities = orchestrator.get_llm_capabilities()
     assert [item["model"] for item in capabilities["models"]] == [
         "gpt-5.4-mini",
-        "gemini-3-flash",
+        "gemini-2.5-flash",
         "claude-sonnet-4-6",
         "openai/gpt-oss-120b",
         "qwen/qwen3-32b",
@@ -128,7 +128,7 @@ def test_session_llm_config_defaults_and_custom_update(tmp_path: Path, monkeypat
                 "planner": {"model": "claude-sonnet-4-6"},
                 "research_default": {"model": "gpt-5.4-mini"},
                 "communication": {"model": "gpt-5.4-mini"},
-                "risk_check": {"model": "gemini-3-flash"},
+                "risk_check": {"model": "gemini-2.5-flash"},
             },
         },
     )
@@ -162,7 +162,7 @@ def test_research_job_uses_llm_config_snapshot_per_execution(tmp_path: Path):
                 "planner": {"model": "gpt-5.4-mini"},
                 "research_default": {"model": "claude-sonnet-4-6"},
                 "communication": {"model": "gpt-5.4-mini"},
-                "risk_check": {"model": "gemini-3-flash"},
+                "risk_check": {"model": "gemini-2.5-flash"},
             },
         },
     )
@@ -197,7 +197,7 @@ def test_research_job_uses_llm_config_snapshot_per_execution(tmp_path: Path):
             "preset": "custom",
             "routes": {
                 "planner": {"model": "gpt-5.4-mini"},
-                "research_default": {"model": "gemini-3-flash"},
+                "research_default": {"model": "gemini-2.5-flash"},
                 "communication": {"model": "claude-sonnet-4-6"},
                 "risk_check": {"model": "gpt-5.4-mini"},
             },
@@ -215,4 +215,4 @@ def test_research_job_uses_llm_config_snapshot_per_execution(tmp_path: Path):
     assert second_job is not None
     assert second_job["id"] != first_job["id"]
     assert second_job["provider"] == "gemini"
-    assert second_job["llm_config"]["routes"]["research_default"]["model"] == "gemini-3-flash"
+    assert second_job["llm_config"]["routes"]["research_default"]["model"] == "gemini-2.5-flash"

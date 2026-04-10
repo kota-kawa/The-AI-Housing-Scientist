@@ -58,6 +58,11 @@ const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 120;
 const DEFAULT_BACKGROUND_IMAGE = 'url("/housing-scientist.png")';
 const SEARCH_BACKGROUND_IMAGE = 'url("/search.png")';
 const COMPLETE_BACKGROUND_IMAGE = 'url("/complete.png")';
+const POLLED_RESEARCH_STATES = new Set([
+  "research_queued",
+  "research_running",
+  "search_results_ready",
+]);
 const COMPLETE_BACKGROUND_STATES = new Set([
   "research_completed",
   "search_results_ready",
@@ -493,7 +498,7 @@ export default function App() {
       return;
     }
 
-    if (!["research_queued", "research_running"].includes(responseState)) {
+    if (!POLLED_RESEARCH_STATES.has(responseState)) {
       return;
     }
 
@@ -632,7 +637,7 @@ export default function App() {
     const assistantMessage = toAssistantMessage(payload);
     forceAutoScrollRef.current = true;
     setMessages((prev) => [...prev, assistantMessage]);
-    if (payload.status === "research_queued" || payload.status === "research_running") {
+    if (POLLED_RESEARCH_STATES.has(payload.status)) {
       setActiveResearchMessageId(assistantMessage.id);
     } else {
       setActiveResearchMessageId("");

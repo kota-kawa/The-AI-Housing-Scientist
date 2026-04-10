@@ -140,7 +140,7 @@ def load_settings() -> Settings:
         claude_api_key=_env("CLAUDE_API_KEY", aliases=("ANTHROPIC_API_KEY",)),
         brave_search_api_key=_env("BRAVE_SEARCH_API", aliases=("BRAVE_SEARCH_API_KEY",)),
         openai_model=_env("OPENAI_MODEL", "gpt-5.4-mini"),
-        gemini_model=_env("GEMINI_MODEL", "gemini-3-flash"),
+        gemini_model=_env("GEMINI_MODEL", "gemini-2.5-flash"),
         groq_model_primary=_env("GROQ_MODEL_PRIMARY", "openai/gpt-oss-120b"),
         groq_model_secondary=_env("GROQ_MODEL_SECONDARY", "qwen/qwen3-32b"),
         claude_model=_env("CLAUDE_MODEL", "claude-sonnet-4-6"),

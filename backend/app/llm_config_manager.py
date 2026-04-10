@@ -150,7 +150,9 @@ class LLMConfigManagerMixin:
                     raise RuntimeError(f"failed to list models for {provider}: {exc}") from exc
                 continue
             if models and model not in models:
-                raise RuntimeError(f"model not available for {provider}: {model}")
+                if self.settings.model_strict_mode:
+                    raise RuntimeError(f"model not available for {provider}: {model}")
+                continue
 
     # JP: session LLM configを更新する。
     # EN: Update session LLM config.

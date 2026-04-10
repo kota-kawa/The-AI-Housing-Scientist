@@ -311,6 +311,104 @@ class OrchestratorResearchMixin:
             "brave_error": brave_error,
         }
 
+    # JP: research execution resultをmemoryへ反映する。
+    # EN: Store research execution result into session memory.
+    def _store_research_execution_result(
+        self,
+        *,
+        session_id: str,
+        job_id: str,
+        approved_plan: dict[str, Any],
+        job_llm_config: dict[str, Any],
+        execution_result: Any,
+        task_status: str,
+    ) -> dict[str, Any]:
+        user_memory, task_memory = self.db.get_memories(session_id)
+        updated_user_memory = approved_plan.get("user_memory_snapshot") or user_memory
+        learned_preferences = updated_user_memory.get("learned_preferences", {}) or {}
+        updated_user_memory = {
+            key: value for key, value in updated_user_memory.items() if key != "learned_preferences"
+        }
+
+        task_memory["status"] = task_status
+        task_memory["awaiting_contract_text"] = False
+        task_memory["profile_resume_pending"] = False
+        task_memory["last_query"] = execution_result.query
+        task_memory["last_normalized_properties"] = execution_result.normalized_properties
+        task_memory["last_ranked_properties"] = execution_result.ranked_properties
+        task_memory["last_duplicate_groups"] = execution_result.duplicate_groups
+        task_memory["last_integrity_reviews"] = execution_result.integrity_reviews
+        task_memory["last_dropped_property_ids"] = execution_result.dropped_property_ids
+        task_memory["last_branch_result_summary"] = execution_result.branch_result_summary
+        task_memory["last_final_report"] = execution_result.final_report_markdown
+        task_memory["last_search_summary"] = execution_result.search_summary
+        task_memory["last_source_items"] = execution_result.source_items
+        task_memory["last_research_summary"] = execution_result.research_summary
+        task_memory["selected_property_id"] = None
+        task_memory["risk_items"] = []
+        task_memory["property_reactions"] = {}
+        task_memory["comparison_property_ids"] = []
+        task_memory["approved_research_plan"] = approved_plan
+        task_memory["approved_llm_config"] = job_llm_config
+        task_memory["active_research_job_id"] = None
+        task_memory["last_research_job_id"] = job_id
+        task_memory["last_llm_config"] = job_llm_config
+        task_memory["selected_branch_id"] = execution_result.selected_branch_id
+        task_memory["branch_summaries"] = execution_result.branch_summaries
+        task_memory["offline_evaluation"] = execution_result.offline_evaluation
+        task_memory["failure_summary"] = execution_result.failure_summary
+        task_memory["selected_path"] = execution_result.selected_path
+        task_memory["search_tree_summary"] = execution_result.search_tree_summary
+        task_memory["pruned_nodes"] = execution_result.pruned_nodes
+        task_memory["latest_strategy_episode_id"] = job_id
+        task_memory["strategy_memory_snapshot"] = learned_preferences.get("strategy_memory", {})
+        self.db.set_pending_action(session_id, None)
+        self.db.update_memories(session_id, updated_user_memory, task_memory)
+        return task_memory
+
+    # JP: research result responseを構築する。
+    # EN: Build research result response.
+    def _build_research_result_response(
+        self,
+        *,
+        job_id: str,
+        response_status: str,
+        execution_result: Any,
+        task_memory: dict[str, Any],
+        status_label: str = "",
+    ) -> ChatMessageResponse:
+        completed_job = self.db.get_research_job(job_id)
+        visible_ranked_properties = self._visible_ranked_properties(
+            execution_result.ranked_properties,
+            task_memory,
+        )
+        response = ChatMessageResponse(
+            status=response_status,
+            assistant_message=(
+                execution_result.research_summary
+                or (
+                    f"調査が完了しました。{len(visible_ranked_properties)}件の候補を比較し、"
+                    "問い合わせに進める候補を整理しました。"
+                )
+            ),
+            missing_slots=[],
+            next_action="select_property",
+            blocks=self._build_research_result_blocks(
+                research_summary=execution_result.research_summary,
+                final_report_markdown=execution_result.final_report_markdown,
+                ranked_properties=visible_ranked_properties,
+                normalized_properties=execution_result.normalized_properties,
+                search_summary=execution_result.search_summary,
+                source_items=execution_result.source_items,
+                task_memory=task_memory,
+                job_id=completed_job["id"] if completed_job else job_id,
+            ),
+            pending_confirmation=False,
+            pending_action=None,
+            status_label=status_label,
+        )
+        return self._annotate_response_labels(response)
+
     # JP: process search messageを処理する。
     # EN: Process process search message.
     def _process_search_message(
@@ -527,56 +625,69 @@ class OrchestratorResearchMixin:
             tree_min_best_score_gap=self.settings.research_tree_min_best_score_gap,
         )
         execution_result = manager.execute()
-        final_report_result = run_final_report(
-            stage_nodes=manager.journal.stage_nodes,
-            selected_branch_nodes=manager.journal.selected_branch_nodes(),
-            adapter=research_adapter,
+        task_memory = self._store_research_execution_result(
+            session_id=session_id,
+            job_id=job_id,
+            approved_plan=approved_plan,
+            job_llm_config=job_llm_config,
+            execution_result=execution_result,
+            task_status="search_results_ready",
         )
+        self.db.update_research_job(
+            job_id,
+            status="reporting",
+            current_stage="synthesize",
+            progress_percent=96,
+            latest_summary=(
+                (execution_result.research_summary or "候補比較を表示しました。")
+                + "\n詳細レポートを生成中です。候補の比較と問い合わせ操作は先に進められます。"
+            ),
+        )
+        ready_response = self._build_research_result_response(
+            job_id=job_id,
+            response_status="search_results_ready",
+            execution_result=execution_result,
+            task_memory=task_memory,
+            status_label="候補が揃いました。詳細レポートを生成中",
+        )
+        self.db.update_research_job(job_id, result_payload=ready_response.model_dump())
+        self.db.set_session_status(session_id, "search_results_ready")
+
+        try:
+            final_report_result = run_final_report(
+                stage_nodes=manager.journal.stage_nodes,
+                selected_branch_nodes=manager.journal.selected_branch_nodes(),
+                adapter=research_adapter,
+            )
+        except Exception as exc:
+            final_report_result = {
+                "report_markdown": "",
+                "summary": {},
+                "llm_applied": False,
+                "error": str(exc),
+            }
         execution_result.final_report_markdown = str(
             final_report_result.get("report_markdown") or ""
         ).strip()
 
-        updated_user_memory = approved_plan.get("user_memory_snapshot", user_memory)
-        updated_user_memory = {
-            key: value for key, value in updated_user_memory.items() if key != "learned_preferences"
-        }
-
-        task_memory["status"] = "research_completed"
-        task_memory["awaiting_contract_text"] = False
-        task_memory["profile_resume_pending"] = False
-        task_memory["last_query"] = execution_result.query
-        task_memory["last_normalized_properties"] = execution_result.normalized_properties
-        task_memory["last_ranked_properties"] = execution_result.ranked_properties
-        task_memory["last_duplicate_groups"] = execution_result.duplicate_groups
-        task_memory["last_integrity_reviews"] = execution_result.integrity_reviews
-        task_memory["last_dropped_property_ids"] = execution_result.dropped_property_ids
-        task_memory["last_branch_result_summary"] = execution_result.branch_result_summary
+        current_user_memory, task_memory = self.db.get_memories(session_id)
         task_memory["last_final_report"] = execution_result.final_report_markdown
-        task_memory["last_search_summary"] = execution_result.search_summary
-        task_memory["last_source_items"] = execution_result.source_items
-        task_memory["last_research_summary"] = execution_result.research_summary
-        task_memory["selected_property_id"] = None
-        task_memory["risk_items"] = []
-        task_memory["property_reactions"] = {}
-        task_memory["comparison_property_ids"] = []
-        task_memory["approved_research_plan"] = approved_plan
-        task_memory["approved_llm_config"] = job_llm_config
-        task_memory["active_research_job_id"] = None
-        task_memory["last_research_job_id"] = job_id
-        task_memory["last_llm_config"] = job_llm_config
-        task_memory["selected_branch_id"] = execution_result.selected_branch_id
-        task_memory["branch_summaries"] = execution_result.branch_summaries
-        task_memory["offline_evaluation"] = execution_result.offline_evaluation
-        task_memory["failure_summary"] = execution_result.failure_summary
-        task_memory["selected_path"] = execution_result.selected_path
-        task_memory["search_tree_summary"] = execution_result.search_tree_summary
-        task_memory["pruned_nodes"] = execution_result.pruned_nodes
-        task_memory["latest_strategy_episode_id"] = job_id
-        task_memory["strategy_memory_snapshot"] = (
-            updated_user_memory.get("learned_preferences", {}) or {}
-        ).get("strategy_memory", {})
-        self.db.set_pending_action(session_id, None)
-        self.db.update_memories(session_id, updated_user_memory, task_memory)
+        can_mark_session_completed = (
+            str(task_memory.get("last_research_job_id") or "") == job_id
+            and str(task_memory.get("status") or "")
+            in {"search_results_ready", "research_completed"}
+        )
+        if can_mark_session_completed:
+            task_memory["status"] = "research_completed"
+        self.db.update_memories(session_id, current_user_memory, task_memory)
+        self.db.update_research_job(
+            job_id,
+            status="completed",
+            current_stage="synthesize",
+            progress_percent=100,
+            latest_summary=execution_result.research_summary or "調査が完了しました。",
+            finished_at=utc_now_iso(),
+        )
         self.db.add_audit_event(
             session_id,
             "final_report",
@@ -588,46 +699,16 @@ class OrchestratorResearchMixin:
             "探索 journal と選択済み分岐を走査して最終レポートを生成",
         )
 
-        self.db.update_research_job(
-            job_id,
-            status="completed",
-            current_stage="synthesize",
-            progress_percent=100,
-            latest_summary=execution_result.research_summary or "調査が完了しました。",
-            finished_at=utc_now_iso(),
-        )
-        completed_job = self.db.get_research_job(job_id)
-        visible_ranked_properties = self._visible_ranked_properties(
-            execution_result.ranked_properties,
-            task_memory,
-        )
-        response = ChatMessageResponse(
-            status="research_completed",
-            assistant_message=(
-                execution_result.research_summary
-                or (
-                    f"調査が完了しました。{len(visible_ranked_properties)}件の候補を比較し、"
-                    "問い合わせに進める候補を整理しました。"
-                )
-            ),
-            missing_slots=[],
-            next_action="select_property",
-            blocks=self._build_research_result_blocks(
-                research_summary=execution_result.research_summary,
-                final_report_markdown=execution_result.final_report_markdown,
-                ranked_properties=visible_ranked_properties,
-                normalized_properties=execution_result.normalized_properties,
-                search_summary=execution_result.search_summary,
-                source_items=execution_result.source_items,
-                task_memory=task_memory,
-                job_id=completed_job["id"] if completed_job else job_id,
-            ),
-            pending_confirmation=False,
-            pending_action=None,
+        response = self._build_research_result_response(
+            job_id=job_id,
+            response_status="research_completed",
+            execution_result=execution_result,
+            task_memory=task_memory,
         )
         self.db.update_research_job(job_id, result_payload=response.model_dump())
-        self.db.set_session_status(session_id, "research_completed")
-        self.db.add_message(session_id, "assistant", response.model_dump())
+        if can_mark_session_completed:
+            self.db.set_session_status(session_id, "research_completed")
+            self.db.add_message(session_id, "assistant", response.model_dump())
         return response.model_dump()
 
     # JP: process next research jobを処理する。
@@ -705,7 +786,7 @@ class OrchestratorResearchMixin:
         response = None
         if response_payload:
             response = ChatMessageResponse(**response_payload)
-        elif job["status"] in {"queued", "running"}:
+        elif job["status"] in {"queued", "running", "reporting"}:
             response = self._build_research_running_response(job)
 
         return ResearchStateResponse(

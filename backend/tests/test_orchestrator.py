@@ -26,7 +26,7 @@ def build_settings(database_path: str) -> Settings:
         claude_api_key="",
         brave_search_api_key="",
         openai_model="gpt-5.4-mini",
-        gemini_model="gemini-3-flash",
+        gemini_model="gemini-2.5-flash",
         groq_model_primary="openai/gpt-oss-120b",
         groq_model_secondary="qwen/qwen3-32b",
         claude_model="claude-sonnet-4-6",
@@ -293,6 +293,18 @@ def test_orchestrator_stage_flow_is_interactive(tmp_path: Path):
     assert any(block.type == "cards" for block in research_state.response.blocks)
     assert any(block.type == "tree" for block in research_state.response.blocks)
     assert any(block.title == "最終レポート" for block in research_state.response.blocks)
+    cards_index = next(
+        index for index, block in enumerate(research_state.response.blocks) if block.type == "cards"
+    )
+    report_index = next(
+        index
+        for index, block in enumerate(research_state.response.blocks)
+        if block.title == "最終レポート"
+    )
+    assert cards_index < report_index
+    card_items = research_state.response.blocks[cards_index].content["items"]
+    assert card_items[0]["title"]
+    assert card_items[0]["image_url"].startswith("https://")
 
     user_memory, task_memory = db.get_memories(session_id)
     selected_property_id = task_memory["last_ranked_properties"][0]["property_id_norm"]
@@ -615,6 +627,64 @@ def test_research_completed_response_prefers_llm_summary(tmp_path: Path):
     _, task_memory = db.get_memories(session_id)
     assert task_memory["last_research_summary"] == summary
     assert task_memory["last_final_report"].startswith("# 最終レポート")
+
+
+def test_research_results_are_published_before_final_report(tmp_path: Path, monkeypatch):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+    summary = "条件に合う候補を3件比較できました。"
+    adapter = FakeResearchSummaryAdapter(summary, final_report="# 後追いレポート\n\n詳細です。")
+    install_fake_route_adapters(orchestrator, research_default_adapter=adapter)
+
+    session_id, _ = db.create_session()
+    orchestrator.process_user_message(
+        session_id=session_id,
+        message="江東区で家賃12万円以下、駅徒歩7分以内の1LDKを探しています",
+        provider="openai",
+    )
+    orchestrator.execute_action(
+        session_id=session_id,
+        action_type="approve_research_plan",
+        payload={},
+    )
+
+    observed: dict[str, str] = {}
+
+    def fake_run_final_report(**kwargs):
+        job = db.get_latest_research_job(session_id)
+        assert job is not None
+        observed["job_status"] = job["status"]
+        observed["response_status"] = job["result"]["status"]
+        observed["task_status"] = db.get_memories(session_id)[1]["status"]
+        observed["latest_summary"] = job["latest_summary"]
+        return {
+            "report_markdown": "# 後追いレポート\n\n詳細です。",
+            "summary": {},
+            "llm_applied": False,
+        }
+
+    monkeypatch.setattr(
+        "app.orchestrator_modules.research.run_final_report",
+        fake_run_final_report,
+    )
+
+    assert orchestrator.process_next_research_job() is True
+
+    assert observed["job_status"] == "reporting"
+    assert observed["response_status"] == "search_results_ready"
+    assert observed["task_status"] == "search_results_ready"
+    assert "詳細レポートを生成中" in observed["latest_summary"]
+
+    research_state = orchestrator.get_research_state(session_id)
+    assert research_state.status == "completed"
+    assert research_state.response is not None
+    assert research_state.response.status == "research_completed"
+    report_block = next(
+        block for block in research_state.response.blocks if block.title == "最終レポート"
+    )
+    assert report_block.content["body"].startswith("# 後追いレポート")
 
 
 def test_research_summary_prompt_includes_branch_tradeoffs_and_followups(tmp_path: Path):

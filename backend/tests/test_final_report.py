@@ -161,3 +161,74 @@ def test_final_report_fallback_uses_branch_result_summary_and_selected_path():
     assert "東雲ベイテラス を推奨します" in report
     assert "## 追加調査の提案" in report
     assert "東雲ベイテラス の管理費・初期費用内訳" in report
+
+
+def test_final_report_fallback_says_no_recommendation_without_candidates():
+    stage_nodes = [
+        ResearchNode(
+            id=10,
+            stage="synthesize",
+            node_type="stage",
+            status="completed",
+            input_payload={},
+            output_payload={
+                "offline_evaluation": {
+                    "readiness": "low",
+                    "recommendations": ["strict条件で再探索する"],
+                },
+                "failure_summary": {
+                    "top_issues": ["正規化後の候補が残っていない"],
+                },
+                "research_summary": "条件に合う推薦可能候補はありませんでした。",
+            },
+            reasoning="synthesized",
+        )
+    ]
+    selected_branch_nodes = [
+        ResearchNode(
+            id=20,
+            stage="tree_search",
+            node_type="search_selection",
+            status="completed",
+            input_payload={},
+            output_payload={
+                "selected_branch": {
+                    "branch_id": "node-1",
+                    "label": "strict",
+                    "branch_result_summary": {
+                        "物件候補リスト": [],
+                        "共通リスク": ["検索ヒットはあるが、整合性レビュー後に推薦可能候補が残っていない"],
+                        "未解決の調査項目": ["対象エリア・間取り・must条件を固定した再検索"],
+                    },
+                },
+                "selected_path": [
+                    {
+                        "branch_id": "node-1",
+                        "label": "strict",
+                        "depth": 1,
+                        "strategy_tags": ["tighten_match"],
+                        "branch_score": 8.0,
+                    }
+                ],
+                "search_tree_summary": {
+                    "executed_node_count": 1,
+                    "termination_reason": "frontier_exhausted",
+                },
+            },
+            reasoning="selected path",
+            branch_id="node-1",
+            selected=True,
+            metrics={},
+        )
+    ]
+
+    result = run_final_report(
+        stage_nodes=stage_nodes,
+        selected_branch_nodes=selected_branch_nodes,
+        adapter=None,
+    )
+
+    report = result["report_markdown"]
+    assert "推奨物件なし" in report
+    assert "| 候補なし |" in report
+    assert "東雲ベイテラス を推奨します" not in report

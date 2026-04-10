@@ -704,10 +704,10 @@ class OrchestratorPlanningMixin:
     # JP: research running responseを構築する。
     # EN: Build research running response.
     def _build_research_running_response(self, job: dict[str, Any]) -> ChatMessageResponse:
-        status = "research_running" if job["status"] == "running" else "research_queued"
+        status = "research_queued" if job["status"] == "queued" else "research_running"
         assistant_message = (
             "調査計画に沿って候補を収集中です。進捗はこのまま更新されます。"
-            if job["status"] == "running"
+            if job["status"] != "queued"
             else "調査ジョブを登録しました。まもなく情報収集を始めます。"
         )
         return ChatMessageResponse(

@@ -20,9 +20,11 @@ class AgentManagerExecutionMixin:
             or selected_normalize.get("branch_result_summary", {})
             or state.selected_branch_summary.get("branch_result_summary", {})
         )
-        selected_properties = selected_integrity.get(
-            "normalized_properties", []
-        ) or selected_normalize.get("normalized_properties", [])
+        selected_properties = (
+            selected_integrity["normalized_properties"]
+            if "normalized_properties" in selected_integrity
+            else selected_normalize.get("normalized_properties", [])
+        )
 
         state.source_items = self.collect_source_items(
             ranked_properties=selected_rank.get("ranked_properties", []),
@@ -34,6 +36,11 @@ class AgentManagerExecutionMixin:
             | selected_integrity.get("summary", {})
             | selected_retrieve.get("summary", {})
             | selected_enrich.get("summary", {})
+        )
+        if "normalized_properties" in selected_integrity:
+            state.search_summary["normalized_count"] = len(selected_properties)
+        state.search_summary["rankable_candidate_count"] = len(
+            selected_rank.get("ranked_properties", [])
         )
         if selected_branch_result_summary:
             state.search_summary["branch_result_summary"] = selected_branch_result_summary
@@ -169,9 +176,11 @@ class AgentManagerExecutionMixin:
             or selected_normalize.get("branch_result_summary", {})
             or state.selected_branch_summary.get("branch_result_summary", {})
         )
-        selected_properties = selected_integrity.get(
-            "normalized_properties", []
-        ) or selected_normalize.get("normalized_properties", [])
+        selected_properties = (
+            selected_integrity["normalized_properties"]
+            if "normalized_properties" in selected_integrity
+            else selected_normalize.get("normalized_properties", [])
+        )
 
         return ResearchExecutionResult(
             query=state.query,

@@ -15,7 +15,7 @@ class GeminiOpenAIAdapter(OpenAICompatibleAdapter):
     def __init__(self, *, api_key: str, model: str, timeout_seconds: int, max_retries: int):
         super().__init__(
             provider_name="gemini",
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
             api_key=api_key,
             model=model,
             timeout_seconds=timeout_seconds,

@@ -168,7 +168,15 @@ class AgentManagerTreeMixin:
             if str(item).strip()
         ]
 
-        queries = list(base_queries)
+        strict_area_operators = {
+            "tighten_match",
+            "relax_for_coverage",
+            "source_diversify",
+            "detail_first",
+            "schema_first",
+            "exploit_best",
+        }
+        queries = [] if operator in strict_area_operators else list(base_queries)
         if operator == "tighten_match":
             queries.extend(
                 [
@@ -1517,6 +1525,11 @@ class AgentManagerTreeMixin:
                 search_summary |= artifacts.normalize.get("summary", {})
             if artifacts.integrity:
                 search_summary |= artifacts.integrity.get("summary", {})
+            if "normalized_properties" in artifacts.integrity:
+                node_properties = artifacts.integrity.get("normalized_properties", [])
+            else:
+                node_properties = artifacts.normalize.get("normalized_properties", [])
+
             branch_nodes.append(
                 {
                     "branch_id": artifacts.plan.node_key,
@@ -1529,10 +1542,9 @@ class AgentManagerTreeMixin:
                     "search_summary": search_summary,
                     "raw_results": artifacts.retrieve.get("raw_results", []),
                     "detail_html_map": artifacts.enrich.get("detail_html_map", {}),
-                    "normalized_properties": (
-                        artifacts.integrity.get("normalized_properties", [])
-                        or artifacts.normalize.get("normalized_properties", [])
-                    ),
+                    "normalized_properties": node_properties,
+                    "dropped_properties": artifacts.integrity.get("dropped_properties", []),
+                    "integrity_reviews": artifacts.integrity.get("integrity_reviews", []),
                     "duplicate_groups": artifacts.normalize.get("duplicate_groups", []),
                     "ranked_properties": artifacts.rank.get("ranked_properties", []),
                 }

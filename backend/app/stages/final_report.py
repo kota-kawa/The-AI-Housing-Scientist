@@ -48,6 +48,7 @@ Requirements:
 - Keep headings in Japanese.
 - The comparison section must include a markdown table.
 - If information is missing, state that clearly instead of guessing.
+- If there are no recommendation-ready candidates, state "推奨物件なし" and do not recommend a relative best property.
 - Reuse the draft when it is already correct, but improve flow and clarity.
 - Do NOT include any markdown image tags (![...](...)). Property images are already shown in the recommendation candidates section.
 """
@@ -285,12 +286,10 @@ def _build_fallback_report(
         top_name = str(top_candidate.get("building_name") or "候補物件")
         top_reason = str(top_candidate.get("reason") or "条件一致度が高い候補です。")
         recommendation_text = f"{top_name} を推奨します。{top_reason}"
-    elif research_summary:
-        top_name = str(selected_branch.get("label") or "今回の選定結果")
-        recommendation_text = research_summary
     else:
-        top_name = str(selected_branch.get("label") or "推奨候補なし")
-        recommendation_text = "現時点では問い合わせ推奨まで十分に整理できていません。"
+        recommendation_text = "推奨物件なし。現時点では問い合わせ推奨まで十分に整理できた候補がありません。"
+        if research_summary:
+            recommendation_text += f"\n\n調査サマリー: {research_summary}"
 
     risk_lines = [f"- {item}" for item in common_risks[:5]] or [
         "- 重大な共通リスクは明示されていません。"

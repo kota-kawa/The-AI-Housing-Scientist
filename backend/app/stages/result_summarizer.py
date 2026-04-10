@@ -180,6 +180,8 @@ def _build_node_snapshot(branch_node: dict[str, Any]) -> dict[str, Any]:
     normalized_properties = list(branch_node.get("normalized_properties", []) or [])
     ranked_properties = list(branch_node.get("ranked_properties", []) or [])
     duplicate_groups = list(branch_node.get("duplicate_groups", []) or [])
+    dropped_properties = list(branch_node.get("dropped_properties", []) or [])
+    integrity_reviews = list(branch_node.get("integrity_reviews", []) or [])
     raw_by_url = {
         str(item.get("url") or ""): item
         for item in raw_results
@@ -263,6 +265,32 @@ def _build_node_snapshot(branch_node: dict[str, Any]) -> dict[str, Any]:
             }
             for group in duplicate_groups[:4]
         ],
+        "dropped_candidates": [
+            {
+                "target": _compact_text(prop.get("building_name") or "除外候補", max_chars=80),
+                "property_id_norm": str(prop.get("property_id_norm") or ""),
+                "reason": _compact_text(
+                    " / ".join(
+                        str(item)
+                        for item in (
+                            (prop.get("integrity_review") or {}).get("inconsistencies", [])
+                        )
+                        if str(item).strip()
+                    )
+                    or "整合性レビューで推薦対象から除外",
+                    max_chars=180,
+                ),
+                "source_node": str(branch_node.get("label") or branch_node.get("branch_id") or "node"),
+            }
+            for prop in dropped_properties[:MAX_REJECTIONS]
+        ],
+        "integrity_issue_count": len(
+            [
+                item
+                for item in integrity_reviews
+                if item.get("should_drop") or item.get("review_status") == "needs_confirmation"
+            ]
+        ),
     }
 
 
@@ -288,6 +316,15 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
                     "property_id_norm": "",
                     "reason": str(issue),
                     "source_node": label,
+                }
+            )
+        for dropped in node.get("dropped_candidates", []) or []:
+            rejections.append(
+                {
+                    "target": str(dropped.get("target") or "除外候補"),
+                    "property_id_norm": str(dropped.get("property_id_norm") or ""),
+                    "reason": str(dropped.get("reason") or "整合性レビューで推薦対象から除外"),
+                    "source_node": str(dropped.get("source_node") or label),
                 }
             )
 
@@ -348,30 +385,6 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
                 )
 
     merged_candidates = sorted(merged.values(), key=_candidate_sort_key, reverse=True)
-    if not merged_candidates and fallback_search_hits:
-        for item in fallback_search_hits[:MAX_CANDIDATES]:
-            merged_candidates.append(
-                {
-                    "property_id_norm": "",
-                    "building_name": str(item.get("title") or "検索候補"),
-                    "image_url": str(item.get("image_url") or ""),
-                    "address": "",
-                    "rent": 0,
-                    "layout": "",
-                    "station_walk_min": 0,
-                    "area_m2": 0.0,
-                    "detail_url": str(item.get("url") or ""),
-                    "score": 0.0,
-                    "reason": str(item.get("summary") or "検索結果から見つかった候補です。"),
-                    "evidence": _unique_strings([item.get("summary")], limit=2),
-                    "matched_queries": _unique_strings(
-                        list(item.get("matched_queries", []) or []), limit=2
-                    ),
-                    "source_nodes": [],
-                    "seen_count": 1,
-                }
-            )
-
     shortlisted = merged_candidates[:MAX_CANDIDATES]
     shortlisted_keys = {_property_key(item) for item in shortlisted}
 
@@ -392,6 +405,8 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
             break
 
     common_risks: list[str] = []
+    if not shortlisted and fallback_search_hits:
+        common_risks.append("検索ヒットはあるが、整合性レビュー後に推薦可能候補が残っていない")
     if any(not item.get("detail_url") for item in shortlisted):
         common_risks.append("詳細ページ未取得の候補が残っている")
     if any(int(item.get("station_walk_min") or 0) <= 0 for item in shortlisted):
@@ -404,6 +419,8 @@ def _fallback_result_summary(branch_nodes: list[dict[str, Any]]) -> dict[str, An
         common_risks.append("入居可能時期が未確認の候補がある")
 
     open_questions: list[str] = []
+    if not shortlisted and fallback_search_hits:
+        open_questions.append("strict条件（対象エリア・間取り・must条件）を固定した再検索")
     for item in shortlisted:
         name = str(item.get("building_name") or "候補物件")
         if int(item.get("station_walk_min") or 0) <= 0:
@@ -556,16 +573,24 @@ def _coerce_result_summary(
 ) -> dict[str, Any]:
     if not isinstance(result, dict):
         return fallback
+    fallback_candidate_keys = {
+        _property_key(candidate)
+        for candidate in fallback.get(PROPERTY_CANDIDATES_KEY, []) or []
+        if _property_key(candidate)
+    }
+    result_candidates = [
+        item
+        for item in result.get(PROPERTY_CANDIDATES_KEY, []) or []
+        if fallback_candidate_keys and _property_key(item) in fallback_candidate_keys
+    ]
     merged = {
-        PROPERTY_CANDIDATES_KEY: result.get(
-            PROPERTY_CANDIDATES_KEY, fallback[PROPERTY_CANDIDATES_KEY]
-        ),
+        PROPERTY_CANDIDATES_KEY: result_candidates,
         REJECTION_REASONS_KEY: result.get(REJECTION_REASONS_KEY, fallback[REJECTION_REASONS_KEY]),
         COMMON_RISKS_KEY: result.get(COMMON_RISKS_KEY, fallback[COMMON_RISKS_KEY]),
         OPEN_QUESTIONS_KEY: result.get(OPEN_QUESTIONS_KEY, fallback[OPEN_QUESTIONS_KEY]),
         SUMMARY_KEY: result.get(SUMMARY_KEY, fallback[SUMMARY_KEY]),
     }
-    if not merged[PROPERTY_CANDIDATES_KEY]:
+    if not merged[PROPERTY_CANDIDATES_KEY] and fallback_candidate_keys:
         merged[PROPERTY_CANDIDATES_KEY] = fallback[PROPERTY_CANDIDATES_KEY]
     if not isinstance(merged[SUMMARY_KEY], dict):
         merged[SUMMARY_KEY] = fallback[SUMMARY_KEY]

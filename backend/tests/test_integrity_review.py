@@ -147,3 +147,80 @@ def test_integrity_review_llm_can_drop_candidate_that_rules_keep():
     assert review["should_drop"] is True
     assert review["trust_score"] <= 45
     assert review["evidence_urls"] == ["https://example.com/reference"]
+
+
+def test_integrity_review_drops_layout_mismatch_before_ranking():
+    result = run_integrity_review(
+        normalized_properties=[
+            {
+                "property_id_norm": "p1",
+                "building_name": "町田ファミリーレジデンス",
+                "detail_url": "https://example.com/p1",
+                "address": "東京都町田市原町田6-7-8",
+                "layout": "1LDK",
+                "rent": 118000,
+                "management_fee": 8000,
+                "station_walk_min": 7,
+                "available_date": "2026-05-01",
+                "notes": "1LDK募集",
+                "features": [],
+            }
+        ],
+        raw_results=[
+            {
+                "url": "https://example.com/p1",
+                "title": "町田ファミリーレジデンス 1LDK",
+                "description": "東京都町田市原町田6-7-8 賃料118,000円 1LDK 徒歩7分",
+                "extra_snippets": [],
+            }
+        ],
+        detail_html_map={
+            "https://example.com/p1": "<html><body><p>賃料118,000円</p><p>1LDK</p></body></html>"
+        },
+        layout_preference="ワンルーム",
+        today=date(2026, 4, 9),
+    )
+
+    assert result["normalized_properties"] == []
+    review = result["integrity_reviews_by_id"]["p1"]
+    assert review["should_drop"] is True
+    assert review["drop_reason_class"] == "layout_mismatch"
+    assert result["summary"]["dropped_layout_mismatch_count"] == 1
+
+
+def test_integrity_review_drops_explicit_must_condition_mismatch():
+    result = run_integrity_review(
+        normalized_properties=[
+            {
+                "property_id_norm": "p1",
+                "building_name": "町田ローセキュリティ",
+                "detail_url": "https://example.com/p1",
+                "address": "東京都町田市原町田6-7-8",
+                "layout": "1R",
+                "rent": 98000,
+                "management_fee": 5000,
+                "station_walk_min": 8,
+                "floor_level": 1,
+                "has_autolock": False,
+                "available_date": "2026-05-01",
+                "notes": "1階、オートロックなし",
+                "features": [],
+            }
+        ],
+        raw_results=[
+            {
+                "url": "https://example.com/p1",
+                "title": "町田ローセキュリティ 1R",
+                "description": "1階 オートロックなし 賃料98,000円",
+                "extra_snippets": [],
+            }
+        ],
+        detail_html_map={"https://example.com/p1": "<html><body>1階 オートロックなし</body></html>"},
+        must_conditions=["2階以上", "オートロック"],
+        today=date(2026, 4, 9),
+    )
+
+    assert result["normalized_properties"] == []
+    review = result["integrity_reviews_by_id"]["p1"]
+    assert review["drop_reason_class"] == "must_mismatch"
+    assert result["summary"]["dropped_must_mismatch_count"] == 1

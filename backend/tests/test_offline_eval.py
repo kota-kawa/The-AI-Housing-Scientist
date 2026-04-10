@@ -254,3 +254,38 @@ def test_evaluate_final_result_treats_missing_metrics_as_low_readiness():
     assert result["readiness"] == "low"
     assert "詳細ページ補完率を上げる取得戦略を優先する" in result["recommendations"]
     assert "家賃・徒歩・間取りの欠損ペナルティを強める" in result["recommendations"]
+
+
+def test_zero_candidate_branch_stays_low_quality_even_with_detail_hits():
+    branch = evaluate_branch(
+        branch_id="strict-empty",
+        label="strict empty",
+        queries=["町田 ワンルーム 賃貸"],
+        raw_results=[
+            {"source_name": "catalog"},
+            {"source_name": "brave"},
+        ],
+        normalized_properties=[],
+        ranked_properties=[],
+        duplicate_groups=[],
+        search_summary={
+            "detail_hit_count": 8,
+            "integrity_input_count": 8,
+            "integrity_dropped_count": 8,
+            "integrity_drop_ratio": 1.0,
+            "dropped_area_mismatch_count": 5,
+        },
+    )
+
+    assert branch["branch_score"] <= 8.0
+    assert branch["top_issue_class"] == "result_empty"
+    assert branch["rankable_candidate_count"] == 0
+    assert "ランキング可能な候補が残っていない" in branch["issues"]
+
+    final_result = evaluate_final_result(
+        selected_branch_summary=branch,
+        visible_ranked_properties=[],
+        search_summary={},
+    )
+    assert final_result["readiness"] == "low"
+    assert "除外済み候補を推薦に戻さず、strict条件で再探索する" in final_result["recommendations"]

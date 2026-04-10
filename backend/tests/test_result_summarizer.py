@@ -107,3 +107,45 @@ def test_result_summarizer_fallback_merges_candidates_across_branch_nodes():
     assert result[REJECTION_REASONS_KEY][0]["reason"] == "詳細ページ補完率が低い"
     assert "管理費や初期費用の内訳が不足している" in result[COMMON_RISKS_KEY]
     assert "東雲ベイテラス の入居可能時期" in result[OPEN_QUESTIONS_KEY]
+
+
+def test_result_summarizer_does_not_promote_dropped_or_search_hit_only_items():
+    branch_nodes = [
+        {
+            "branch_id": "node-1",
+            "label": "strict",
+            "depth": 1,
+            "queries": ["町田 賃貸 ワンルーム"],
+            "issues": ["正規化後の候補が残っていない"],
+            "search_summary": {"detail_hit_count": 1},
+            "raw_results": [
+                {
+                    "title": "東雲ベイテラス 1LDK",
+                    "url": "https://example.com/p1",
+                    "description": "東京都江東区東雲1-4-8 1LDK",
+                    "matched_queries": ["町田 賃貸 ワンルーム"],
+                }
+            ],
+            "detail_html_map": {},
+            "normalized_properties": [],
+            "dropped_properties": [
+                {
+                    "property_id_norm": "p1",
+                    "building_name": "東雲ベイテラス",
+                    "integrity_review": {
+                        "inconsistencies": ["希望エリア「町田」と物件の所在地が一致しないため除外"],
+                        "should_drop": True,
+                    },
+                }
+            ],
+            "duplicate_groups": [],
+            "ranked_properties": [],
+        }
+    ]
+
+    result = run_result_summarizer(branch_nodes=branch_nodes, adapter=None)
+
+    assert result[PROPERTY_CANDIDATES_KEY] == []
+    assert result[REJECTION_REASONS_KEY][0]["target"] == "東雲ベイテラス"
+    assert "推薦可能候補が残っていない" in result[COMMON_RISKS_KEY][0]
+    assert "strict条件" in result[OPEN_QUESTIONS_KEY][0]

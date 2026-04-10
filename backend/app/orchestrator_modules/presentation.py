@@ -25,36 +25,37 @@ class OrchestratorPresentationMixin:
 
         slice_items = ranked_properties if max_items is None else ranked_properties[:max_items]
         for item in slice_items:
-            prop = by_id.get(item["property_id_norm"], {})
-            reaction_state = reactions.get(item["property_id_norm"], "")
+            property_id = str(item.get("property_id_norm") or item.get("id") or "").strip()
+            prop = by_id.get(property_id) or item
+            reaction_state = reactions.get(property_id, "")
             card = {
-                "id": item["property_id_norm"],
-                "title": prop.get("building_name", "候補物件"),
-                "image_url": prop.get("image_url", ""),
-                "score": item["score"],
+                "id": property_id,
+                "title": prop.get("building_name") or item.get("title") or "候補物件",
+                "image_url": prop.get("image_url") or item.get("image_url") or "",
+                "score": item.get("score", ""),
                 "rent": prop.get("rent", 0),
                 "station_walk_min": prop.get("station_walk_min", 0),
-                "station": prop.get("nearest_station", ""),
+                "station": prop.get("nearest_station") or prop.get("station") or "",
                 "address": prop.get("address", ""),
                 "layout": prop.get("layout", ""),
                 "area": self._format_area(prop.get("area_m2", 0)),
-                "why_selected": item["why_selected"],
-                "why_not_selected": item["why_not_selected"],
+                "why_selected": item.get("why_selected") or item.get("reason") or "",
+                "why_not_selected": item.get("why_not_selected") or item.get("rejection_reason") or "",
                 "feature_tags": prop.get("features", [])[:3],
                 "reaction_state": reaction_state,
             }
-            if selectable:
+            if selectable and property_id:
                 card["action"] = {
                     "action_type": "generate_inquiry",
                     "label": "この物件の問い合わせ文を作成する",
-                    "payload": {"property_id": item["property_id_norm"]},
+                    "payload": {"property_id": property_id},
                 }
                 card["secondary_actions"] = [
                     {
                         "action_type": "record_property_reaction",
                         "label": "気になる解除" if reaction_state == "favorite" else "気になる",
                         "payload": {
-                            "property_id": item["property_id_norm"],
+                            "property_id": property_id,
                             "reaction": "clear" if reaction_state == "favorite" else "favorite",
                         },
                     },
@@ -62,7 +63,7 @@ class OrchestratorPresentationMixin:
                         "action_type": "record_property_reaction",
                         "label": "除外解除" if reaction_state == "exclude" else "除外する",
                         "payload": {
-                            "property_id": item["property_id_norm"],
+                            "property_id": property_id,
                             "reaction": "clear" if reaction_state == "exclude" else "exclude",
                         },
                     },
@@ -85,17 +86,20 @@ class OrchestratorPresentationMixin:
 
         rows = []
         for item in ranked_properties[:8]:
-            prop = by_id.get(item["property_id_norm"], {})
+            property_id = str(item.get("property_id_norm") or item.get("id") or "").strip()
+            prop = by_id.get(property_id) or item
             rows.append(
                 {
-                    "building_name": prop.get("building_name", "候補物件"),
-                    "score": item["score"],
+                    "building_name": prop.get("building_name")
+                    or item.get("title")
+                    or "候補物件",
+                    "score": item.get("score", ""),
                     "rent": self._format_money(prop.get("rent")),
                     "layout": prop.get("layout", "要確認"),
                     "area_m2": self._format_area(prop.get("area_m2", 0)),
-                    "station": prop.get("nearest_station", "要確認"),
+                    "station": prop.get("nearest_station") or prop.get("station") or "要確認",
                     "station_walk_min": self._format_walk(prop.get("station_walk_min", 0)),
-                    "reaction": reactions.get(item["property_id_norm"], ""),
+                    "reaction": reactions.get(property_id, ""),
                 }
             )
 
@@ -246,6 +250,15 @@ class OrchestratorPresentationMixin:
             )
         )
 
+        blocks.extend(
+            self._build_search_blocks(
+                ranked_properties=ranked_properties,
+                normalized_properties=normalized_properties,
+                search_summary=search_summary,
+                property_reactions=self._get_property_reactions(task_memory),
+            )
+        )
+
         if str(final_report_markdown).strip():
             blocks.append(
                 UIBlock(
@@ -257,15 +270,6 @@ class OrchestratorPresentationMixin:
                     },
                 )
             )
-
-        blocks.extend(
-            self._build_search_blocks(
-                ranked_properties=ranked_properties,
-                normalized_properties=normalized_properties,
-                search_summary=search_summary,
-                property_reactions=self._get_property_reactions(task_memory),
-            )
-        )
 
         branch_summaries = task_memory.get("branch_summaries") or []
         selected_branch_id = str(task_memory.get("selected_branch_id") or "")

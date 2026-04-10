@@ -92,7 +92,7 @@ def _score_from_range(value: float, *, min_value: float, max_value: float) -> fl
 # EN: Process classify top issue.
 def _classify_top_issue(issues: list[str]) -> str:
     joined = " / ".join(issues)
-    if "検索結果" in joined:
+    if "検索結果" in joined or "正規化後の候補" in joined or "ランキング可能な候補" in joined:
         return "result_empty"
     if "詳細ページ補完率" in joined:
         return "detail_low"
@@ -150,10 +150,15 @@ def evaluate_branch(
     debug_depth: int = 0,
 ) -> dict[str, Any]:
     normalized_count = len(normalized_properties)
+    rankable_candidate_count = len(ranked_properties)
+    strict_match_count = sum(
+        1 for item in ranked_properties if float(item.get("score") or 0.0) >= 60.0
+    )
     detail_hit_count = int(search_summary.get("detail_hit_count", 0) or 0)
     integrity_input_count = int(search_summary.get("integrity_input_count", normalized_count) or 0)
     integrity_dropped_count = int(search_summary.get("integrity_dropped_count", 0) or 0)
     integrity_drop_ratio = float(search_summary.get("integrity_drop_ratio", 0.0) or 0.0)
+    dropped_area_mismatch_count = int(search_summary.get("dropped_area_mismatch_count", 0) or 0)
     detail_denominator = integrity_input_count or normalized_count
     detail_coverage = round(detail_hit_count / detail_denominator, 3) if detail_denominator else 0.0
     detail_coverage = min(detail_coverage, 1.0)
@@ -185,6 +190,11 @@ def evaluate_branch(
     score -= duplicate_ratio * 5.0
     score -= integrity_drop_ratio * 10.0
 
+    if normalized_count == 0:
+        score = min(score, 8.0 if raw_results else 0.0)
+    elif rankable_candidate_count == 0:
+        score = min(score, 18.0)
+
     issues: list[str] = []
     recommendations: list[str] = []
     if not raw_results:
@@ -193,6 +203,9 @@ def evaluate_branch(
     if normalized_count == 0:
         issues.append("正規化後の候補が残っていない")
         recommendations.append("詳細ページが取れないURLを減らし、取得元を増やす")
+    if rankable_candidate_count == 0:
+        issues.append("ランキング可能な候補が残っていない")
+        recommendations.append("除外済み候補を推薦に戻さず、strict条件で再探索する")
     if detail_coverage < 0.4:
         issues.append("詳細ページ補完率が低い")
         recommendations.append("詳細ページ取得を優先する検索分岐を残す")
@@ -208,6 +221,9 @@ def evaluate_branch(
     if integrity_dropped_count > 0 and integrity_drop_ratio >= 0.4:
         issues.append("データ整合性レビューで除外候補が多い")
         recommendations.append("募集終了表記や数値矛盾の多いソースは優先度を下げる")
+    if dropped_area_mismatch_count > 0:
+        issues.append("エリア不一致で除外された候補が多い")
+        recommendations.append("対象エリアを固定した strict 探索と近隣探索を分ける")
 
     summary = (
         f"{label}: score={round(score, 2)}, "
@@ -237,6 +253,9 @@ def evaluate_branch(
         "strategy_tags": [str(tag).strip() for tag in strategy_tags or [] if str(tag).strip()],
         "raw_result_count": len(raw_results),
         "normalized_count": normalized_count,
+        "viable_candidate_count": normalized_count,
+        "rankable_candidate_count": rankable_candidate_count,
+        "strict_match_count": strict_match_count,
         "detail_hit_count": detail_hit_count,
         "detail_coverage": detail_coverage,
         "duplicate_group_count": len(duplicate_groups),
@@ -244,6 +263,8 @@ def evaluate_branch(
         "integrity_input_count": integrity_input_count,
         "integrity_dropped_count": integrity_dropped_count,
         "integrity_drop_ratio": integrity_drop_ratio,
+        "dropped_candidate_count": integrity_dropped_count,
+        "dropped_area_mismatch_count": dropped_area_mismatch_count,
         "structured_ratio": structured_ratio,
         "top_score": top_score,
         "avg_top3_score": avg_top3_score,
@@ -389,17 +410,20 @@ def evaluate_final_result(
     visible_count = len(visible_ranked_properties)
     detail_coverage_metric = _summary_metric(selected_branch_summary, "detail_coverage")
     structured_ratio_metric = _summary_metric(selected_branch_summary, "structured_ratio")
+    normalized_count_metric = _summary_metric(selected_branch_summary, "normalized_count")
     detail_coverage = detail_coverage_metric.as_float() or 0.0
     structured_ratio = structured_ratio_metric.as_float() or 0.0
+    selected_normalized_count = normalized_count_metric.as_float() or 0.0
 
     readiness = "low"
     if (
         visible_count >= 3
+        and selected_normalized_count >= 3
         and detail_coverage_metric >= _metric_value(0.5, name="detail_coverage")
         and structured_ratio_metric >= _metric_value(0.6, name="structured_ratio")
     ):
         readiness = "high"
-    elif visible_count >= 1 and detail_coverage_metric >= _metric_value(
+    elif visible_count >= 1 and selected_normalized_count >= 1 and detail_coverage_metric >= _metric_value(
         0.3, name="detail_coverage"
     ):
         readiness = "medium"
@@ -407,6 +431,8 @@ def evaluate_final_result(
     recommendations: list[str] = []
     if readiness == "low":
         recommendations.append("条件の優先順位を確認して branch search を再実行する")
+    if visible_count == 0 or selected_normalized_count == 0:
+        recommendations.append("除外済み候補を推薦に戻さず、strict条件で再探索する")
     if detail_coverage_metric < _metric_value(0.5, name="detail_coverage"):
         recommendations.append("詳細ページ補完率を上げる取得戦略を優先する")
     if structured_ratio_metric < _metric_value(0.6, name="structured_ratio"):

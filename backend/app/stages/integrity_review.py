@@ -104,6 +104,13 @@ def _extract_layout_values(text: str) -> list[str]:
     return _unique_strings(match.group(1).upper() for match in LAYOUT_PATTERN.finditer(normalized))
 
 
+# JP: layout preferenceを正規化する。
+# EN: Normalize a layout preference.
+def _normalize_layout_value(value: str) -> str:
+    values = _extract_layout_values(value)
+    return values[0] if values else str(value or "").upper().replace("ワンルーム", "1R").strip()
+
+
 # JP: walk valuesを抽出する。
 # EN: Extract walk values.
 def _extract_walk_values(text: str) -> list[int]:
@@ -223,6 +230,8 @@ def _rule_review_for_property(
     today: date,
     target_area: str = "",
     listing_type: str = "",
+    layout_preference: str = "",
+    must_conditions: list[str] | None = None,
 ) -> dict[str, Any]:
     source_text = " ".join(
         [
@@ -237,6 +246,7 @@ def _rule_review_for_property(
     )
     inconsistencies: list[str] = []
     hard_drop = False
+    must_conditions = must_conditions or []
 
     # JP: 希望エリアと物件の所在地が一致しない場合は除外する。
     # EN: Drop properties that are clearly outside the target area.
@@ -266,6 +276,46 @@ def _rule_review_for_property(
         scores["listing_consistency"] = 1
         inconsistencies.append("賃貸物件の情報であり、売買物件ではないため除外")
         hard_drop = True
+
+    normalized_layout_preference = _normalize_layout_value(layout_preference)
+    current_layout = _normalize_layout_value(str(prop.get("layout") or ""))
+    if normalized_layout_preference:
+        if current_layout and current_layout != normalized_layout_preference:
+            scores["listing_consistency"] = 1
+            inconsistencies.append(
+                f"希望間取り「{normalized_layout_preference}」と物件の間取り「{current_layout}」が一致しないため除外"
+            )
+            hard_drop = True
+        elif not current_layout:
+            scores["listing_consistency"] = min(scores["listing_consistency"], 2)
+            inconsistencies.append("希望間取りに対する適合可否が未確認")
+
+    for condition in must_conditions:
+        text_condition = str(condition or "").strip()
+        if not text_condition:
+            continue
+        floor_match = re.search(r"(\d{1,2})\s*階以上", text_condition)
+        if floor_match:
+            min_floor = int(floor_match.group(1))
+            floor_level = int(prop.get("floor_level") or 0)
+            if floor_level > 0 and floor_level < min_floor:
+                scores["listing_consistency"] = 1
+                inconsistencies.append(
+                    f"must条件「{text_condition}」に対して所在階が{floor_level}階のため除外"
+                )
+                hard_drop = True
+            elif floor_level <= 0:
+                scores["evidence_completeness"] = min(scores["evidence_completeness"], 2)
+                inconsistencies.append(f"must条件「{text_condition}」の所在階が未確認")
+        if "オートロック" in text_condition:
+            has_autolock = prop.get("has_autolock")
+            if has_autolock is False:
+                scores["listing_consistency"] = 1
+                inconsistencies.append("must条件「オートロック」に対して無しのため除外")
+                hard_drop = True
+            elif has_autolock is None:
+                scores["evidence_completeness"] = min(scores["evidence_completeness"], 2)
+                inconsistencies.append("must条件「オートロック」の有無が未確認")
 
     if any(token in source_text for token in UNAVAILABLE_TOKENS):
         scores["freshness"] = 1
@@ -345,6 +395,24 @@ def _rule_review_for_property(
     trust_score = _score_to_trust(scores, len(inconsistencies))
     if hard_drop:
         trust_score = min(trust_score, 45)
+    drop_reason_class = ""
+    joined_inconsistencies = " / ".join(inconsistencies)
+    if hard_drop:
+        if "希望エリア" in joined_inconsistencies:
+            drop_reason_class = "area_mismatch"
+        elif "希望間取り" in joined_inconsistencies:
+            drop_reason_class = "layout_mismatch"
+        elif "must条件" in joined_inconsistencies:
+            drop_reason_class = "must_mismatch"
+        elif "売買" in joined_inconsistencies or "賃貸物件ではない" in joined_inconsistencies:
+            drop_reason_class = "listing_type_mismatch"
+        elif "募集終了" in joined_inconsistencies or "成約済み" in joined_inconsistencies:
+            drop_reason_class = "unavailable"
+        else:
+            drop_reason_class = "integrity_drop"
+    review_status = "dropped" if hard_drop or trust_score < 55 else "rankable"
+    if review_status == "rankable" and any("未確認" in item or "欠落" in item for item in inconsistencies):
+        review_status = "needs_confirmation"
 
     return {
         "property_id_norm": str(prop.get("property_id_norm") or ""),
@@ -353,6 +421,8 @@ def _rule_review_for_property(
         "inconsistencies": inconsistencies,
         "evidence_urls": _evidence_urls(prop, raw_result),
         "should_drop": hard_drop or trust_score < 55,
+        "review_status": review_status,
+        "drop_reason_class": drop_reason_class,
     }
 
 
@@ -548,6 +618,15 @@ def _merge_reviews(
             int(llm_review.get("trust_score") or 100),
             45,
         )
+    should_drop = bool(
+        rule_review.get("should_drop") or llm_review.get("should_drop") or trust_score < 55
+    )
+    drop_reason_class = str(rule_review.get("drop_reason_class") or "").strip()
+    if should_drop and not drop_reason_class:
+        drop_reason_class = "llm_drop" if llm_review.get("should_drop") else "integrity_drop"
+    review_status = "dropped" if should_drop else str(
+        rule_review.get("review_status") or llm_review.get("review_status") or "rankable"
+    )
 
     return {
         "property_id_norm": str(
@@ -560,9 +639,9 @@ def _merge_reviews(
             list(rule_review.get("evidence_urls", []) or [])
             + list(llm_review.get("evidence_urls", []) or [])
         ),
-        "should_drop": bool(
-            rule_review.get("should_drop") or llm_review.get("should_drop") or trust_score < 55
-        ),
+        "should_drop": should_drop,
+        "review_status": review_status,
+        "drop_reason_class": drop_reason_class,
     }
 
 
@@ -577,6 +656,8 @@ def run_integrity_review(
     today: date | None = None,
     target_area: str = "",
     listing_type: str = "",
+    layout_preference: str = "",
+    must_conditions: list[str] | None = None,
 ) -> dict[str, Any]:
     resolved_today = today or date.today()
     raw_by_url = {
@@ -597,6 +678,8 @@ def run_integrity_review(
             today=resolved_today,
             target_area=target_area,
             listing_type=listing_type,
+            layout_preference=layout_preference,
+            must_conditions=must_conditions or [],
         )
         rule_reviews_by_id[rule_review["property_id_norm"]] = rule_review
 
@@ -633,6 +716,15 @@ def run_integrity_review(
 
     trust_scores = [int(item.get("trust_score") or 0) for item in merged_reviews]
     avg_trust_score = round(sum(trust_scores) / len(trust_scores), 1) if trust_scores else 0.0
+    dropped_area_mismatch_count = sum(
+        1 for item in merged_reviews if item.get("drop_reason_class") == "area_mismatch"
+    )
+    dropped_layout_mismatch_count = sum(
+        1 for item in merged_reviews if item.get("drop_reason_class") == "layout_mismatch"
+    )
+    dropped_must_mismatch_count = sum(
+        1 for item in merged_reviews if item.get("drop_reason_class") == "must_mismatch"
+    )
 
     return {
         "normalized_properties": filtered_properties,
@@ -659,5 +751,8 @@ def run_integrity_review(
                 if normalized_properties
                 else 0.0
             ),
+            "dropped_area_mismatch_count": dropped_area_mismatch_count,
+            "dropped_layout_mismatch_count": dropped_layout_mismatch_count,
+            "dropped_must_mismatch_count": dropped_must_mismatch_count,
         },
     }

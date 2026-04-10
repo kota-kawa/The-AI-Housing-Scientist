@@ -729,6 +729,12 @@ class AgentManagerToolingMixin:
         user_mem = self._active_user_memory()
         target_area = str(user_mem.get("target_area") or "").strip()
         listing_type = str(user_mem.get("listing_type") or "").strip()
+        layout_preference = str(user_mem.get("layout_preference") or "").strip()
+        must_conditions = [
+            str(item).strip()
+            for item in user_mem.get("must_conditions", []) or []
+            if str(item).strip()
+        ]
         return run_integrity_review(
             normalized_properties=normalized_properties,
             raw_results=raw_results,
@@ -736,4 +742,6 @@ class AgentManagerToolingMixin:
             adapter=self.research_adapter,
             target_area=target_area,
             listing_type=listing_type,
+            layout_preference=layout_preference,
+            must_conditions=must_conditions,
         )

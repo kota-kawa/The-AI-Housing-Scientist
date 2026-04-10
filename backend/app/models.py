@@ -29,6 +29,13 @@ class PropertyNormalized(BaseModel):
     agency_name: str = ""
     notes: str = ""
     features: list[str] = Field(default_factory=list)
+    floor_level: int = 0
+    total_floors: int = 0
+    has_autolock: bool | None = None
+    contract_terms: dict[str, str] = Field(default_factory=dict)
+    field_evidence: dict[str, str] = Field(default_factory=dict)
+    field_confidence: dict[str, float] = Field(default_factory=dict)
+    extraction_source: str = ""
 
 
 class DuplicateGroup(BaseModel):

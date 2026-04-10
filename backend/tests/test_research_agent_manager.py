@@ -29,7 +29,7 @@ def build_settings(database_path: str) -> Settings:
         claude_api_key="",
         brave_search_api_key="",
         openai_model="gpt-5.4-mini",
-        gemini_model="gemini-3-flash",
+        gemini_model="gemini-2.5-flash",
         groq_model_primary="openai/gpt-oss-120b",
         groq_model_secondary="qwen/qwen3-32b",
         claude_model="claude-sonnet-4-6",
@@ -280,6 +280,70 @@ def test_register_frontier_node_uses_executed_count_for_tree_budget(tmp_path: Pa
     assert child_plan.node_key in state.node_plans
     assert child_plan.node_key in state.node_artifacts
     assert state.frontier == ["existing-3", child_plan.node_key]
+
+
+def test_branch_result_nodes_keep_empty_integrity_result_instead_of_normalize_fallback(
+    tmp_path: Path,
+):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+    state = ResearchExecutionState()
+    plan = SearchNodePlan(
+        node_key="strict-empty",
+        label="strict",
+        description="strict plan",
+        queries=["町田 賃貸 ワンルーム"],
+        ranking_profile={},
+        strategy_tags=["tighten_match"],
+        depth=1,
+    )
+    artifact = SearchNodeArtifacts(
+        plan=plan,
+        query_hash=manager._hash_queries(plan.queries, plan.ranking_profile),
+        frontier_score=8.0,
+        status="completed",
+    )
+    artifact.summary = {"status": "completed", "branch_id": plan.node_key}
+    artifact.normalize = {
+        "normalized_properties": [{"property_id_norm": "dropped", "building_name": "別エリア"}],
+        "summary": {"normalized_count": 1},
+    }
+    artifact.integrity = {
+        "normalized_properties": [],
+        "dropped_properties": [{"property_id_norm": "dropped", "building_name": "別エリア"}],
+        "integrity_reviews": [],
+        "summary": {"integrity_dropped_count": 1},
+    }
+    state.node_artifacts[plan.node_key] = artifact
+
+    nodes = manager._branch_result_nodes(state, node_key=plan.node_key)
+
+    assert nodes[0]["normalized_properties"] == []
+    assert nodes[0]["dropped_properties"][0]["property_id_norm"] == "dropped"
 
 
 def test_initial_node_plans_prioritize_success_path_and_exclude_avoided_strategies(tmp_path: Path):

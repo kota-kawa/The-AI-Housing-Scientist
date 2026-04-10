@@ -222,6 +222,75 @@ def test_search_normalize_llm_supplements_natural_detail_html():
     assert result["summary"]["detail_parsed_count"] == 1
 
 
+def test_search_normalize_extracts_table_dl_jsonld_and_extended_fields():
+    items = [
+        {
+            "title": "町田セントラルスタジオ | External Listing",
+            "description": "町田のワンルーム募集",
+            "url": "https://example.com/machida-central",
+            "extra_snippets": [],
+            "source_name": "external",
+        }
+    ]
+
+    def fetch_detail(url: str) -> str | None:
+        if "machida-central" not in url:
+            return None
+        return """
+        <html>
+          <head>
+            <script type="application/ld+json">
+              {
+                "@type": "Apartment",
+                "name": "町田セントラルスタジオ",
+                "address": {
+                  "addressRegion": "東京都",
+                  "addressLocality": "町田市",
+                  "streetAddress": "原町田6-7-8"
+                },
+                "offers": {"price": "112000"}
+              }
+            </script>
+          </head>
+          <body>
+            <table>
+              <tr><th>賃料</th><td>11.2万円</td></tr>
+              <tr><th>管理費</th><td>8,000円</td></tr>
+              <tr><th>所在地</th><td>東京都町田市原町田6-7-8</td></tr>
+              <tr><th>間取り</th><td>ワンルーム</td></tr>
+              <tr><th>専有面積</th><td>25.4㎡</td></tr>
+              <tr><th>所在階</th><td>3階 / 10階建</td></tr>
+              <tr><th>オートロック</th><td>あり</td></tr>
+            </table>
+            <dl>
+              <dt>交通</dt><dd>小田急線 町田駅 徒歩7分</dd>
+            </dl>
+            <p>更新料1ヶ月。短期解約違約金あり。解約予告2か月前。</p>
+          </body>
+        </html>
+        """
+
+    result = run_search_and_normalize(
+        query="町田 賃貸 ワンルーム",
+        search_results=items,
+        detail_fetcher=fetch_detail,
+    )
+
+    prop = result["normalized_properties"][0]
+    assert prop["building_name"] == "町田セントラルスタジオ"
+    assert prop["address"] == "東京都町田市原町田6-7-8"
+    assert prop["rent"] == 112000
+    assert prop["management_fee"] == 8000
+    assert prop["layout"] == "1R"
+    assert prop["station_walk_min"] == 7
+    assert prop["area_m2"] == 25.4
+    assert prop["floor_level"] == 3
+    assert prop["total_floors"] == 10
+    assert prop["has_autolock"] is True
+    assert "early_termination" in prop["contract_terms"]
+    assert "rent" in prop["field_evidence"]
+
+
 def test_search_normalize_fuzzy_dedup_with_name_variation():
     items = [
         {

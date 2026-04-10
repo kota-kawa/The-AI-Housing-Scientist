@@ -239,13 +239,12 @@ class Database:
         count = int(row["count"]) if row is not None else 0
         if count > 0:
             self._backfill_property_catalog_image_urls(conn)
-            return
 
         now = utc_now_iso()
         for item in CATALOG_SEED:
             conn.execute(
                 """
-                INSERT INTO property_catalog(
+                INSERT OR IGNORE INTO property_catalog(
                     property_id,
                     detail_url,
                     image_url,
