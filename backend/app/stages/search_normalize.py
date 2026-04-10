@@ -50,6 +50,9 @@ RENT_CONTEXT_EXCLUSION_TOKENS = (
 )
 LLM_HTML_MAX_CHARS = 9000
 LLM_EXTRACTION_CONFIDENCE_THRESHOLD = 0.35
+# JP: 賃貸物件の家賃として妥当な最低金額（円）。これ未満は抽出エラーとみなす。
+# EN: Minimum plausible monthly rent (yen). Values below this are treated as extraction errors.
+MIN_PLAUSIBLE_RENT = 5000
 
 
 # JP: textを正規化する。
@@ -434,6 +437,12 @@ def _build_fallback_property(
     area_m2 = _extract_area(combined)
     rent = _extract_rent(combined)
     station_walk_min = _extract_station_walk(combined)
+
+    # JP: 明らかに異常な家賃値は抽出失敗として扱い、LLMに再抽出させる。
+    # EN: Treat implausibly low rent as extraction failure so LLM can re-extract.
+    if 0 < rent < MIN_PLAUSIBLE_RENT:
+        rent = 0
+
     llm_fields, _ = _extract_property_fields_with_llm(
         adapter=adapter,
         item=item,
@@ -446,6 +455,10 @@ def _build_fallback_property(
         },
         text=combined,
     )
+
+    llm_rent = int(llm_fields.get("rent") or 0)
+    if 0 < llm_rent < MIN_PLAUSIBLE_RENT:
+        llm_rent = 0
 
     return PropertyNormalized(
         property_id_norm=property_id_norm,
@@ -461,7 +474,7 @@ def _build_fallback_property(
         line_name="",
         layout=layout or str(llm_fields.get("layout") or ""),
         area_m2=area_m2 or float(llm_fields.get("area_m2") or 0.0),
-        rent=rent or int(llm_fields.get("rent") or 0),
+        rent=rent or llm_rent,
         management_fee=0,
         deposit=_extract_deposit_or_key_money(combined, "敷金"),
         key_money=_extract_deposit_or_key_money(combined, "礼金"),
@@ -519,6 +532,12 @@ def _build_detail_property(
     station_walk_min = (
         int(station_walk_raw) if station_walk_raw.isdigit() else _extract_station_walk(text)
     )
+
+    # JP: 明らかに異常な家賃値は抽出失敗として扱い、LLMに再抽出させる。
+    # EN: Treat implausibly low rent as extraction failure so LLM can re-extract.
+    if 0 < rent < MIN_PLAUSIBLE_RENT:
+        rent = 0
+
     llm_fields, _ = _extract_property_fields_with_llm(
         adapter=adapter,
         item=item,
@@ -532,9 +551,12 @@ def _build_detail_property(
         detail_html=detail_html,
         text=text,
     )
+    llm_rent = int(llm_fields.get("rent") or 0)
+    if 0 < llm_rent < MIN_PLAUSIBLE_RENT:
+        llm_rent = 0
     layout = layout or str(llm_fields.get("layout") or "")
     area_m2 = area_m2 or float(llm_fields.get("area_m2") or 0.0)
-    rent = rent or int(llm_fields.get("rent") or 0)
+    rent = rent or llm_rent
     station_walk_min = station_walk_min or int(llm_fields.get("station_walk_min") or 0)
     nearest_station = _extract_html_field(detail_html, "nearest_station")
     line_name = _extract_html_field(detail_html, "line_name")

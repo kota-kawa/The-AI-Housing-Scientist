@@ -197,6 +197,7 @@ def _rule_review_for_property(
     raw_result: dict[str, Any],
     detail_html: str,
     today: date,
+    target_area: str = "",
 ) -> dict[str, Any]:
     source_text = " ".join(
         [
@@ -211,6 +212,18 @@ def _rule_review_for_property(
     )
     inconsistencies: list[str] = []
     hard_drop = False
+
+    # JP: 希望エリアと物件の所在地が一致しない場合は除外する。
+    # EN: Drop properties that are clearly outside the target area.
+    if target_area:
+        area_name = str(prop.get("area_name") or "")
+        address = str(prop.get("address") or "")
+        area_haystack = f"{area_name} {address} {source_text}"
+        if target_area not in area_haystack:
+            inconsistencies.append(
+                f"希望エリア「{target_area}」と物件の所在地が一致しないため除外"
+            )
+            hard_drop = True
 
     scores = {
         "freshness": 5,
@@ -527,6 +540,7 @@ def run_integrity_review(
     detail_html_map: dict[str, str] | None = None,
     adapter: LLMAdapter | None = None,
     today: date | None = None,
+    target_area: str = "",
 ) -> dict[str, Any]:
     resolved_today = today or date.today()
     raw_by_url = {
@@ -545,6 +559,7 @@ def run_integrity_review(
             raw_result=raw_result,
             detail_html=str(detail_lookup.get(detail_url) or ""),
             today=resolved_today,
+            target_area=target_area,
         )
         rule_reviews_by_id[rule_review["property_id_norm"]] = rule_review
 

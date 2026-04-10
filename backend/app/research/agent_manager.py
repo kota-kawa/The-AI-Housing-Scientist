@@ -89,6 +89,8 @@ class HousingResearchAgentManager(
         self._job_lock = threading.RLock()
         self._journal_lock = threading.RLock()
         self._job_progress_percent = 0
+        self._current_live_activity = ""
+        self._recent_live_activities: list[str] = []
         self._cache_copy = copy.deepcopy
         self.journal = ResearchJournal()
         self.context = ToolContext(

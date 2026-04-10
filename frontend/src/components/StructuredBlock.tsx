@@ -1837,7 +1837,13 @@ function TreeDiagram({
         </div>
       )}
 
-      {summary && <p className="text-[12px] leading-6 text-slate-600">{summary}</p>}
+      {summary && (
+        <div className="rounded-2xl border border-slate-200/80 bg-white/75 px-3 py-2.5 shadow-sm">
+          <p className="whitespace-pre-wrap break-words text-[12px] leading-6 text-slate-600">
+            {summary}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -2193,7 +2199,13 @@ function TimelineDiagram({
         </div>
       </div>
 
-      {summary && <p className="text-[12px] leading-6 text-slate-600">{summary}</p>}
+      {summary && (
+        <div className="rounded-2xl border border-slate-200/80 bg-white/75 px-3 py-2.5 shadow-sm">
+          <p className="whitespace-pre-wrap break-words text-[12px] leading-6 text-slate-600">
+            {summary}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

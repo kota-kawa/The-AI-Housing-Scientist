@@ -375,24 +375,6 @@ class OrchestratorPresentationMixin:
                 )
             )
 
-        if ranked_properties:
-            blocks.append(
-                UIBlock(
-                    type="cards",
-                    title="結果の物件画像",
-                    content={
-                        "compare_enabled": False,
-                        "items": self._build_property_cards(
-                            ranked_properties=ranked_properties[:1],
-                            normalized_properties=normalized_properties,
-                            selectable=True,
-                            property_reactions=self._get_property_reactions(task_memory),
-                            max_items=1,
-                        ),
-                    },
-                )
-            )
-
         return blocks
 
     # JP: inquiry blocksを構築する。

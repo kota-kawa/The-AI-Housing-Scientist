@@ -1005,6 +1005,20 @@ class AgentManagerTreeMixin:
                 raw_results=retrieve_result.get("raw_results", []),
             )
             artifacts.enrich = enrich_result
+            self._update_live_progress(
+                stage_name="tree_search",
+                progress_percent=56,
+                current_action="検索結果を構造化中",
+                detail=(
+                    f"{plan.label} / {len(retrieve_result.get('raw_results', []))}件の候補から"
+                    f" 家賃・間取り・駅距離を抽出しています。"
+                )
+                + (
+                    " LLMで不足項目の補完も行っています。"
+                    if self.research_adapter is not None
+                    else ""
+                ),
+            )
             normalize_result = self.toolbox.run(
                 "normalize_dedupe",
                 self.context,
@@ -1013,6 +1027,20 @@ class AgentManagerTreeMixin:
                 detail_html_map=enrich_result.get("detail_html_map", {}),
             )
             artifacts.normalize = normalize_result
+            self._update_live_progress(
+                stage_name="tree_search",
+                progress_percent=64,
+                current_action="掲載情報の整合性を確認中",
+                detail=(
+                    f"{plan.label} / {len(normalize_result.get('normalized_properties', []))}件を"
+                    f" 対象に募集終了や条件矛盾を見ています。"
+                )
+                + (
+                    " LLMでも説明文を再確認しています。"
+                    if self.research_adapter is not None
+                    else ""
+                ),
+            )
             integrity_result = self.toolbox.run(
                 "integrity_review",
                 self.context,
@@ -1021,6 +1049,20 @@ class AgentManagerTreeMixin:
                 detail_html_map=enrich_result.get("detail_html_map", {}),
             )
             artifacts.integrity = integrity_result
+            self._update_live_progress(
+                stage_name="tree_search",
+                progress_percent=72,
+                current_action="候補をランキング中",
+                detail=(
+                    f"{plan.label} / 残った"
+                    f" {len(integrity_result.get('normalized_properties', []))}件を条件一致度で並べています。"
+                )
+                + (
+                    " LLMで選定理由も整えています。"
+                    if self.research_adapter is not None
+                    else ""
+                ),
+            )
             ranking_result = self.toolbox.run(
                 "rank",
                 self.context,
@@ -1697,7 +1739,10 @@ class AgentManagerTreeMixin:
         _, state.plan_result = self._run_stage(
             stage_name="plan_finalize",
             progress_percent=10,
-            latest_summary="承認済み計画を確認しています。",
+            latest_summary=(
+                "現在: 承認済み計画を確認しています。\n"
+                "内容: seed クエリと探索条件を固定しています。"
+            ),
             input_payload={"approved_plan": self.approved_plan},
             reasoning="ユーザー承認済みの計画を固定し、以降の調査に使う条件を確定する。",
             runner=lambda: self.toolbox.run("plan_finalize", self.context),
@@ -1758,9 +1803,16 @@ class AgentManagerTreeMixin:
                     continue
 
                 if len(selected_plans) == 1:
-                    latest_summary = f"{selected_plans[0].label} を depth {selected_plans[0].depth} で検証しています。"
+                    latest_summary = (
+                        f"現在: 探索ノードを検証中\n"
+                        f"内容: {selected_plans[0].label} を depth {selected_plans[0].depth} で評価しています。"
+                    )
                 else:
-                    latest_summary = f"{len(selected_plans)}件の探索ノードを並列検証しています。"
+                    labels = " / ".join(plan.label for plan in selected_plans[:3])
+                    latest_summary = (
+                        f"現在: 探索ノードを並列検証中\n"
+                        f"内容: {len(selected_plans)}件を同時評価しています。{labels}"
+                    )
                 self._update_job(
                     stage_name="tree_search",
                     progress_percent=24 + min(58, len(state.branch_summaries) * 6),
@@ -1802,6 +1854,14 @@ class AgentManagerTreeMixin:
                     "frontier_exhausted" if not state.frontier else "node_budget_exhausted"
                 )
 
+            self._update_live_progress(
+                stage_name="tree_search",
+                progress_percent=82,
+                current_action="探索分岐を要約中",
+                detail=(
+                    "各分岐の候補・リスクを圧縮し、最終候補の比較材料を作っています。"
+                ),
+            )
             self._attach_branch_result_summaries(state)
             state.selected_branch_summary = (
                 state.selected_branch_summary
@@ -1809,6 +1869,14 @@ class AgentManagerTreeMixin:
                 or self._default_selected_branch_summary()
             )
             state.selected_path = self._build_selected_path(state)
+            self._update_live_progress(
+                stage_name="tree_search",
+                progress_percent=88,
+                current_action="最良の探索経路を選定中",
+                detail=(
+                    f"{len(state.branch_summaries)} 分岐から条件一致度と根拠量を見て選んでいます。"
+                ),
+            )
             selected_artifacts = self._selected_artifacts(state)
             self._record_node(
                 stage="tree_search",

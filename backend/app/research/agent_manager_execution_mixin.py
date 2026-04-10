@@ -45,6 +45,15 @@ class AgentManagerExecutionMixin:
         )
         state.offline_evaluation["selected_path"] = state.selected_path
         state.offline_evaluation["search_tree_summary"] = state.search_tree_summary
+        self._update_live_progress(
+            stage_name="synthesize",
+            progress_percent=92,
+            current_action="最終サマリーを組み立て中",
+            detail=(
+                f"上位 {len(selected_rank.get('ranked_properties', []))}件の候補と"
+                f" {len(state.source_items)}件の参照ソースを整理しています。"
+            ),
+        )
         state.research_summary = self._build_fallback_research_summary(
             ranked_properties=selected_rank.get("ranked_properties", []),
             normalized_properties=selected_properties,
@@ -55,6 +64,12 @@ class AgentManagerExecutionMixin:
         )
         if self.research_adapter is not None:
             try:
+                self._update_live_progress(
+                    stage_name="synthesize",
+                    progress_percent=93,
+                    current_action="LLMで最終要約を生成中",
+                    detail="探索結果をユーザー向けの日本語サマリーに整えています。",
+                )
                 llm_summary = self._build_llm_research_summary(
                     ranked_properties=selected_rank.get("ranked_properties", []),
                     normalized_properties=selected_properties,
@@ -120,7 +135,10 @@ class AgentManagerExecutionMixin:
         self._run_stage(
             stage_name="synthesize",
             progress_percent=94,
-            latest_summary="結果をユーザー向けに整理しています。",
+            latest_summary=(
+                "現在: 結果をユーザー向けに整理しています。\n"
+                "内容: 推薦理由・注意点・次の確認事項を最終レスポンスへまとめています。"
+            ),
             input_payload={"selected_branch_id": state.selected_branch_summary["branch_id"]},
             reasoning="最良ノード、探索経路、失敗要因をまとめて次アクションへ接続する。",
             runner=lambda: {

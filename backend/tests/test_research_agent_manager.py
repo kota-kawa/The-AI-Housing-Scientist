@@ -685,6 +685,108 @@ def test_parallel_research_tools_share_singleflight_cache(tmp_path: Path):
     ) == 1
 
 
+def test_live_progress_summary_shows_current_action_and_recent_history(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+
+    manager._update_live_progress(
+        stage_name="tree_search",
+        progress_percent=36,
+        current_action="検索結果を収集中",
+        detail="クエリ 1/2: 江東区 賃貸 1LDK",
+    )
+    manager._update_live_progress(
+        stage_name="tree_search",
+        progress_percent=48,
+        current_action="物件詳細ページを取得中",
+        detail="2/5 件目",
+        url="https://example.com/property/123",
+    )
+
+    job = db.get_research_job(job_id)
+    assert job is not None
+    assert "現在: 物件詳細ページを取得中" in job["latest_summary"]
+    assert "対象: https://example.com/property/123" in job["latest_summary"]
+    assert "直近:" in job["latest_summary"]
+    assert "検索結果を収集中" in job["latest_summary"]
+
+
+def test_tool_enrich_updates_job_with_live_detail_url(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: f"<html>{url}</html>",
+        collect_source_items=lambda **kwargs: [],
+    )
+    plan = SearchNodePlan(
+        node_key="node-1",
+        label="情報源分散",
+        description="detail fetch",
+        queries=["江東区 賃貸 1LDK"],
+        ranking_profile={},
+        strategy_tags=["source_diversify"],
+        depth=1,
+    )
+
+    result = manager._tool_enrich(
+        context=manager.context,
+        branch=plan,
+        raw_results=[
+            {"url": "https://example.com/property/abc", "source_name": "catalog"},
+        ],
+    )
+
+    job = db.get_research_job(job_id)
+    assert result["summary"]["detail_hit_count"] == 1
+    assert job is not None
+    assert "物件詳細ページを取得中" in job["latest_summary"]
+    assert "https://example.com/property/abc" in job["latest_summary"]
+
+
 def test_select_frontier_nodes_balances_best_branch_and_alternative(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)

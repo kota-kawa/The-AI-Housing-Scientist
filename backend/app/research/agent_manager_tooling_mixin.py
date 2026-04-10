@@ -16,6 +16,67 @@ from .agent_manager_types import SearchNodePlan
 
 
 class AgentManagerToolingMixin:
+    @staticmethod
+    def _compact_progress_text(value: Any, *, max_chars: int = 120) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        if len(text) <= max_chars:
+            return text
+        return text[: max_chars - 1].rstrip() + "…"
+
+    def _display_progress_url(self, url: str, *, max_chars: int = 140) -> str:
+        text = self._compact_progress_text(url, max_chars=max_chars)
+        if text:
+            return text
+        return ""
+
+    def _update_live_progress(
+        self,
+        *,
+        stage_name: str,
+        progress_percent: int,
+        current_action: str,
+        detail: str = "",
+        url: str = "",
+    ) -> None:
+        action = self._compact_progress_text(current_action, max_chars=72)
+        detail_text = self._compact_progress_text(detail, max_chars=120)
+        url_text = self._display_progress_url(url)
+
+        activity_parts = [action]
+        if detail_text:
+            activity_parts.append(detail_text)
+        if url_text:
+            activity_parts.append(url_text)
+        activity = " | ".join(part for part in activity_parts if part)
+
+        with self._job_lock:
+            if (
+                self._current_live_activity
+                and self._current_live_activity != activity
+                and (
+                    not self._recent_live_activities
+                    or self._recent_live_activities[-1] != self._current_live_activity
+                )
+            ):
+                self._recent_live_activities.append(self._current_live_activity)
+                self._recent_live_activities = self._recent_live_activities[-4:]
+            self._current_live_activity = activity
+
+            lines = [f"現在: {action}"]
+            if detail_text:
+                lines.append(f"内容: {detail_text}")
+            if url_text:
+                lines.append(f"対象: {url_text}")
+            if self._recent_live_activities:
+                lines.append("直近:")
+                lines.extend(f"- {item}" for item in reversed(self._recent_live_activities[-3:]))
+
+        self._update_job(
+            stage_name=stage_name,
+            progress_percent=progress_percent,
+            latest_summary="\n".join(lines),
+        )
+
     # JP: cached singleflight loadを処理する。
     # EN: Process cached singleflight load.
     def _cached_singleflight_load(
@@ -495,10 +556,11 @@ class AgentManagerToolingMixin:
         cache_hit_count = 0
 
         for index, query in enumerate(branch.queries, start=1):
-            self._update_job(
+            self._update_live_progress(
                 stage_name="tree_search",
                 progress_percent=36,
-                latest_summary=f"{branch.label}: {index}/{len(branch.queries)}件目を収集中",
+                current_action="検索結果を収集中",
+                detail=f"{branch.label} / クエリ {index}/{len(branch.queries)}: {query}",
             )
             (results, source_summary), cache_hit = self._cached_singleflight_load(
                 cache=self.search_result_cache,
@@ -593,11 +655,13 @@ class AgentManagerToolingMixin:
                 cache_hit_count += 1
             if detail_html:
                 detail_html_map[url] = detail_html
-            if total and (index == 1 or index == total or index % 3 == 0):
-                self._update_job(
+            if total:
+                self._update_live_progress(
                     stage_name="tree_search",
                     progress_percent=48,
-                    latest_summary=f"{branch.label}: 詳細ページを補完中 {index}/{total}",
+                    current_action="物件詳細ページを取得中",
+                    detail=f"{branch.label} / {index}/{total} 件目",
+                    url=url,
                 )
         return {
             "detail_html_map": detail_html_map,
@@ -662,9 +726,11 @@ class AgentManagerToolingMixin:
         raw_results: list[dict[str, Any]],
         detail_html_map: dict[str, str],
     ) -> dict[str, Any]:
+        target_area = str(self._active_user_memory().get("target_area") or "").strip()
         return run_integrity_review(
             normalized_properties=normalized_properties,
             raw_results=raw_results,
             detail_html_map=detail_html_map,
             adapter=self.research_adapter,
+            target_area=target_area,
         )
