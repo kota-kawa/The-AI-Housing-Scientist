@@ -90,8 +90,8 @@ class OrchestratorActionsMixin:
             raise RuntimeError("session not found")
 
         user_memory, task_memory, llm_config = self._ensure_session_llm_config(session_id)
-        normalized_properties = task_memory.get("last_normalized_properties", [])
-        ranked_properties = task_memory.get("last_ranked_properties", [])
+        normalized_properties = self._display_normalized_properties(task_memory)
+        ranked_properties = self._display_ranked_properties(task_memory)
         property_reactions = self._get_property_reactions(task_memory)
         latest_job_id = str(task_memory.get("last_research_job_id") or "")
         latest_job = self.db.get_research_job(latest_job_id) if latest_job_id else None

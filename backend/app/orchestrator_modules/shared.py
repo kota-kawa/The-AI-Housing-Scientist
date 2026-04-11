@@ -215,7 +215,11 @@ def _generate_llm_guidance_message(
     """タスク状態を踏まえた文脈依存のガイダンスメッセージをLLMで生成する。"""
     status = str(task_memory.get("status") or "")
     has_plan = bool(task_memory.get("draft_research_plan"))
-    ranked = list(task_memory.get("last_ranked_properties") or [])
+    ranked = list(
+        task_memory.get("last_display_ranked_properties")
+        or task_memory.get("last_ranked_properties")
+        or []
+    )
     last_error = str(task_memory.get("last_error") or "")
 
     context_lines = [f"- 現在の状態: {status or '不明'}"]

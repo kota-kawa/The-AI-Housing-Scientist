@@ -336,6 +336,10 @@ class OrchestratorResearchMixin:
         task_memory["last_query"] = execution_result.query
         task_memory["last_normalized_properties"] = execution_result.normalized_properties
         task_memory["last_ranked_properties"] = execution_result.ranked_properties
+        task_memory["last_display_normalized_properties"] = (
+            execution_result.display_normalized_properties
+        )
+        task_memory["last_display_ranked_properties"] = execution_result.display_ranked_properties
         task_memory["last_duplicate_groups"] = execution_result.duplicate_groups
         task_memory["last_integrity_reviews"] = execution_result.integrity_reviews
         task_memory["last_dropped_property_ids"] = execution_result.dropped_property_ids
@@ -379,7 +383,7 @@ class OrchestratorResearchMixin:
     ) -> ChatMessageResponse:
         completed_job = self.db.get_research_job(job_id)
         visible_ranked_properties = self._visible_ranked_properties(
-            execution_result.ranked_properties,
+            execution_result.display_ranked_properties,
             task_memory,
         )
         response = ChatMessageResponse(
@@ -397,7 +401,7 @@ class OrchestratorResearchMixin:
                 research_summary=execution_result.research_summary,
                 final_report_markdown=execution_result.final_report_markdown,
                 ranked_properties=visible_ranked_properties,
-                normalized_properties=execution_result.normalized_properties,
+                normalized_properties=execution_result.display_normalized_properties,
                 search_summary=execution_result.search_summary,
                 source_items=execution_result.source_items,
                 task_memory=task_memory,

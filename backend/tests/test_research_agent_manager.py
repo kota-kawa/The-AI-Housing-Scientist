@@ -11,6 +11,7 @@ from app.research.agent_manager import (
     SearchNodeArtifacts,
     SearchNodePlan,
 )
+from app.stages.result_summarizer import PROPERTY_CANDIDATES_KEY
 
 
 def build_settings(database_path: str) -> Settings:
@@ -344,6 +345,208 @@ def test_branch_result_nodes_keep_empty_integrity_result_instead_of_normalize_fa
 
     assert nodes[0]["normalized_properties"] == []
     assert nodes[0]["dropped_properties"][0]["property_id_norm"] == "dropped"
+
+
+def test_display_candidate_pool_prefers_selected_path_aggregate_and_merges_snapshots(
+    tmp_path: Path,
+):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = HousingResearchAgentManager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+    state = ResearchExecutionState()
+
+    root_plan = SearchNodePlan(
+        node_key="root",
+        label="root",
+        description="root plan",
+        queries=["江東区 賃貸"],
+        ranking_profile={},
+        strategy_tags=["broad"],
+        depth=1,
+    )
+    child_plan = SearchNodePlan(
+        node_key="child",
+        label="child",
+        description="child plan",
+        queries=["江東区 1LDK 駅近"],
+        ranking_profile={},
+        strategy_tags=["refine"],
+        depth=2,
+        parent_key="root",
+    )
+
+    root_artifact = SearchNodeArtifacts(
+        plan=root_plan,
+        query_hash=manager._hash_queries(root_plan.queries, root_plan.ranking_profile),
+        frontier_score=72.0,
+        status="completed",
+    )
+    root_artifact.summary = {"status": "completed", "branch_id": "root"}
+    root_artifact.integrity = {
+        "normalized_properties": [
+            {
+                "property_id_norm": "p-root",
+                "building_name": "親ノード物件",
+                "detail_url": "https://example.com/p-root",
+                "image_url": "https://img.example.com/p-root.jpg",
+                "address": "江東区豊洲1-1-1",
+                "rent": 119000,
+                "layout": "1LDK",
+                "station_walk_min": 6,
+                "area_m2": 35.5,
+                "features": ["角部屋"],
+                "notes": "親ノードで発見した候補",
+            },
+            {
+                "property_id_norm": "p-merge",
+                "building_name": "統合対象物件",
+                "detail_url": "https://example.com/p-merge",
+                "address": "江東区東雲2-2-2",
+                "layout": "1LDK",
+                "features": ["南向き"],
+                "notes": "親ノードの補足メモ",
+            },
+        ]
+    }
+    root_artifact.rank = {
+        "ranked_properties": [
+            {
+                "property_id_norm": "p-root",
+                "score": 84.0,
+                "why_selected": "親ノードで条件一致が高かった",
+                "why_not_selected": "",
+            },
+            {
+                "property_id_norm": "p-merge",
+                "score": 71.0,
+                "why_selected": "母集団に残した候補",
+                "why_not_selected": "",
+            },
+        ]
+    }
+
+    child_artifact = SearchNodeArtifacts(
+        plan=child_plan,
+        query_hash=manager._hash_queries(child_plan.queries, child_plan.ranking_profile),
+        frontier_score=80.0,
+        status="completed",
+    )
+    child_artifact.summary = {"status": "completed", "branch_id": "child"}
+    child_artifact.integrity = {
+        "normalized_properties": [
+            {
+                "property_id_norm": "p-merge",
+                "building_name": "統合対象物件",
+                "detail_url": "https://example.com/p-merge",
+                "image_url": "https://img.example.com/p-merge.jpg",
+                "address": "江東区東雲2-2-2",
+                "rent": 118000,
+                "layout": "1LDK",
+                "station_walk_min": 5,
+                "area_m2": 36.2,
+                "features": ["追い焚き"],
+            },
+            {
+                "property_id_norm": "p-child",
+                "building_name": "子ノード物件",
+                "detail_url": "https://example.com/p-child",
+                "image_url": "https://img.example.com/p-child.jpg",
+                "address": "江東区有明3-3-3",
+                "rent": 121000,
+                "layout": "1LDK",
+                "station_walk_min": 4,
+                "area_m2": 34.0,
+                "features": ["宅配ボックス"],
+            },
+        ]
+    }
+    child_artifact.rank = {
+        "ranked_properties": [
+            {
+                "property_id_norm": "p-merge",
+                "score": 88.0,
+                "why_selected": "子ノードで詳細が揃った",
+                "why_not_selected": "管理費は要確認",
+            },
+            {
+                "property_id_norm": "p-child",
+                "score": 76.0,
+                "why_selected": "駅近候補として残した",
+                "why_not_selected": "",
+            },
+        ]
+    }
+
+    state.node_artifacts = {
+        "root": root_artifact,
+        "child": child_artifact,
+    }
+    state.selected_branch_summary = {"branch_id": "child"}
+
+    display_ranked, display_normalized = manager._build_display_candidate_pool(
+        state=state,
+        selected_branch_result_summary={
+            PROPERTY_CANDIDATES_KEY: [
+                {
+                    "property_id_norm": "p-root",
+                    "detail_url": "https://example.com/p-root",
+                    "building_name": "親ノード物件",
+                    "reason": "親ノードだけで残っていた候補",
+                },
+                {
+                    "property_id_norm": "p-merge",
+                    "detail_url": "https://example.com/p-merge",
+                    "building_name": "統合対象物件",
+                    "reason": "パス全体で最も情報が揃った候補",
+                },
+                {
+                    "property_id_norm": "missing",
+                    "detail_url": "https://example.com/missing",
+                    "building_name": "未解決候補",
+                    "reason": "canonical snapshot が無い候補",
+                },
+            ]
+        },
+    )
+
+    assert [item["property_id_norm"] for item in display_ranked] == [
+        "p-root",
+        "p-merge",
+        "p-child",
+    ]
+    assert all(item["property_id_norm"] != "missing" for item in display_ranked)
+
+    normalized_by_id = {item["property_id_norm"]: item for item in display_normalized}
+    assert normalized_by_id["p-root"]["building_name"] == "親ノード物件"
+    assert normalized_by_id["p-merge"]["rent"] == 118000
+    assert normalized_by_id["p-merge"]["station_walk_min"] == 5
+    assert normalized_by_id["p-merge"]["notes"] == "親ノードの補足メモ"
+    assert normalized_by_id["p-merge"]["features"] == ["追い焚き", "南向き"]
+    assert display_ranked[1]["why_selected"] == "子ノードで詳細が揃った"
+    assert display_ranked[1]["why_not_selected"] == "管理費は要確認"
 
 
 def test_initial_node_plans_prioritize_success_path_and_exclude_avoided_strategies(tmp_path: Path):

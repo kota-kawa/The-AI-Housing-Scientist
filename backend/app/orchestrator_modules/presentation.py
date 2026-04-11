@@ -6,6 +6,8 @@ from app.models import ChatMessageResponse, UIBlock
 
 from .shared import _generate_llm_guidance_message
 
+INITIAL_DISPLAY_CANDIDATE_LIMIT = 6
+
 
 class OrchestratorPresentationMixin:
     # JP: property cardsを構築する。
@@ -17,7 +19,7 @@ class OrchestratorPresentationMixin:
         normalized_properties: list[dict[str, Any]],
         selectable: bool,
         property_reactions: dict[str, str] | None = None,
-        max_items: int | None = 3,
+        max_items: int | None = INITIAL_DISPLAY_CANDIDATE_LIMIT,
     ) -> list[dict[str, Any]]:
         by_id = {item["property_id_norm"]: item for item in normalized_properties}
         cards: list[dict[str, Any]] = []
@@ -87,7 +89,7 @@ class OrchestratorPresentationMixin:
         reactions = property_reactions or {}
 
         rows = []
-        for item in ranked_properties[:8]:
+        for item in ranked_properties[:INITIAL_DISPLAY_CANDIDATE_LIMIT]:
             property_id = str(item.get("property_id_norm") or item.get("id") or "").strip()
             prop = by_id.get(property_id) or item
             rows.append(
@@ -103,7 +105,11 @@ class OrchestratorPresentationMixin:
                 }
             )
 
+        display_candidate_count = int(
+            search_summary.get("display_candidate_count") or len(ranked_properties)
+        )
         summary_body = (
+            f"表示候補 {display_candidate_count}件 / "
             f"比較対象 {search_summary.get('normalized_count', 0)}件 / "
             f"詳細ページ解析 {search_summary.get('detail_parsed_count', 0)}件 / "
             f"スニペット補完 {search_summary.get('fallback_count', 0)}件 / "
@@ -629,7 +635,7 @@ class OrchestratorPresentationMixin:
                 )
             ]
 
-        ranked_properties = task_memory.get("last_ranked_properties") or []
+        ranked_properties = self._display_ranked_properties(task_memory)
         if ranked_properties:
             top_id = str(ranked_properties[0].get("property_id_norm") or "")
             action_items: list[dict[str, Any]] = []
@@ -675,7 +681,7 @@ class OrchestratorPresentationMixin:
             "draft_research_plan"
         ):
             assistant_text = "調査計画は作成済みです。承認ボタンで開始するか、条件を追加して計画を更新してください。"
-        elif task_memory.get("last_ranked_properties"):
+        elif self._display_ranked_properties(task_memory):
             assistant_text = (
                 "直前の候補は保持しています。物件カードのボタンで問い合わせ文を作るか、"
                 "新しい条件を送るか、契約条項テキストを貼り付けてください。"

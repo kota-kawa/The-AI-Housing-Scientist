@@ -158,6 +158,24 @@ class OrchestratorCoreMixin:
             if str(property_id).strip() and str(reaction).strip()
         }
 
+    # JP: display ranked propertiesを取得する。
+    # EN: Get display ranked properties.
+    def _display_ranked_properties(self, task_memory: dict[str, Any]) -> list[dict[str, Any]]:
+        return list(
+            task_memory.get("last_display_ranked_properties")
+            or task_memory.get("last_ranked_properties")
+            or []
+        )
+
+    # JP: display normalized propertiesを取得する。
+    # EN: Get display normalized properties.
+    def _display_normalized_properties(self, task_memory: dict[str, Any]) -> list[dict[str, Any]]:
+        return list(
+            task_memory.get("last_display_normalized_properties")
+            or task_memory.get("last_normalized_properties")
+            or []
+        )
+
     # JP: visible ranked propertiesを処理する。
     # EN: Process visible ranked properties.
     def _visible_ranked_properties(
@@ -208,7 +226,7 @@ class OrchestratorCoreMixin:
     def _find_property_name(self, task_memory: dict[str, Any], property_id: str | None) -> str:
         if not property_id:
             return "選択中の物件"
-        for item in task_memory.get("last_normalized_properties", []):
+        for item in self._display_normalized_properties(task_memory):
             if item.get("property_id_norm") == property_id:
                 return str(item.get("building_name") or "選択中の物件")
         return "選択中の物件"

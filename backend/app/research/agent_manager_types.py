@@ -62,6 +62,8 @@ class ResearchExecutionState:
     termination_reason: str = ""
     source_items: list[dict[str, Any]] = field(default_factory=list)
     search_summary: dict[str, Any] = field(default_factory=dict)
+    display_normalized_properties: list[dict[str, Any]] = field(default_factory=list)
+    display_ranked_properties: list[dict[str, Any]] = field(default_factory=list)
     offline_evaluation: dict[str, Any] = field(default_factory=dict)
     failure_summary: dict[str, Any] = field(default_factory=dict)
     research_summary: str = ""
@@ -77,6 +79,8 @@ class ResearchExecutionResult:
     final_report_markdown: str
     normalized_properties: list[dict[str, Any]]
     ranked_properties: list[dict[str, Any]]
+    display_normalized_properties: list[dict[str, Any]]
+    display_ranked_properties: list[dict[str, Any]]
     duplicate_groups: list[dict[str, Any]]
     integrity_reviews: list[dict[str, Any]]
     dropped_property_ids: list[str]

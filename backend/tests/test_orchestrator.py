@@ -687,6 +687,133 @@ def test_research_results_are_published_before_final_report(tmp_path: Path, monk
     assert report_block.content["body"].startswith("# 後追いレポート")
 
 
+def test_search_blocks_limit_initial_display_to_six(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+
+    ranked_properties = []
+    normalized_properties = []
+    for index in range(7):
+        property_id = f"p{index}"
+        ranked_properties.append(
+            {
+                "property_id_norm": property_id,
+                "score": 90 - index,
+                "why_selected": f"候補 {index}",
+                "why_not_selected": "",
+            }
+        )
+        normalized_properties.append(
+            {
+                "property_id_norm": property_id,
+                "building_name": f"表示候補{index}",
+                "image_url": f"https://img.example.com/{property_id}.jpg",
+                "rent": 100000 + index * 1000,
+                "layout": "1LDK",
+                "area_m2": 30 + index,
+                "station_walk_min": 5 + index,
+                "nearest_station": "豊洲駅",
+                "address": f"江東区{index}",
+                "features": ["宅配ボックス"],
+            }
+        )
+
+    blocks = orchestrator._build_search_blocks(
+        ranked_properties=ranked_properties,
+        normalized_properties=normalized_properties,
+        search_summary={
+            "display_candidate_count": 6,
+            "normalized_count": 7,
+            "detail_parsed_count": 7,
+            "fallback_count": 0,
+            "duplicate_group_count": 0,
+        },
+    )
+
+    cards_block = next(block for block in blocks if block.type == "cards")
+    table_block = next(block for block in blocks if block.type == "table")
+    summary_block = next(block for block in blocks if block.title == "検索サマリー")
+
+    assert len(cards_block.content["items"]) == 6
+    assert len(table_block.content["rows"]) == 6
+    assert summary_block.content["body"].startswith("表示候補 6件")
+
+
+def test_generate_inquiry_prefers_display_candidates_over_leaf_only_candidates(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+    orchestrator = HousingOrchestrator(settings=build_settings(database_path), db=db)
+
+    session_id, _ = db.create_session()
+    user_memory, task_memory = db.get_memories(session_id)
+    user_memory.update(
+        {
+            "move_in_date": "2026-05",
+            "must_conditions": [],
+            "nice_to_have": [],
+        }
+    )
+    task_memory.update(
+        {
+            "status": "research_completed",
+            "last_normalized_properties": [
+                {
+                    "property_id_norm": "leaf-only",
+                    "building_name": "leaf only",
+                    "rent": 110000,
+                    "nearest_station": "木場駅",
+                    "station_walk_min": 7,
+                    "layout": "1LDK",
+                    "features": [],
+                }
+            ],
+            "last_ranked_properties": [
+                {
+                    "property_id_norm": "leaf-only",
+                    "score": 70,
+                    "why_selected": "leaf result",
+                    "why_not_selected": "",
+                }
+            ],
+            "last_display_normalized_properties": [
+                {
+                    "property_id_norm": "display-1",
+                    "building_name": "表示候補",
+                    "rent": 118000,
+                    "nearest_station": "豊洲駅",
+                    "station_walk_min": 4,
+                    "layout": "1LDK",
+                    "features": ["宅配ボックス"],
+                    "notes": "selected path aggregate",
+                }
+            ],
+            "last_display_ranked_properties": [
+                {
+                    "property_id_norm": "display-1",
+                    "score": 88.0,
+                    "why_selected": "selected path aggregate",
+                    "why_not_selected": "",
+                }
+            ],
+        }
+    )
+    db.update_memories(session_id, user_memory, task_memory)
+
+    response = orchestrator.execute_action(
+        session_id=session_id,
+        action_type="generate_inquiry",
+        payload={"property_id": "display-1"},
+    )
+
+    assert response.status == "inquiry_draft_ready"
+    selected_block = next(block for block in response.blocks if block.title == "選択中の物件")
+    assert selected_block.content["items"][0]["id"] == "display-1"
+    assert "表示候補" in response.assistant_message
+
+
 def test_research_summary_prompt_includes_branch_tradeoffs_and_followups(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
