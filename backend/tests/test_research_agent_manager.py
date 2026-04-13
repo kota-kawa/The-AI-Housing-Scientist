@@ -94,6 +94,29 @@ class FakePlannerRouteAdapter(LLMAdapter):
         return ["fake-planner-model"]
 
 
+class FakeLinkSelectionAdapter(LLMAdapter):
+    def __init__(self, selected_indexes: list[int]):
+        self.selected_indexes = selected_indexes
+        self.calls = 0
+
+    def generate_text(self, *, system: str, user: str, temperature: float = 0.2) -> str:
+        raise AssertionError("generate_text should not be called in link selection tests")
+
+    def generate_structured(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: dict,
+        temperature: float = 0.2,
+    ) -> dict:
+        self.calls += 1
+        return {"selected_indexes": list(self.selected_indexes)}
+
+    def list_models(self) -> list[str]:
+        return ["fake-link-selection-model"]
+
+
 def passthrough_branch_family_queries(
     user_memory: dict[str, object],
     seed_queries: list[str],
@@ -615,20 +638,20 @@ def test_ensure_minimum_display_candidates_backfills_from_raw_results(tmp_path: 
         "raw_results": [
             {
                 "title": "東雲ベイテラス",
-                "url": "https://example.com/p1",
-                "description": "家賃は要確認。東雲エリアの参考候補。",
+                "url": "https://example.com/property/p1",
+                "description": "東京都江東区東雲1-4-8 / 家賃118,000円 / 1LDK / 徒歩6分",
                 "source_name": "catalog",
             },
             {
                 "title": "豊洲リバーサイド",
-                "url": "https://example.com/p2",
-                "description": "豊洲駅周辺の参考候補。",
+                "url": "https://example.com/property/p2",
+                "description": "東京都江東区豊洲2-1-9 / 家賃121,000円 / 1LDK / 徒歩7分",
                 "source_name": "catalog",
             },
             {
                 "title": "有明フロント",
-                "url": "https://example.com/p3",
-                "description": "条件を緩めた再探索で見つかった候補。",
+                "url": "https://example.com/property/p3",
+                "description": "東京都江東区有明1-2-3 / 家賃126,000円 / 1LDK / 徒歩9分",
                 "source_name": "catalog",
             },
         ]
@@ -661,6 +684,92 @@ def test_ensure_minimum_display_candidates_backfills_from_raw_results(tmp_path: 
     ]
     assert all("参考候補" in item["why_selected"] for item in ranked)
     assert all(item["property_id_norm"] for item in normalized)
+
+
+def test_ensure_minimum_display_candidates_skips_listing_pages_in_raw_results(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = make_manager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+    state = ResearchExecutionState()
+    plan = SearchNodePlan(
+        node_key="strict-primary",
+        label="strict",
+        description="strict plan",
+        queries=["江東区 賃貸 1LDK"],
+        ranking_profile={},
+        strategy_tags=["strict_primary"],
+        depth=1,
+        branch_family="strict_primary",
+        area_scope="strict",
+        constraint_mode="primary",
+    )
+    artifact = SearchNodeArtifacts(
+        plan=plan,
+        query_hash=manager._hash_queries(plan.queries, plan.ranking_profile),
+        frontier_score=22.0,
+        status="completed",
+    )
+    artifact.retrieve = {
+        "raw_results": [
+            {
+                "title": "江東区の賃貸物件一覧",
+                "url": "https://example.com/search/koto?area=koto&page=1",
+                "description": "該当物件 24件",
+                "source_name": "catalog",
+            },
+            {
+                "title": "東雲ベイテラス",
+                "url": "https://example.com/property/p1",
+                "description": "東京都江東区東雲1-4-8 / 家賃118,000円 / 1LDK / 徒歩6分",
+                "source_name": "catalog",
+            },
+        ]
+    }
+    artifact.summary = {
+        "branch_id": plan.node_key,
+        "status": "completed",
+        "label": plan.label,
+        "branch_family": plan.branch_family,
+        "branch_score": 22.0,
+        "depth": 1,
+    }
+    state.node_artifacts[plan.node_key] = artifact
+    state.branch_summaries = [artifact.summary]
+
+    ranked, normalized, source = manager._ensure_minimum_display_candidates(
+        state,
+        display_ranked_properties=[],
+        display_normalized_properties=[],
+        alternative_display_groups=[],
+    )
+
+    assert source == "raw_result_fill"
+    assert len(ranked) == 1
+    assert len(normalized) == 1
+    assert ranked[0]["building_name"] == "東雲ベイテラス"
 
 
 def test_initial_node_plans_create_fixed_branch_families(tmp_path: Path):
@@ -1090,6 +1199,188 @@ def test_parallel_research_tools_share_singleflight_cache(tmp_path: Path):
     ) == 1
 
 
+def test_tool_enrich_expands_listing_page_to_same_domain_detail_pages(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    html_by_url = {
+        "https://example.com/search/koto": """
+        <html>
+          <body>
+            <h1>江東区の賃貸物件一覧</h1>
+            <div class="card">
+              <a href="/property/p1">詳細を見る</a>
+              <p>東雲ベイテラス 家賃11.8万円 1LDK 徒歩6分</p>
+            </div>
+            <div class="card">
+              <a href="/property/p2">物件詳細</a>
+              <p>豊洲リバーサイド 家賃12.1万円 1LDK 徒歩7分</p>
+            </div>
+            <div class="card">
+              <a href="https://other.example.com/property/p3">外部サイト</a>
+              <p>他社の物件</p>
+            </div>
+          </body>
+        </html>
+        """,
+        "https://example.com/property/p1": """
+        <article data-kind="property-detail">
+          <h1 data-field="building_name">東雲ベイテラス</h1>
+          <p data-field="address">東京都江東区東雲1-4-8</p>
+          <p data-field="layout">1LDK</p>
+          <p data-field="rent">118000</p>
+        </article>
+        """,
+        "https://example.com/property/p2": """
+        <article data-kind="property-detail">
+          <h1 data-field="building_name">豊洲リバーサイド</h1>
+          <p data-field="address">東京都江東区豊洲2-1-9</p>
+          <p data-field="layout">1LDK</p>
+          <p data-field="rent">121000</p>
+        </article>
+        """,
+    }
+    manager = make_manager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: html_by_url.get(url),
+        collect_source_items=lambda **kwargs: [],
+    )
+    plan = SearchNodePlan(
+        node_key="strict-primary",
+        label="strict",
+        description="strict plan",
+        queries=["江東区 賃貸 1LDK"],
+        ranking_profile={},
+        strategy_tags=["strict_primary"],
+        depth=1,
+    )
+
+    result = manager._tool_enrich(
+        context=manager.context,
+        branch=plan,
+        raw_results=[
+            {
+                "title": "江東区の賃貸物件一覧",
+                "url": "https://example.com/search/koto",
+                "description": "江東区の1LDKをまとめた一覧",
+                "source_name": "brave",
+                "matched_queries": ["江東区 賃貸 1LDK"],
+            }
+        ],
+    )
+
+    expanded_urls = sorted(item["url"] for item in result["expanded_raw_results"])
+    assert expanded_urls == [
+        "https://example.com/property/p1",
+        "https://example.com/property/p2",
+    ]
+    assert sorted(result["detail_html_map"].keys()) == sorted(expanded_urls)
+    assert result["summary"]["listing_page_expand_count"] == 1
+    assert result["summary"]["discovered_detail_count"] == 2
+    assert result["summary"]["expanded_result_count"] == 2
+
+
+def test_tool_enrich_uses_llm_for_ambiguous_listing_links(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    adapter = FakeLinkSelectionAdapter([1])
+    html_by_url = {
+        "https://example.com/listing": """
+        <html>
+          <body>
+            <h1>候補一覧</h1>
+            <div class="slot">
+              <a href="/estate/alpha">見る</a>
+              <p>候補A 1LDK</p>
+            </div>
+            <div class="slot">
+              <a href="/estate/beta">見る</a>
+              <p>候補B 家賃11.9万円 1LDK 徒歩6分</p>
+            </div>
+          </body>
+        </html>
+        """,
+        "https://example.com/estate/beta": """
+        <article data-kind="property-detail">
+          <h1 data-field="building_name">候補Bレジデンス</h1>
+          <p data-field="address">東京都江東区木場1-2-3</p>
+          <p data-field="layout">1LDK</p>
+          <p data-field="rent">119000</p>
+        </article>
+        """,
+    }
+    manager = make_manager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=adapter,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: html_by_url.get(url),
+        collect_source_items=lambda **kwargs: [],
+    )
+    plan = SearchNodePlan(
+        node_key="strict-primary",
+        label="strict",
+        description="strict plan",
+        queries=["江東区 賃貸 1LDK"],
+        ranking_profile={},
+        strategy_tags=["strict_primary"],
+        depth=1,
+    )
+
+    result = manager._tool_enrich(
+        context=manager.context,
+        branch=plan,
+        raw_results=[
+            {
+                "title": "一覧ページ",
+                "url": "https://example.com/listing",
+                "description": "曖昧なリンクが並ぶ一覧",
+                "source_name": "brave",
+                "matched_queries": ["江東区 賃貸 1LDK"],
+            }
+        ],
+    )
+
+    assert adapter.calls == 1
+    assert [item["url"] for item in result["expanded_raw_results"]] == [
+        "https://example.com/estate/beta"
+    ]
+
+
 def test_live_progress_summary_shows_current_action_and_recent_history(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
@@ -1164,7 +1455,14 @@ def test_tool_enrich_updates_job_with_live_detail_url(tmp_path: Path):
         research_adapter=None,
         build_research_queries=lambda user_memory, seed_queries: seed_queries,
         collect_search_results=lambda **kwargs: ([], {}),
-        fetch_detail_html=lambda url: f"<html>{url}</html>",
+        fetch_detail_html=lambda url: """
+        <article data-kind="property-detail">
+          <h1 data-field="building_name">テスト物件</h1>
+          <p data-field="address">東京都江東区豊洲1-2-3</p>
+          <p data-field="layout">1LDK</p>
+          <p data-field="rent">118000</p>
+        </article>
+        """,
         collect_source_items=lambda **kwargs: [],
     )
     plan = SearchNodePlan(

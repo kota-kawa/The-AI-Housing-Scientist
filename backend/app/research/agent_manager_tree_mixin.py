@@ -1047,7 +1047,6 @@ class AgentManagerTreeMixin:
         started = time.perf_counter()
         try:
             retrieve_result = self.toolbox.run("retrieve", self.context, branch=plan)
-            artifacts.retrieve = retrieve_result
             enrich_result = self.toolbox.run(
                 "enrich",
                 self.context,
@@ -1055,6 +1054,20 @@ class AgentManagerTreeMixin:
                 raw_results=retrieve_result.get("raw_results", []),
             )
             artifacts.enrich = enrich_result
+            if "expanded_raw_results" in enrich_result:
+                effective_raw_results = list(enrich_result.get("expanded_raw_results", []) or [])
+            else:
+                effective_raw_results = list(retrieve_result.get("raw_results", []) or [])
+            retrieve_result = dict(retrieve_result)
+            retrieve_result["seed_raw_results"] = list(retrieve_result.get("raw_results", []) or [])
+            retrieve_result["raw_results"] = effective_raw_results
+            retrieve_summary = dict(retrieve_result.get("summary", {}) or {})
+            retrieve_summary["seed_url_count"] = int(
+                retrieve_summary.get("unique_url_count") or len(retrieve_result["seed_raw_results"])
+            )
+            retrieve_summary["unique_url_count"] = len(effective_raw_results)
+            retrieve_result["summary"] = retrieve_summary
+            artifacts.retrieve = retrieve_result
             self._update_live_progress(
                 stage_name="tree_search",
                 progress_percent=56,

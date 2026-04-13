@@ -1,18 +1,47 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import html
+import json
+import re
 import threading
 import time
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 from app.research.journal import ResearchIntent, ResearchNode
 from app.research.state_machine import ResearchStageDefinition, ResearchStateMachine
 from app.research.tools import CallableResearchTool, Toolbox, ToolContext, ToolSpec
 from app.stages.integrity_review import run_integrity_review
 from app.stages.ranking import run_ranking
-from app.stages.search_normalize import run_search_and_normalize
+from app.stages.search_normalize import is_single_property_search_result, run_search_and_normalize
 
 from .agent_manager_types import SearchNodePlan
+
+MAX_DETAIL_LINK_CANDIDATES_PER_PAGE = 12
+MAX_FOLLOW_DETAIL_LINKS_PER_PAGE = 4
+MAX_EXPANDED_RAW_RESULTS = 36
+LINK_CONTEXT_WINDOW = 180
+DETAIL_LINK_HINT_TOKENS = (
+    "詳細",
+    "物件詳細",
+    "空室",
+    "募集",
+    "この物件",
+    "賃貸マンション",
+    "賃貸アパート",
+    "間取り",
+)
+COLLECTION_LINK_HINT_TOKENS = (
+    "一覧",
+    "検索結果",
+    "エリア",
+    "沿線",
+    "地図",
+    "特集",
+    "ランキング",
+    "条件変更",
+)
 
 
 class AgentManagerToolingMixin:
@@ -28,6 +57,267 @@ class AgentManagerToolingMixin:
         if text:
             return text
         return ""
+
+    @staticmethod
+    def _clean_html_fragment(value: str) -> str:
+        text = re.sub(r"<script[\s\S]*?</script>", " ", value or "", flags=re.IGNORECASE)
+        text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        return html.unescape(re.sub(r"\s+", " ", text)).strip()
+
+    @classmethod
+    def _extract_html_title(cls, value: str) -> str:
+        match = re.search(r"<title[^>]*>([\s\S]*?)</title>", value or "", re.IGNORECASE)
+        if not match:
+            return ""
+        return cls._clean_html_fragment(match.group(1))
+
+    @staticmethod
+    def _normalized_host(url: str) -> str:
+        host = urlparse(str(url or "")).netloc.lower().strip()
+        if ":" in host:
+            host = host.split(":", 1)[0]
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+
+    @classmethod
+    def _is_same_domain(cls, left_url: str, right_url: str) -> bool:
+        left_host = cls._normalized_host(left_url)
+        right_host = cls._normalized_host(right_url)
+        if not left_host or not right_host:
+            return False
+        return (
+            left_host == right_host
+            or left_host.endswith(f".{right_host}")
+            or right_host.endswith(f".{left_host}")
+        )
+
+    @classmethod
+    def _link_property_signal_score(
+        cls,
+        *,
+        url: str,
+        anchor_text: str,
+        context_text: str,
+    ) -> int:
+        synthetic_item = {
+            "url": url,
+            "title": anchor_text,
+            "description": context_text,
+            "extra_snippets": [],
+        }
+        score = 0
+        if is_single_property_search_result(synthetic_item):
+            score += 3
+
+        combined = f"{anchor_text} {context_text}"
+        if any(token in combined for token in DETAIL_LINK_HINT_TOKENS):
+            score += 1
+        if re.search(r"(?:賃料|家賃)[^。\n]{0,18}(?:万|円)", combined):
+            score += 1
+        if re.search(r"徒歩\s*(?:約|およそ)?\s*\d{1,2}\s*分", combined):
+            score += 1
+        if re.search(r"\d(?:SLDK|SDK|LDK|DK|K|R)", combined, re.IGNORECASE):
+            score += 1
+        if re.search(r"\d{1,3}(?:\.\d+)?\s*(?:㎡|m2)", combined, re.IGNORECASE):
+            score += 1
+        if any(token in combined for token in COLLECTION_LINK_HINT_TOKENS):
+            score -= 2
+        return score
+
+    def _extract_same_domain_detail_link_candidates(
+        self,
+        *,
+        base_url: str,
+        parent_item: dict[str, Any],
+        html_text: str,
+    ) -> list[dict[str, Any]]:
+        candidates_by_url: dict[str, dict[str, Any]] = {}
+        for index, match in enumerate(
+            re.finditer(
+                r"<a\b[^>]*href=(?:\"([^\"]+)\"|'([^']+)')[^>]*>([\s\S]*?)</a>",
+                html_text or "",
+                re.IGNORECASE,
+            )
+        ):
+            href = html.unescape((match.group(1) or match.group(2) or "").strip())
+            if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+                continue
+            absolute_url = urljoin(base_url, href)
+            parsed = urlparse(absolute_url)
+            if parsed.scheme not in {"http", "https"}:
+                continue
+            absolute_url = parsed._replace(fragment="").geturl()
+            if not self._is_same_domain(base_url, absolute_url):
+                continue
+
+            anchor_text = self._clean_html_fragment(match.group(3))[:120]
+            context_html = html_text[
+                max(0, match.start() - LINK_CONTEXT_WINDOW) : min(
+                    len(html_text),
+                    match.end() + LINK_CONTEXT_WINDOW,
+                )
+            ]
+            context_text = self._clean_html_fragment(context_html)[:220]
+            score = self._link_property_signal_score(
+                url=absolute_url,
+                anchor_text=anchor_text,
+                context_text=context_text,
+            )
+            if score < 2 and self.research_adapter is None:
+                continue
+            if score < 1:
+                continue
+
+            candidate = {
+                "url": absolute_url,
+                "anchor_text": anchor_text,
+                "context_text": context_text,
+                "heuristic_score": score,
+                "position": index,
+                "parent_url": base_url,
+                "parent_title": str(parent_item.get("title") or ""),
+            }
+            existing = candidates_by_url.get(absolute_url)
+            if existing is None or (
+                candidate["heuristic_score"],
+                len(candidate["context_text"]),
+            ) > (
+                existing["heuristic_score"],
+                len(existing["context_text"]),
+            ):
+                candidates_by_url[absolute_url] = candidate
+
+        candidates = sorted(
+            candidates_by_url.values(),
+            key=lambda item: (
+                int(item.get("heuristic_score") or 0),
+                -int(item.get("position") or 0),
+            ),
+            reverse=True,
+        )
+        return candidates[:MAX_DETAIL_LINK_CANDIDATES_PER_PAGE]
+
+    def _select_detail_link_candidates_with_llm(
+        self,
+        *,
+        parent_item: dict[str, Any],
+        parent_url: str,
+        parent_html: str,
+        candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        fallback: list[dict[str, Any]] = []
+        for threshold in (3, 2):
+            for item in candidates:
+                if int(item.get("heuristic_score") or 0) < threshold:
+                    continue
+                if item in fallback:
+                    continue
+                fallback.append(item)
+                if len(fallback) >= MAX_FOLLOW_DETAIL_LINKS_PER_PAGE:
+                    break
+            if len(fallback) >= MAX_FOLLOW_DETAIL_LINKS_PER_PAGE:
+                break
+        if self.research_adapter is None or len(candidates) < 2:
+            return fallback
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "selected_indexes": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 0},
+                }
+            },
+            "required": ["selected_indexes"],
+            "additionalProperties": False,
+        }
+        payload = {
+            "page": {
+                "url": parent_url,
+                "title": str(parent_item.get("title") or "") or self._extract_html_title(parent_html),
+                "description": str(parent_item.get("description") or ""),
+            },
+            "candidate_links": [
+                {
+                    "candidate_index": index,
+                    "url": item.get("url", ""),
+                    "anchor_text": item.get("anchor_text", ""),
+                    "context_text": item.get("context_text", ""),
+                    "heuristic_score": item.get("heuristic_score", 0),
+                }
+                for index, item in enumerate(candidates[:MAX_DETAIL_LINK_CANDIDATES_PER_PAGE])
+            ],
+            "selection_rules": [
+                "一覧ページ内から、単一の賃貸物件詳細ページに進みそうなリンクだけを選ぶ",
+                "検索結果一覧、条件一覧、特集、地図、ランキング、カテゴリーページは選ばない",
+                "同じ物件でもっとも具体的な詳細ページを優先し、最大4件まで選ぶ",
+                "家賃、間取り、駅徒歩、募集住戸など単一物件の文脈があるリンクを優先する",
+            ],
+        }
+        try:
+            result = self.research_adapter.generate_structured(
+                system=(
+                    "You identify which links on a Japanese rental listing page most likely lead "
+                    "to concrete single-property detail pages. Choose only the best candidates."
+                ),
+                user=json.dumps(payload, ensure_ascii=False, indent=2),
+                schema=schema,
+                temperature=0.0,
+            )
+        except Exception:
+            return fallback
+
+        selected_indexes: list[int] = []
+        for value in result.get("selected_indexes", []) or []:
+            try:
+                index = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= index < len(candidates) and index not in selected_indexes:
+                selected_indexes.append(index)
+            if len(selected_indexes) >= MAX_FOLLOW_DETAIL_LINKS_PER_PAGE:
+                break
+        if not selected_indexes:
+            return fallback
+        return [candidates[index] for index in selected_indexes]
+
+    def _build_discovered_detail_result(
+        self,
+        *,
+        parent_item: dict[str, Any],
+        child_candidate: dict[str, Any],
+        child_html: str,
+    ) -> dict[str, Any]:
+        inherited_snippets = [
+            str(item).strip()
+            for item in parent_item.get("extra_snippets", []) or []
+            if str(item).strip()
+        ]
+        context_text = str(child_candidate.get("context_text") or "").strip()
+        child_title = self._extract_html_title(child_html)
+        anchor_text = str(child_candidate.get("anchor_text") or "").strip()
+        if anchor_text in {"見る", "詳細", "詳細を見る", "物件詳細"}:
+            anchor_text = ""
+        title = (
+            anchor_text
+            or child_title
+            or str(parent_item.get("title") or "").strip()
+            or "物件詳細"
+        )
+        return {
+            "title": title,
+            "url": str(child_candidate.get("url") or "").strip(),
+            "description": context_text or str(parent_item.get("description") or "").strip(),
+            "extra_snippets": inherited_snippets[:3],
+            "source_name": str(parent_item.get("source_name") or "source"),
+            "matched_queries": list(parent_item.get("matched_queries", []) or []),
+            "source_names": list(parent_item.get("source_names", []) or []),
+            "parent_url": str(parent_item.get("url") or "").strip(),
+            "discovered_from": "listing_page_link",
+            "discovered_anchor_text": str(child_candidate.get("anchor_text") or "").strip(),
+        }
 
     def _update_live_progress(
         self,
@@ -645,8 +935,14 @@ class AgentManagerToolingMixin:
         raw_results: list[dict[str, Any]],
     ) -> dict[str, Any]:
         detail_html_map: dict[str, str] = {}
+        expanded_raw_results: list[dict[str, Any]] = []
+        expanded_by_url: dict[str, dict[str, Any]] = {}
         total = len(raw_results)
         cache_hit_count = 0
+        listing_page_expand_count = 0
+        discovered_detail_count = 0
+        child_fetch_attempt_count = 0
+        child_candidate_count = 0
         for index, item in enumerate(raw_results, start=1):
             url = str(item.get("url") or "").strip()
             if not url:
@@ -659,8 +955,6 @@ class AgentManagerToolingMixin:
             )
             if cache_hit:
                 cache_hit_count += 1
-            if detail_html:
-                detail_html_map[url] = detail_html
             if total:
                 self._update_live_progress(
                     stage_name="tree_search",
@@ -669,13 +963,91 @@ class AgentManagerToolingMixin:
                     detail=f"{branch.label} / {index}/{total} 件目",
                     url=url,
                 )
+            if not detail_html:
+                continue
+
+            if is_single_property_search_result(item, detail_html):
+                detail_html_map[url] = detail_html
+                expanded_by_url[url] = dict(item)
+                continue
+
+            listing_page_expand_count += 1
+            link_candidates = self._extract_same_domain_detail_link_candidates(
+                base_url=url,
+                parent_item=item,
+                html_text=detail_html,
+            )
+            child_candidate_count += len(link_candidates)
+            selected_candidates = self._select_detail_link_candidates_with_llm(
+                parent_item=item,
+                parent_url=url,
+                parent_html=detail_html,
+                candidates=link_candidates,
+            )
+            if selected_candidates:
+                self._update_live_progress(
+                    stage_name="tree_search",
+                    progress_percent=50,
+                    current_action="一覧ページから詳細リンクを探索中",
+                    detail=(
+                        f"{branch.label} / {len(selected_candidates)}件の詳細候補を追跡"
+                    ),
+                    url=url,
+                )
+            for child_candidate in selected_candidates:
+                child_url = str(child_candidate.get("url") or "").strip()
+                if (
+                    not child_url
+                    or child_url in detail_html_map
+                    or child_url in expanded_by_url
+                ):
+                    continue
+                child_fetch_attempt_count += 1
+                child_html, child_cache_hit = self._cached_singleflight_load(
+                    cache=self.detail_html_cache,
+                    inflight=self._detail_html_inflight,
+                    key=child_url,
+                    loader=lambda child_url=child_url: self.fetch_detail_html(child_url),
+                )
+                if child_cache_hit:
+                    cache_hit_count += 1
+                if not child_html:
+                    continue
+                discovered_item = self._build_discovered_detail_result(
+                    parent_item=item,
+                    child_candidate=child_candidate,
+                    child_html=child_html,
+                )
+                if not is_single_property_search_result(discovered_item, child_html):
+                    continue
+                detail_html_map[child_url] = child_html
+                expanded_by_url[child_url] = discovered_item
+                discovered_detail_count += 1
+                if len(expanded_by_url) >= MAX_EXPANDED_RAW_RESULTS:
+                    break
+            if len(expanded_by_url) >= MAX_EXPANDED_RAW_RESULTS:
+                break
+
+        if expanded_by_url:
+            expanded_raw_results = list(expanded_by_url.values())
+        else:
+            expanded_raw_results = []
         return {
             "detail_html_map": detail_html_map,
+            "expanded_raw_results": expanded_raw_results,
             "summary": {
                 "detail_attempt_count": total,
                 "detail_hit_count": len(detail_html_map),
                 "cache_hit_count": cache_hit_count,
-                "summary": f"詳細ページを {len(detail_html_map)} 件取得",
+                "listing_page_expand_count": listing_page_expand_count,
+                "listing_page_child_candidate_count": child_candidate_count,
+                "child_fetch_attempt_count": child_fetch_attempt_count,
+                "discovered_detail_count": discovered_detail_count,
+                "expanded_result_count": len(expanded_raw_results),
+                "summary": (
+                    f"単一物件ページ {len(detail_html_map)} 件を取得"
+                    f"（一覧ページ深掘り {discovered_detail_count} 件）"
+                ),
             },
         }
 

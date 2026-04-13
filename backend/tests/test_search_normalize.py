@@ -30,13 +30,13 @@ def test_search_normalize_dedup_group_with_structured_address():
         {
             "title": "サンプルマンション 1LDK 徒歩8分",
             "description": "東京都渋谷区渋谷1-2-3 家賃14.5万 35㎡",
-            "url": "https://example.com/1",
+            "url": "https://example.com/property/1",
             "extra_snippets": [],
         },
         {
             "title": "サンプルマンション 1LDK 徒歩8分",
             "description": "東京都渋谷区渋谷1-2-3 家賃14.8万 35㎡",
-            "url": "https://example.com/2",
+            "url": "https://example.com/property/2",
             "extra_snippets": [],
         },
     ]
@@ -52,13 +52,13 @@ def test_search_normalize_avoids_false_dedup_when_address_missing():
         {
             "title": "サンプルマンション 1LDK 徒歩8分",
             "description": "家賃14.5万 35㎡",
-            "url": "https://example.com/1",
+            "url": "https://example.com/property/1",
             "extra_snippets": [],
         },
         {
             "title": "サンプルマンション 1LDK 徒歩8分",
             "description": "家賃15.8万 35㎡",
-            "url": "https://example.com/2",
+            "url": "https://example.com/property/2",
             "extra_snippets": [],
         },
     ]
@@ -123,7 +123,7 @@ def test_search_normalize_extracts_base_rent_without_confusing_management_fee():
         {
             "title": "東雲ベイテラス 1LDK",
             "description": "東京都江東区東雲1-4-8 管理費8,000円 家賃118,000円 徒歩6分 42.1㎡",
-            "url": "https://example.com/shinonome",
+            "url": "https://example.com/property/shinonome",
             "extra_snippets": [],
         }
     ]
@@ -135,6 +135,47 @@ def test_search_normalize_extracts_base_rent_without_confusing_management_fee():
 
     prop = result["normalized_properties"][0]
     assert prop["rent"] == 118000
+
+
+def test_search_normalize_skips_collection_pages():
+    items = [
+        {
+            "title": "江東区の賃貸物件一覧",
+            "description": "江東区の1LDKや2LDKをまとめて掲載",
+            "url": "https://example.com/search/koto?area=koto&page=1",
+            "extra_snippets": ["該当物件 24件", "おすすめ物件をまとめて比較"],
+        }
+    ]
+
+    def fetch_detail(url: str) -> str | None:
+        if "search/koto" not in url:
+            return None
+        return """
+        <html>
+          <body>
+            <h1>江東区の賃貸物件一覧</h1>
+            <p>該当物件 24件</p>
+            <article>
+              <p>家賃11.8万円 1LDK 徒歩6分</p>
+            </article>
+            <article>
+              <p>家賃12.4万円 1LDK 徒歩8分</p>
+            </article>
+            <article>
+              <p>家賃13.1万円 2LDK 徒歩9分</p>
+            </article>
+          </body>
+        </html>
+        """
+
+    result = run_search_and_normalize(
+        query="江東区 賃貸 12万円",
+        search_results=items,
+        detail_fetcher=fetch_detail,
+    )
+
+    assert result["normalized_properties"] == []
+    assert result["summary"]["skipped_count"] == 1
 
 
 def test_search_normalize_inserts_resolved_image_into_final_data():

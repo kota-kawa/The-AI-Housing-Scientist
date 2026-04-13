@@ -8,6 +8,7 @@ import json
 import re
 from typing import Any
 import unicodedata
+from urllib.parse import parse_qs, urlparse
 
 from app.llm.base import LLMAdapter
 from app.models import DuplicateGroup, PropertyNormalized
@@ -56,6 +57,67 @@ MIN_PLAUSIBLE_RENT = 5000
 # JP: 賃貸物件の家賃として妥当な最高金額（円）。これ超過は売買価格の誤抽出とみなす。
 # EN: Maximum plausible monthly rent (yen). Values above this are treated as sale price misextraction.
 MAX_PLAUSIBLE_RENT = 1_000_000
+DETAIL_URL_POSITIVE_SEGMENTS = {
+    "property",
+    "properties",
+    "detail",
+    "details",
+    "bukken",
+    "room",
+    "rooms",
+    "heya",
+    "bkdtl",
+    "estate",
+    "unit",
+}
+DETAIL_URL_NEGATIVE_SEGMENTS = {
+    "search",
+    "list",
+    "lists",
+    "feature",
+    "features",
+    "article",
+    "articles",
+    "ranking",
+    "rank",
+    "map",
+    "area",
+    "city",
+    "station",
+    "ensen",
+    "line",
+    "special",
+    "theme",
+    "new",
+    "news",
+}
+DETAIL_URL_NEGATIVE_QUERY_KEYS = {
+    "page",
+    "sort",
+    "order",
+    "q",
+    "query",
+    "keyword",
+    "area",
+    "city",
+    "line",
+    "station",
+    "pref",
+    "map",
+}
+COLLECTION_PAGE_TOKENS = (
+    "物件一覧",
+    "検索結果",
+    "該当物件",
+    "掲載物件",
+    "おすすめ物件",
+    "人気物件",
+    "周辺の賃貸",
+    "この条件の物件",
+    "エリアから探す",
+    "沿線から探す",
+    "こだわり条件",
+)
 
 
 # JP: textを正規化する。
@@ -498,6 +560,172 @@ def _extract_contract_terms(text: str) -> dict[str, str]:
                 terms[key] = sentence[:160]
                 break
     return terms
+
+
+# JP: URLが単一物件ページらしいかを判定する。
+# EN: Decide whether a URL looks like a single-property detail page.
+def _looks_like_single_property_url(url: str) -> bool:
+    parsed = urlparse(str(url or "").strip())
+    path = unicodedata.normalize("NFKC", parsed.path or "").lower()
+    if not parsed.scheme or not parsed.netloc or not path or path == "/":
+        return False
+
+    if parsed.netloc.endswith("mock-housing.local") and path.startswith("/properties/"):
+        return True
+
+    segments = [segment for segment in path.split("/") if segment]
+    if not segments:
+        return False
+
+    segment_set = {segment for segment in segments}
+    has_positive_segment = bool(segment_set & DETAIL_URL_POSITIVE_SEGMENTS)
+    has_negative_segment = bool(segment_set & DETAIL_URL_NEGATIVE_SEGMENTS)
+    query_keys = {key.lower() for key in parse_qs(parsed.query).keys()}
+    has_negative_query = bool(query_keys & DETAIL_URL_NEGATIVE_QUERY_KEYS)
+
+    if has_negative_segment and not has_positive_segment:
+        return False
+    if has_negative_query and not has_positive_segment:
+        return False
+    if has_positive_segment:
+        return True
+
+    last_segment = segments[-1]
+    if last_segment in DETAIL_URL_NEGATIVE_SEGMENTS:
+        return False
+    if re.fullmatch(r"(?:page|list|search)[-_]?\d*", last_segment):
+        return False
+    if len(last_segment) >= 12 and re.search(r"[a-z]", last_segment):
+        return True
+    if len(segments) >= 2 and re.search(r"\d", last_segment):
+        return True
+    return False
+
+
+# JP: 検索結果本文から具体物件らしさのシグナル数を数える。
+# EN: Count property-specific fact signals from a search snippet.
+def _search_result_fact_signal_count(item: dict[str, Any]) -> int:
+    snippets = [
+        str(snippet).strip()
+        for snippet in item.get("extra_snippets", []) or []
+        if str(snippet).strip()
+    ]
+    combined = " ".join(
+        part
+        for part in [
+            str(item.get("title") or ""),
+            str(item.get("description") or ""),
+            *snippets[:6],
+        ]
+        if part
+    )
+    checks = [
+        _extract_rent(combined) > 0,
+        bool(_extract_layout(combined)),
+        _extract_station_walk(combined) > 0,
+        bool(_extract_address(combined)),
+        _extract_area(combined) > 0,
+    ]
+    return sum(1 for passed in checks if passed)
+
+
+# JP: 一覧ページらしいシグナル数を数える。
+# EN: Count page-collection signals that indicate the page is not a single property detail.
+def _collection_signal_count(item: dict[str, Any], detail_html: str) -> int:
+    text = _strip_html(detail_html)
+    combined = " ".join(
+        part
+        for part in [
+            str(item.get("title") or ""),
+            str(item.get("description") or ""),
+            text[:5000],
+        ]
+        if part
+    )
+    signal_count = sum(1 for token in COLLECTION_PAGE_TOKENS if token in combined)
+    if re.search(r"(?:該当|掲載|おすすめ)[^0-9]{0,8}\d+\s*件", combined):
+        signal_count += 1
+    if len(re.findall(r"(?:賃料|家賃)[^。\n]{0,18}(?:万|円)", text)) >= 3:
+        signal_count += 1
+    if len(re.findall(r"徒歩\s*(?:約|およそ)?\s*\d{1,2}\s*分", text)) >= 3:
+        signal_count += 1
+    return signal_count
+
+
+# JP: HTMLから単一物件ページらしいシグナル数を数える。
+# EN: Count structured signals that indicate the HTML is a single property detail page.
+def _detail_page_signal_count(item: dict[str, Any], detail_html: str) -> int:
+    detail_html_lower = str(detail_html or "").lower()
+    if 'data-kind="property-detail"' in detail_html_lower:
+        return 99
+
+    text = _strip_html(detail_html)
+    json_ld_payloads = _extract_json_ld_payloads(detail_html)
+    detail_signals = [
+        bool(
+            _extract_html_field(detail_html, "building_name")
+            or _json_ld_first_text(json_ld_payloads, ("name",))
+        ),
+        bool(
+            _extract_html_field(detail_html, "address")
+            or _json_ld_address(json_ld_payloads)
+            or _extract_address(text)
+        ),
+        (
+            _extract_money_amount(_extract_html_field(detail_html, "rent"))
+            or _json_ld_price(json_ld_payloads)
+            or _extract_rent(text)
+        )
+        > 0,
+        bool(_extract_layout(_extract_html_field(detail_html, "layout") or text)),
+        (_extract_area(_extract_html_field(detail_html, "area_m2") or text) > 0),
+        (
+            _extract_station_walk(_extract_html_field(detail_html, "station_walk_min") or text) > 0
+        ),
+    ]
+    return sum(1 for passed in detail_signals if passed)
+
+
+# JP: 検索結果が単一物件ページかを判定する。
+# EN: Decide whether a search result points to one concrete property.
+def is_single_property_search_result(
+    item: dict[str, Any],
+    detail_html: str = "",
+) -> bool:
+    url = str(item.get("url") or "").strip()
+    snippets = [
+        str(snippet).strip()
+        for snippet in item.get("extra_snippets", []) or []
+        if str(snippet).strip()
+    ]
+    combined = " ".join(
+        part
+        for part in [
+            str(item.get("title") or ""),
+            str(item.get("description") or ""),
+            *snippets[:6],
+        ]
+        if part
+    )
+
+    if detail_html:
+        detail_signal_count = _detail_page_signal_count(item, detail_html)
+        collection_signal_count = _collection_signal_count(item, detail_html)
+        if detail_signal_count >= 4 and collection_signal_count == 0:
+            return True
+        if (
+            detail_signal_count >= 5
+            and collection_signal_count <= 1
+            and _search_result_fact_signal_count(item) >= 1
+        ):
+            return True
+        return False
+
+    if not _looks_like_single_property_url(url):
+        return False
+    if any(token in combined for token in COLLECTION_PAGE_TOKENS):
+        return False
+    return _search_result_fact_signal_count(item) >= 2
 
 
 # JP: compact LLM textを処理する。
@@ -1341,6 +1569,10 @@ def run_search_and_normalize(
                 detail_html = detail_fetcher(str(item["url"]))
             except Exception:
                 detail_html = None
+
+        if not is_single_property_search_result(item, detail_html or ""):
+            skipped_count += 1
+            continue
 
         prop = None
         if detail_html:

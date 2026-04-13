@@ -9,6 +9,7 @@ from app.models import ChatMessageResponse, ResearchStateResponse, UIBlock
 from app.research import HousingResearchAgentManager
 from app.services import BraveSearchClient
 from app.stages import run_final_report, run_risk_check
+from app.stages.search_normalize import is_single_property_search_result
 from app.stages.planner import _has_slot_value, run_planner
 
 MAX_RESEARCH_QUERIES = 8
@@ -369,8 +370,30 @@ class OrchestratorResearchMixin:
             url = str(prop.get("detail_url") or "")
             if not url or url in seen_urls:
                 continue
-            seen_urls.add(url)
             raw = raw_by_url.get(url, {})
+            if not is_single_property_search_result(
+                raw
+                or {
+                    "url": url,
+                    "title": prop.get("building_name", ""),
+                    "description": " ".join(
+                        part
+                        for part in [
+                            str(prop.get("address") or "").strip(),
+                            str(prop.get("layout") or "").strip(),
+                            (
+                                f"家賃{int(prop.get('rent') or 0):,}円"
+                                if int(prop.get("rent") or 0) > 0
+                                else ""
+                            ),
+                        ]
+                        if part
+                    ),
+                    "extra_snippets": list(prop.get("features", []) or [])[:3],
+                }
+            ):
+                continue
+            seen_urls.add(url)
             queries = raw.get("matched_queries", []) or []
             items.append(
                 {

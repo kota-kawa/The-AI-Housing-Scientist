@@ -8,6 +8,7 @@ from app.research.offline_eval import (
     evaluate_final_result,
     summarize_branch_failures,
 )
+from app.stages.search_normalize import is_single_property_search_result
 from app.stages.result_summarizer import PROPERTY_CANDIDATES_KEY
 
 from .agent_manager_types import (
@@ -393,6 +394,7 @@ class AgentManagerExecutionMixin:
                 continue
             label = str(summary.get("label") or artifacts.plan.label or "検索候補")
             raw_results = list(artifacts.retrieve.get("raw_results", []) or [])
+            detail_html_map = dict(artifacts.enrich.get("detail_html_map", {}) or {})
             for raw in raw_results:
                 url = str(raw.get("url") or "").strip()
                 title = str(raw.get("title") or "").strip()
@@ -401,6 +403,9 @@ class AgentManagerExecutionMixin:
                 if not url and title and title in seen_titles:
                     continue
                 if not url and not title:
+                    continue
+                detail_html = str(detail_html_map.get(url) or "")
+                if not is_single_property_search_result(raw, detail_html):
                     continue
                 # JP: エリア不一致の参考候補を除外する。
                 # EN: Skip fallback candidates that clearly don't match the target area.
