@@ -4,9 +4,14 @@ import re
 import unicodedata
 from typing import Any
 
-from app.stages.search_normalize import _split_address_levels
-
 AREA_MATCH_LEVELS = ("exact", "municipality", "nearby", "partial", "none")
+
+
+def _split_address(value: str) -> dict[str, str]:
+    """Lazy wrapper to avoid circular import with app.stages.search_normalize."""
+    from app.stages.search_normalize import _split_address_levels
+
+    return _split_address_levels(value)
 
 
 def _normalize_text(value: Any) -> str:
@@ -40,8 +45,8 @@ def classify_area_match(
     address_text = _normalize_text(address)
     area_text = _normalize_text(area_name)
     combined_text = " ".join(part for part in [address_text, area_text] if part).strip()
-    property_levels = _split_address_levels(address or area_name)
-    target_levels = _split_address_levels(target_area)
+    property_levels = _split_address(address or area_name)
+    target_levels = _split_address(target_area)
 
     target_municipality = _normalize_text(target_levels.get("municipality", ""))
     target_locality = _normalize_text(target_levels.get("locality", ""))
@@ -71,6 +76,33 @@ def classify_area_match(
             "evidence": f"住所が希望エリア {target_area} と同一市区町村内",
         }
 
+    # JP: target_area が駅名・地名（市区町村が付いていない）の場合、
+    #     住所や物件の所在地名に含まれるかをチェックして exact/municipality にする。
+    # EN: When target_area is a station/neighborhood name without municipality suffix,
+    #     check if it appears in the property's address or area_name to allow exact matching.
+    if not target_municipality and target_text:
+        # JP: 物件の市区町村名にターゲットが含まれている場合は municipality レベル。
+        # EN: If the target name appears in the property's municipality, treat as municipality match.
+        if property_municipality and target_text in _normalize_text(property_municipality):
+            return {
+                "match_level": "municipality",
+                "evidence": f"希望エリア {target_area} が物件の市区町村名に含まれる",
+            }
+        # JP: 物件の町名にターゲットが含まれている場合は exact レベル。
+        # EN: If the target name appears in the property's locality, treat as exact match.
+        if property_locality and target_text in _normalize_text(property_locality):
+            return {
+                "match_level": "exact",
+                "evidence": f"希望エリア {target_area} が物件の町名に含まれる",
+            }
+        # JP: 住所全体にターゲットが含まれるか確認。
+        # EN: Check if target appears in the full address text.
+        if address_text and target_text in address_text:
+            return {
+                "match_level": "partial",
+                "evidence": f"候補の住所内に希望エリア {target_area} の表記がある",
+            }
+
     nearby_values = [str(item).strip() for item in nearby_tokens or [] if str(item).strip()]
     if nearby_values and _match_text_tokens(combined_text, nearby_values):
         token = next(
@@ -82,7 +114,7 @@ def classify_area_match(
             "evidence": f"候補の所在地が近隣エリア {token} に一致",
         }
 
-    if _match_text_tokens(combined_text, [target_text]):
+    if target_municipality and _match_text_tokens(combined_text, [target_text]):
         return {
             "match_level": "partial",
             "evidence": f"候補内に希望エリア {target_area} の表記がある",
@@ -99,5 +131,5 @@ def classify_area_match(
 
 def is_match_allowed_for_scope(match_level: str, area_scope: str) -> bool:
     if area_scope == "nearby":
-        return match_level in {"exact", "municipality", "nearby"}
+        return match_level in {"exact", "municipality", "nearby", "partial"}
     return match_level in {"exact", "municipality"}

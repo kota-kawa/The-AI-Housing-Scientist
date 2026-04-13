@@ -134,6 +134,18 @@ class OrchestratorResearchMixin:
                 ]
             )
         else:
+            # JP: nearby スコープでもターゲットエリアを含むクエリを先頭に入れる。
+            # EN: Always include a query with the target area first, even in nearby scope.
+            queries.append(
+                _compose_query(
+                    area,
+                    listing_type_keyword,
+                    budget_fragment,
+                    layout,
+                    walk_token,
+                    must_fragment or nice_fragment,
+                )
+            )
             nearby_tokens = nearby_areas[:2] if nearby_areas else [f"{area}周辺"]
             for nearby in nearby_tokens:
                 queries.append(

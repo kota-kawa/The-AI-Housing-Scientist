@@ -14,7 +14,7 @@ DEFAULT_CATALOG_PROFILE = {
     "area_exact_bonus": 40.0,
     "area_municipality_bonus": 24.0,
     "area_partial_bonus": 12.0,
-    "area_miss_penalty": 10.0,
+    "area_miss_penalty": 35.0,
     "budget_match_bonus": 30.0,
     "budget_near_bonus": 10.0,
     "budget_far_penalty": 20.0,
@@ -361,9 +361,22 @@ class PropertyCatalogService:
         count: int = 8,
         adapter: LLMAdapter | None = None,
     ) -> list[dict[str, Any]]:
+        from app.area_matching import classify_area_match
+
         profile = _resolve_profile()
+        target_area = str(user_memory.get("target_area") or "").strip()
         scored: list[dict[str, Any]] = []
         for item in self.db.list_catalog_properties():
+            # JP: ターゲットエリアが指定されている場合、エリア不一致の物件を除外する。
+            # EN: Hard-filter properties that clearly don't match the target area.
+            if target_area:
+                area_match = classify_area_match(
+                    target_area=target_area,
+                    address=str(item.get("address") or ""),
+                    area_name=str(item.get("area_name") or ""),
+                )
+                if area_match["match_level"] == "none":
+                    continue
             score = self._score_property(item, user_memory, query, profile=profile)
             scored.append({"score": score, "item": item})
 

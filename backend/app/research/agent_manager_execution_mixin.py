@@ -364,10 +364,15 @@ class AgentManagerExecutionMixin:
         excluded_urls: set[str],
         limit: int,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        from app.area_matching import classify_area_match
+
         ranked_properties: list[dict[str, Any]] = []
         normalized_properties: list[dict[str, Any]] = []
         seen_urls = {str(url).strip() for url in excluded_urls if str(url).strip()}
         seen_titles: set[str] = set()
+        # JP: フォールバック候補もエリアチェックする。
+        # EN: Area-check fallback candidates to prevent unrelated properties from appearing.
+        target_area = str(self._active_user_memory().get("target_area") or "").strip()
         completed_summaries = sorted(
             [
                 item
@@ -397,6 +402,21 @@ class AgentManagerExecutionMixin:
                     continue
                 if not url and not title:
                     continue
+                # JP: エリア不一致の参考候補を除外する。
+                # EN: Skip fallback candidates that clearly don't match the target area.
+                if target_area:
+                    raw_address = str(raw.get("address") or "").strip()
+                    raw_area_name = str(raw.get("area_name") or "").strip()
+                    raw_description = str(raw.get("description") or "").strip()
+                    area_check_text = raw_address or raw_area_name or raw_description or title
+                    area_match = classify_area_match(
+                        target_area=target_area,
+                        address=area_check_text,
+                        area_name=raw_area_name,
+                        nearby_tokens=artifacts.plan.nearby_hints or [],
+                    )
+                    if area_match["match_level"] == "none":
+                        continue
                 property_id = (
                     str(raw.get("property_id_norm") or "").strip()
                     or f"fallback-{hashlib.sha1((url or title).encode('utf-8')).hexdigest()[:12]}"
@@ -489,8 +509,11 @@ class AgentManagerExecutionMixin:
         if len(ranked) >= MIN_DISPLAY_CANDIDATE_COUNT:
             return ranked, normalized, ""
 
-        # JP: まず別 family のランク済み候補で補完する。
-        # EN: Fill from alternative family candidates first.
+        # JP: まず別 family のランク済み候補で補完する。エリア不一致は除外する。
+        # EN: Fill from alternative family candidates first. Skip area-mismatched properties.
+        from app.area_matching import classify_area_match
+
+        target_area = str(self._active_user_memory().get("target_area") or "").strip()
         for group in alternative_display_groups:
             group_by_id = {
                 str(item.get("property_id_norm") or "").strip(): dict(item)
@@ -504,6 +527,16 @@ class AgentManagerExecutionMixin:
                 prop = group_by_id.get(property_id)
                 if prop is None:
                     continue
+                # JP: エリア不一致の候補を別ブランチから補完しない。
+                # EN: Don't fill in properties that don't match the target area.
+                if target_area:
+                    area_match = classify_area_match(
+                        target_area=target_area,
+                        address=str(prop.get("address") or ""),
+                        area_name=str(prop.get("area_name") or ""),
+                    )
+                    if area_match["match_level"] == "none":
+                        continue
                 ranked.append(dict(item))
                 normalized_by_id[property_id] = prop
                 normalized.append(prop)
