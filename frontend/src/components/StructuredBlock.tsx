@@ -900,6 +900,7 @@ function PropertyCard({
   const address = toDisplayText(item.address);
   const layout = toDisplayText(item.layout);
   const area = toDisplayText(item.area);
+  const detailUrl = toDisplayText(item.detail_url);
   const whySelected = toDisplayText(item.why_selected);
   const whyNotSelected = toDisplayText(item.why_not_selected);
   const action = (item.action as ActionDescriptor | undefined) ?? undefined;
@@ -1074,6 +1075,17 @@ function PropertyCard({
           >
             {compareSelected ? "比較対象から外す" : "比較に追加する"}
           </button>
+        )}
+
+        {detailUrl && (
+          <a
+            href={detailUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            この物件のサイトを見る
+          </a>
         )}
 
         {action && (

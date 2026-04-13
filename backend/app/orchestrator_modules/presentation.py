@@ -51,6 +51,7 @@ class OrchestratorPresentationMixin:
                 "address": prop.get("address", ""),
                 "layout": prop.get("layout", ""),
                 "area": self._format_area(prop.get("area_m2", 0)),
+                "detail_url": prop.get("detail_url") or item.get("detail_url") or "",
                 "why_selected": item.get("why_selected") or item.get("reason") or "",
                 "why_not_selected": item.get("why_not_selected")
                 or item.get("rejection_reason")
@@ -64,24 +65,6 @@ class OrchestratorPresentationMixin:
                     "label": "この物件の問い合わせ文を作成する",
                     "payload": {"property_id": property_id},
                 }
-                card["secondary_actions"] = [
-                    {
-                        "action_type": "record_property_reaction",
-                        "label": "気になる解除" if reaction_state == "favorite" else "気になる",
-                        "payload": {
-                            "property_id": property_id,
-                            "reaction": "clear" if reaction_state == "favorite" else "favorite",
-                        },
-                    },
-                    {
-                        "action_type": "record_property_reaction",
-                        "label": "除外解除" if reaction_state == "exclude" else "除外する",
-                        "payload": {
-                            "property_id": property_id,
-                            "reaction": "clear" if reaction_state == "exclude" else "exclude",
-                        },
-                    },
-                ]
             cards.append(card)
         return cards
 
