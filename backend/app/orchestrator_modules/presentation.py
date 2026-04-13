@@ -728,7 +728,7 @@ class OrchestratorPresentationMixin:
 
         # LLMで文脈依存メッセージに差し替え（失敗時はフォールバックを維持）
         try:
-            _, _, llm_config = self._ensure_session_llm_config(session_id, task_memory=task_memory)
+            guidance_user_memory, _, llm_config = self._ensure_session_llm_config(session_id, task_memory=task_memory)
             adapter = self._get_adapter_for_route(
                 llm_config=llm_config,
                 route_key="planner",
@@ -740,6 +740,7 @@ class OrchestratorPresentationMixin:
                     task_memory=task_memory,
                     user_message=message,
                     adapter=adapter,
+                    user_memory=guidance_user_memory,
                 )
                 if llm_text:
                     assistant_text = llm_text

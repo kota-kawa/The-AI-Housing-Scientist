@@ -49,12 +49,10 @@ def _llm_confirmation_items(
     deposit = int(prop.get("deposit") or 0)
     key_money = int(prop.get("key_money") or 0)
     system = (
-        "You are a Japanese rental assistant. "
-        "Propose 3 to 5 property-specific confirmation questions to ask the landlord or agent. "
-        "Focus on the unique characteristics of this specific property such as building age, "
-        "structure type, management style, floor plan details, and special clauses. "
-        "Do NOT include generic questions about vacancy, initial costs, cancellation terms, "
-        "or viewing schedules — those are already in the standard checklist."
+        "あなたは日本の賃貸物件アシスタントです。"
+        "大家や仲介業者に確認すべき、この物件固有の確認事項を3〜5個提案してください。"
+        "築年数、構造、管理方式、間取りの詳細、特約条項など、物件ごとに異なる特徴に焦点を当ててください。"
+        "空室状況、初期費用、解約条件、内見日程などの汎用的な質問は標準チェックリストに含まれているため除外してください。"
     )
     user_prompt = (
         "物件情報:\n"
@@ -183,10 +181,11 @@ def _build_llm_draft(
     confirmation_items: list[str],
 ) -> str:
     system = (
-        "You are a Japanese rental inquiry assistant. "
-        "Write a natural, concise inquiry email in Japanese. "
-        "Reflect the user's priorities and the property's characteristics. "
-        "Do not invent facts that were not provided."
+        "あなたは日本の賃貸問い合わせアシスタントです。"
+        "自然で簡潔な問い合わせメールを日本語で作成してください。"
+        "以下の構成に従ってください: 1. 挨拶 2. 問い合わせ対象物件の特定と自己紹介 "
+        "3. 確認事項の番号付きリスト 4. 結びの挨拶。"
+        "ユーザーの優先事項と物件の特徴を反映し、提供されていない情報を捏造しないでください。"
     )
     user = (
         "物件情報:\n"

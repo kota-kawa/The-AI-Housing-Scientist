@@ -22,10 +22,10 @@ def _generate_llm_resume_body(profile_summary: dict[str, Any], adapter: LLMAdapt
     stable_prefs = list(profile_summary.get("stable_preferences") or [])
     liked_features = list(profile_summary.get("liked_features") or [])
     system = (
-        "You are a friendly Japanese rental assistant. "
-        "Write a short, warm session resume message in Japanese (2–3 sentences). "
-        "Mention the user's previous search conditions naturally and ask whether they'd like to continue. "
-        "Do not use bullet points or markdown."
+        "あなたは親しみやすい日本の賃貸アシスタントです。"
+        "前回の検索条件を自然に盛り込んだ、温かいセッション再開メッセージを日本語で2〜3文で書いてください。"
+        "前回の条件を引き継ぐかどうかをユーザーに確認してください。"
+        "箇条書きやMarkdownは使わないでください。"
     )
     user_prompt = (
         "前回の検索条件:\n"
@@ -120,10 +120,10 @@ def _generate_llm_plan_presentation(
     try:
         result = adapter.generate_structured(
             system=(
-                "You are a Japanese rental planning assistant rewriting a pre-search plan for UI display. "
-                "Ground every sentence in the provided user message, extracted conditions, and draft plan. "
-                "Do not invent unsupported constraints, areas, budgets, or amenities. "
-                "Return only the requested JSON."
+                "あなたは日本の賃貸プランニングアシスタントです。検索前の計画をUI表示用に書き直します。"
+                "すべての文をユーザーメッセージ、抽出された条件、ドラフト計画に基づいて記述してください。"
+                "裏付けのない制約、エリア、予算、設備を捏造しないでください。"
+                "要求されたJSONのみを返してください。"
             ),
             user=json.dumps(prompt_payload, ensure_ascii=False, indent=2),
             schema=schema,
@@ -167,8 +167,8 @@ def _generate_response_labels(
     # status_label: ステータスとブロック数を踏まえた一言ラベル
     block_summary = ", ".join(f"{b.type}({b.title})" for b in response.blocks[:4]) or "なし"
     system = (
-        "You are a Japanese UI labeling assistant. "
-        "Return only the requested JSON with no explanation."
+        "あなたは日本語UIラベリングアシスタントです。"
+        "説明なしで、要求されたJSONのみを返してください。"
     )
     schema = {
         "type": "object",
@@ -211,6 +211,7 @@ def _generate_llm_guidance_message(
     task_memory: dict[str, Any],
     user_message: str,
     adapter: LLMAdapter,
+    user_memory: dict[str, Any] | None = None,
 ) -> str:
     """タスク状態を踏まえた文脈依存のガイダンスメッセージをLLMで生成する。"""
     status = str(task_memory.get("status") or "")
@@ -229,12 +230,24 @@ def _generate_llm_guidance_message(
         context_lines.append(f"- 前回の候補: {len(ranked)}件保持中")
     if last_error:
         context_lines.append(f"- 直前のエラー: {last_error[:80]}")
+    if user_memory:
+        area = str(user_memory.get("target_area") or "").strip()
+        budget = int(user_memory.get("budget_max") or 0)
+        layout = str(user_memory.get("layout_preference") or "").strip()
+        conditions = []
+        if area:
+            conditions.append(f"エリア: {area}")
+        if budget > 0:
+            conditions.append(f"予算上限: {budget:,}円")
+        if layout:
+            conditions.append(f"間取り: {layout}")
+        if conditions:
+            context_lines.append(f"- ユーザー条件: {' / '.join(conditions)}")
 
     system = (
-        "You are a friendly Japanese rental assistant. "
-        "Write a short, actionable guidance message in Japanese (1–2 sentences) "
-        "telling the user what they can do next based on the current session state. "
-        "Be specific. Do not use bullet points."
+        "あなたは親しみやすい日本の賃貸アシスタントです。"
+        "現在のセッション状態に基づき、ユーザーが次にできることを日本語1〜2文で具体的に案内してください。"
+        "箇条書きは使わないでください。"
     )
     user_prompt = (
         "セッション状態:\n" + "\n".join(context_lines) + "\n"

@@ -11,46 +11,46 @@ from app.stages.result_summarizer import (
     PROPERTY_CANDIDATES_KEY,
 )
 
-final_report_system_msg = """You are a Japanese rental research analyst.
-You are given a compact research journal for one completed apartment search.
-Your task is to produce a clear markdown report that explains:
-- how the exploration proceeded,
-- why the selected branch was chosen,
-- how the shortlisted properties compare,
-- what risks remain,
-- which property is recommended and why.
+final_report_system_msg = """あなたは日本の賃貸物件調査アナリストです。
+1件のマンション検索に関する調査ジャーナルが与えられます。
+以下を説明する明瞭なMarkdownレポートを作成してください:
+- 探索がどのように進行したか
+- 選択されたブランチが選ばれた理由
+- 候補物件の比較
+- 残存するリスク
+- 推薦物件とその根拠
 
-Important instructions:
-- Use only the provided facts.
-- Do not invent candidates, metrics, or conditions.
-- Keep the report decision-oriented and easy to reuse as an internal memo or customer-facing explanation.
+重要な指示:
+- 提供された事実のみを使用してください。
+- 候補、指標、条件を捏造しないでください。
+- 意思決定に直結する内容にし、社内メモや顧客向け説明として再利用しやすい形にしてください。
 """
 
-final_report_prompt = """You are given:
+final_report_prompt = """以下が与えられます:
 
-1) Stage-level journal summaries:
+1) ステージレベルのジャーナル要約:
 {stage_nodes}
 
-2) Nodes on the selected branch:
+2) 選択されたブランチのノード:
 {selected_branch_nodes}
 
-3) A draft markdown report:
+3) ドラフトMarkdownレポート:
 {draft_report}
 
-Write a final markdown report with the following sections in this order:
+以下のセクションをこの順序で含む最終Markdownレポートを作成してください:
 1. 探索経路
 2. 候補比較表
 3. リスク
 4. 推奨物件と根拠
 5. 追加調査の提案
 
-Requirements:
-- Keep headings in Japanese.
-- The comparison section must include a markdown table.
-- If information is missing, state that clearly instead of guessing.
-- If there are no recommendation-ready candidates, state "推奨物件なし" and do not recommend a relative best property.
-- Reuse the draft when it is already correct, but improve flow and clarity.
-- Do NOT include any markdown image tags (![...](...)). Property images are already shown in the recommendation candidates section.
+要件:
+- 見出しは日本語にしてください。
+- 候補比較セクションにはMarkdownテーブルを含めてください。
+- 情報が不足している場合は推測せず、不足していることを明記してください。
+- 推薦に十分な候補がない場合は「推奨物件なし」と記載し、相対的なベスト物件の推薦はしないでください。
+- ドラフトが正確な場合はそのまま活用し、流れと明瞭さを改善してください。
+- 推奨物件セクションでは、image_url がある候補物件にMarkdown画像タグ（![物件名](image_url)）を含めてください。
 """
 
 

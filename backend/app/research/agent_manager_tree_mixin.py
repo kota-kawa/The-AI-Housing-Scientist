@@ -110,9 +110,9 @@ class AgentManagerTreeMixin:
         try:
             result = self.research_adapter.generate_structured(
                 system=(
-                    "You are proposing safe Japanese rental search query refinements. "
-                    "Return at most two concise query suggestions grounded in the provided conditions. "
-                    "Do not include site names or unsafe scraping instructions."
+                    "あなたは日本の賃貸検索クエリの改善を提案するアシスタントです。"
+                    "提供された条件に基づいた簡潔なクエリ候補を最大2件返してください。"
+                    "サイト名やスクレイピング指示は含めないでください。"
                 ),
                 user=json.dumps(
                     {

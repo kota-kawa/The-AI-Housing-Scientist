@@ -379,16 +379,16 @@ def _build_llm_ranking_enhancements(
             "why_selected は 1-2文の自然な日本語で、主な魅力を具体的に述べる",
             "why_not_selected は 1-2文の自然な日本語で、懸念点や未確認点を具体的に述べる",
             "与えられていない設備・条件は推測しない",
-            "examples の input.property は properties の1件、output は assessments の1件に対応する",
-            "examples は比較根拠の書き方の見本として扱い、同じ慎重さで理由を書く",
+            "examples は1物件ごとの評価の書き方を示す few-shot 見本であり、match_level の判定基準・evidence の粒度・理由文の長さを揃えること",
+            "examples と同等の慎重さで全物件を評価し、根拠がない条件には none を付けること",
         ],
         "examples": ranking_examples,
     }
     result = adapter.generate_structured(
         system=(
-            "You are a Japanese rental ranking assistant. "
-            "Judge each nice-to-have condition only from explicit evidence in the property text. "
-            "Then rewrite the selection reasons into natural Japanese without inventing facts."
+            "あなたは日本の賃貸物件ランキングアシスタントです。"
+            "各「あると良い条件」を物件テキスト中の明示的な根拠のみで判定してください。"
+            "選定理由を自然な日本語で書き直し、記載のない情報は推測しないでください。"
         ),
         user=json.dumps(payload, ensure_ascii=False, indent=2),
         schema=schema,

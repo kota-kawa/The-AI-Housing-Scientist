@@ -130,9 +130,12 @@ def _build_llm_risk_result(source_text: str, adapter: LLMAdapter) -> dict[str, A
     }
     result = adapter.generate_structured(
         system=(
-            "You are a Japanese rental contract risk analyst. "
-            "Extract concrete risks from the provided contract text. "
-            "Do not invent clauses that do not appear in the source."
+            "あなたは日本の賃貸契約リスクアナリストです。"
+            "提供された契約条項テキストから具体的なリスクを抽出してください。"
+            "特に以下の観点を重点的に確認してください: "
+            "更新料（金額・頻度）、短期解約違約金（適用期間・金額）、"
+            "解約予告期間（期限・条件）、保証会社条件（保証料・連帯保証人要件）。"
+            "原文に記載のない条項は捏造しないでください。"
         ),
         user=f"契約条項テキスト:\n{source_text}",
         schema=schema,

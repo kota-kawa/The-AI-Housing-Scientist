@@ -16,33 +16,33 @@ MAX_CANDIDATES = 5
 MAX_REJECTIONS = 8
 MAX_OPEN_QUESTIONS = 6
 
-result_summarizer_sys_msg = """You are an expert Japanese rental research analyst.
-You are given outputs from multiple tree-search nodes that belong to the same search branch.
-Your task is to compress them into a factual branch summary that is useful for later ranking and decision making.
+result_summarizer_sys_msg = """あなたは日本の賃貸物件調査の専門アナリストです。
+同一検索ブランチに属する複数のツリー検索ノードの出力が与えられます。
+これらを、後続のランキングと意思決定に役立つ事実ベースのブランチ要約に圧縮してください。
 
-Important instructions:
-- Do NOT hallucinate or invent information that does not appear in the node outputs.
-- Merge repeated properties across nodes instead of repeating them.
-- Prefer explicit evidence from normalized properties, ranked reasons, search snippets, and detail-page excerpts.
-- If something is still unclear, move it to unresolved questions instead of guessing.
+重要な指示:
+- ノード出力に存在しない情報を捏造・推測しないでください。
+- 複数ノードで重複する物件は統合し、繰り返さないでください。
+- 正規化物件、ランキング理由、検索スニペット、詳細ページ抜粋からの明示的な根拠を優先してください。
+- 不明確な点は推測せず、未解決の調査項目に回してください。
 """
 
-branch_result_aggregate_prompt = """You are given:
+branch_result_aggregate_prompt = """以下が与えられます:
 
-1) A draft compressed summary of one search branch:
+1) あるブランチの圧縮要約ドラフト:
 {draft_summary}
 
-2) Compacted outputs from multiple nodes in the same branch:
+2) 同ブランチ内の複数ノードの圧縮出力:
 {branch_nodes}
 
-Your task is to produce an updated branch summary for downstream stages.
+後続ステージ向けに更新されたブランチ要約を作成してください。
 
-Requirements:
-1. Preserve useful candidate facts from the draft summary when they are supported by the node outputs.
-2. Merge repeated candidates and repeated risks across nodes.
-3. Keep only the most decision-relevant candidates and rejection reasons.
-4. If evidence is weak or incomplete, keep the candidate concise and list the missing verification in unresolved questions.
-5. Return only valid JSON that matches the required schema.
+要件:
+1. ドラフト要約の候補情報は、ノード出力で裏付けがある場合に保持する。
+2. 複数ノードで重複する候補・リスクは統合する。
+3. 意思決定に最も関連する候補と却下理由のみを残す。
+4. 根拠が弱い・不完全な場合は候補を簡潔にし、不足する検証項目を未解決の調査項目に記載する。
+5. 指定されたスキーマに合致する有効なJSONのみを返す。
 """
 
 

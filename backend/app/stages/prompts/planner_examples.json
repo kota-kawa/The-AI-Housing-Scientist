@@ -84,7 +84,6 @@
         "station_walk_max": null,
         "move_in_date": null,
         "layout_preference": null,
-        "listing_type": "賃貸",
         "must_conditions": ["RC造"],
         "nice_to_have": []
       },
@@ -154,7 +153,6 @@
         "station_walk_max": 10,
         "move_in_date": null,
         "layout_preference": "1LDK",
-        "listing_type": "賃貸",
         "must_conditions": ["2階以上"],
         "nice_to_have": ["独立洗面台"]
       },
