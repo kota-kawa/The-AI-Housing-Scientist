@@ -10,6 +10,16 @@ INITIAL_DISPLAY_CANDIDATE_LIMIT = 6
 
 
 class OrchestratorPresentationMixin:
+    @staticmethod
+    def _branch_family_label(branch_family: str) -> str:
+        labels = {
+            "strict_primary": "strict候補",
+            "strict_relaxed": "条件緩和候補",
+            "nearby_primary": "近隣候補",
+            "nearby_relaxed": "近隣+条件緩和候補",
+        }
+        return labels.get(str(branch_family or "").strip(), str(branch_family or "").strip())
+
     # JP: property cardsを構築する。
     # EN: Build property cards.
     def _build_property_cards(
@@ -292,6 +302,7 @@ class OrchestratorPresentationMixin:
                 rows.append(
                     {
                         "branch": label,
+                        "family": self._branch_family_label(str(item.get("branch_family") or "")),
                         "depth": int(item.get("depth") or 0),
                         "score": float(item.get("branch_score") or 0.0),
                         "frontier_score": float(item.get("frontier_score") or 0.0),
@@ -308,6 +319,7 @@ class OrchestratorPresentationMixin:
                     content={
                         "columns": [
                             "branch",
+                            "family",
                             "depth",
                             "score",
                             "frontier_score",
@@ -317,6 +329,26 @@ class OrchestratorPresentationMixin:
                             "summary",
                         ],
                         "rows": rows,
+                    },
+                )
+            )
+
+        alternative_display_groups = task_memory.get("alternative_display_groups") or []
+        for group in alternative_display_groups[:3]:
+            blocks.append(
+                UIBlock(
+                    type="cards",
+                    title=f"別枠候補: {self._branch_family_label(str(group.get('branch_family') or ''))}",
+                    content={
+                        "compare_enabled": False,
+                        "items": self._build_property_cards(
+                            ranked_properties=list(group.get("ranked_properties") or []),
+                            normalized_properties=list(group.get("normalized_properties") or []),
+                            selectable=True,
+                            property_reactions=self._get_property_reactions(task_memory),
+                            max_items=3,
+                        ),
+                        "body": f"{str(group.get('label') or '').strip()} で見つかった別枠候補です。",
                     },
                 )
             )
@@ -380,6 +412,30 @@ class OrchestratorPresentationMixin:
                             f"{failure_summary.get('summary', '')}\n"
                             f"主な課題: {' / '.join(failure_summary.get('top_issues', [])[:3])}\n"
                             f"改善候補: {' / '.join(failure_summary.get('recommendations', [])[:3])}"
+                        )
+                    },
+                )
+            )
+
+        family_failure_summary = task_memory.get("family_failure_summary") or {}
+        for family in [
+            "strict_primary",
+            "strict_relaxed",
+            "nearby_primary",
+            "nearby_relaxed",
+        ]:
+            family_summary = family_failure_summary.get(family) or {}
+            if not family_summary or not family_summary.get("top_issues"):
+                continue
+            blocks.append(
+                UIBlock(
+                    type="warning",
+                    title=f"改善余地: {self._branch_family_label(family)}",
+                    content={
+                        "body": (
+                            f"{family_summary.get('summary', '')}\n"
+                            f"主な課題: {' / '.join(family_summary.get('top_issues', [])[:3])}\n"
+                            f"改善候補: {' / '.join(family_summary.get('recommendations', [])[:3])}"
                         )
                     },
                 )

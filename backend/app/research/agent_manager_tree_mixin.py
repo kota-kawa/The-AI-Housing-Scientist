@@ -11,6 +11,7 @@ from typing import Any
 
 from app.research.journal import ResearchIntent
 from app.research.offline_eval import (
+    BRANCH_FAMILY_PRIORITY,
     branch_selection_sort_key,
     evaluate_branch,
     evaluate_final_result,
@@ -151,6 +152,9 @@ class AgentManagerTreeMixin:
         base_queries: list[str],
         operator: str,
         user_memory: dict[str, Any],
+        area_scope: str,
+        constraint_mode: str,
+        nearby_hints: list[str] | None = None,
     ) -> list[str]:
         area = str(user_memory.get("target_area") or "").strip()
         layout = str(user_memory.get("layout_preference") or "").strip()
@@ -167,82 +171,66 @@ class AgentManagerTreeMixin:
             for item in user_memory.get("nice_to_have", []) or []
             if str(item).strip()
         ]
+        family_queries = self.build_branch_family_queries(
+            user_memory,
+            base_queries,
+            area_scope=area_scope,
+            constraint_mode=constraint_mode,
+        )
+        nearby_hints = [str(item).strip() for item in nearby_hints or [] if str(item).strip()]
+        location_tokens = nearby_hints[:2] if area_scope == "nearby" and nearby_hints else [area]
+        location_text = " ".join(token for token in location_tokens if token).strip() or area
+        budget_token = f"{int(budget / 10000)}万円" if budget else ""
+        walk_token = f"徒歩{walk}分" if walk else ""
+        core_must = " ".join(must_conditions[:2]).strip() if constraint_mode == "primary" else ""
+        core_nice = " ".join(nice_to_have[:2]).strip()
 
-        strict_area_operators = {
-            "tighten_match",
-            "relax_for_coverage",
-            "source_diversify",
-            "detail_first",
-            "schema_first",
-            "exploit_best",
-        }
-        queries = [] if operator in strict_area_operators else list(base_queries)
-        if operator == "tighten_match":
-            queries.extend(
-                [
-                    self._compose_query(area, layout, " ".join(must_conditions[:2]), lt),
-                    self._compose_query(
-                        area, layout, f"{int(budget / 10000)}万円" if budget else "", lt
-                    ),
-                    self._compose_query(area, layout, f"徒歩{walk}分" if walk else "", lt),
-                ]
-            )
-        elif operator == "relax_for_coverage":
-            queries.extend(
-                [
-                    self._compose_query(area, lt),
-                    self._compose_query(area, "住みやすい", lt),
-                    self._compose_query(area, " ".join(nice_to_have[:2]), lt),
-                ]
-            )
-        elif operator == "source_diversify":
-            lt_info = f"{lt}情報" if lt else "物件情報"
-            queries.extend(
-                [
-                    self._compose_query(area, layout, lt_info),
-                    self._compose_query(area, layout, "募集", lt),
-                    self._compose_query(area, "不動産", lt),
-                ]
-            )
-        elif operator == "detail_first":
-            queries.extend(
-                [
-                    self._compose_query(
-                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "設備", lt
-                    ),
-                    self._compose_query(area, layout, "詳細", lt),
-                    self._compose_query(area, "初期費用", lt),
-                ]
-            )
-        elif operator == "schema_first":
-            queries.extend(
-                [
-                    self._compose_query(area, layout, "設備", lt),
-                    self._compose_query(area, layout, "間取り", lt),
-                    self._compose_query(area, "徒歩", lt),
-                ]
-            )
-        elif operator == "exploit_best":
-            queries.extend(
-                [
-                    self._compose_query(
-                        area, layout, f"{int(budget / 10000)}万円" if budget else "", "駅近", lt
-                    ),
-                    self._compose_query(area, layout, "候補", lt),
-                ]
-            )
-        elif operator == "explore_adjacent":
-            queries.extend(
-                [
-                    self._compose_query(area, " ".join(nice_to_have[:2]), "住みやすい", lt),
-                    self._compose_query(area, layout, "広め", lt),
-                ]
-            )
+        if operator in {
+            "strict_primary",
+            "strict_relaxed",
+            "nearby_primary",
+            "nearby_relaxed",
+        }:
+            queries = list(family_queries)
+        else:
+            queries = list(base_queries or family_queries)
+            if operator == "source_diversify":
+                lt_info = f"{lt}情報" if lt else "物件情報"
+                queries.extend(
+                    [
+                        self._compose_query(location_text, layout, lt_info),
+                        self._compose_query(location_text, layout, "募集", lt),
+                        self._compose_query(location_text, "不動産", lt),
+                    ]
+                )
+            elif operator == "detail_first":
+                queries.extend(
+                    [
+                        self._compose_query(location_text, layout, budget_token, "設備", lt),
+                        self._compose_query(location_text, layout, "詳細", lt),
+                        self._compose_query(location_text, "初期費用", lt),
+                    ]
+                )
+            elif operator == "schema_first":
+                queries.extend(
+                    [
+                        self._compose_query(location_text, layout, "設備", lt),
+                        self._compose_query(location_text, layout, "間取り", lt),
+                        self._compose_query(location_text, walk_token or "徒歩", lt),
+                    ]
+                )
+            elif operator == "exploit_best":
+                queries.extend(
+                    [
+                        self._compose_query(location_text, layout, budget_token, walk_token, lt),
+                        self._compose_query(location_text, layout, core_must, core_nice, lt),
+                    ]
+                )
 
         queries.extend(
             self._llm_query_suggestions(
                 operator=operator,
-                base_queries=queries[:4],
+                base_queries=(queries or family_queries)[:4],
                 user_memory=user_memory,
             )
         )
@@ -255,34 +243,33 @@ class AgentManagerTreeMixin:
         *,
         base_profile: dict[str, Any],
         operator: str,
+        area_scope: str,
+        constraint_mode: str,
     ) -> dict[str, Any]:
-        if operator == "tighten_match":
-            return self._merge_ranking_profile(
-                base_profile,
+        profile = dict(base_profile)
+        if area_scope == "nearby":
+            profile = self._merge_ranking_profile(
+                profile,
                 {
-                    "budget_match_bonus": 28.0,
-                    "station_match_bonus": 18.0,
-                    "layout_match_bonus": 14.0,
-                    "rent_missing_penalty": 18.0,
-                    "station_missing_penalty": 8.0,
-                    "layout_missing_penalty": 7.0,
+                    "area_match_bonus": 12.0,
+                    "area_municipality_bonus": 8.0,
+                    "area_nearby_bonus": 18.0,
+                    "area_partial_bonus": 4.0,
+                    "area_miss_penalty": 30.0,
                 },
             )
-        if operator == "relax_for_coverage":
-            return self._merge_ranking_profile(
-                base_profile,
+        if constraint_mode == "relaxed":
+            profile = self._merge_ranking_profile(
+                profile,
                 {
                     "budget_near_bonus": 8.0,
                     "budget_far_penalty": 12.0,
                     "station_far_penalty": 6.0,
-                    "rent_missing_penalty": 10.0,
-                    "station_missing_penalty": 4.0,
-                    "layout_missing_penalty": 4.0,
                 },
             )
         if operator == "detail_first":
             return self._merge_ranking_profile(
-                base_profile,
+                profile,
                 {
                     "rent_missing_penalty": 24.0,
                     "station_missing_penalty": 12.0,
@@ -291,34 +278,36 @@ class AgentManagerTreeMixin:
             )
         if operator == "schema_first":
             return self._merge_ranking_profile(
-                base_profile,
+                profile,
                 {
                     "rent_missing_penalty": 28.0,
                     "station_missing_penalty": 16.0,
                     "layout_missing_penalty": 16.0,
                 },
             )
-        if operator == "explore_adjacent":
+        if operator == "exploit_best":
             return self._merge_ranking_profile(
-                base_profile,
+                profile,
                 {
-                    "budget_far_penalty": 10.0,
-                    "station_far_penalty": 4.0,
+                    "budget_match_bonus": 28.0,
+                    "station_match_bonus": 18.0,
+                    "layout_match_bonus": 14.0,
                 },
             )
-        return dict(base_profile)
+        return profile
 
     # JP: operator labelを処理する。
     # EN: Process operator label.
     def _operator_label(self, operator: str) -> str:
         labels = {
-            "tighten_match": "条件厳格化",
-            "relax_for_coverage": "候補拡張",
+            "strict_primary": "strict条件",
+            "strict_relaxed": "条件緩和",
+            "nearby_primary": "近隣候補",
+            "nearby_relaxed": "近隣+条件緩和",
             "source_diversify": "情報源分散",
             "detail_first": "詳細優先",
             "schema_first": "項目充足優先",
             "exploit_best": "有望条件の深掘り",
-            "explore_adjacent": "近傍条件の探索",
         }
         return labels.get(operator, operator)
 
@@ -326,22 +315,28 @@ class AgentManagerTreeMixin:
     # EN: Process operator description.
     def _operator_description(self, operator: str) -> str:
         descriptions = {
-            "tighten_match": "must 条件と予算一致度を強める探索",
-            "relax_for_coverage": "候補数と詳細補完率を回復する探索",
+            "strict_primary": "対象エリア固定・must維持で主候補を探す探索",
+            "strict_relaxed": "対象エリア固定・条件緩和で代替候補を探す探索",
+            "nearby_primary": "近隣エリアで must 条件を維持した候補探索",
+            "nearby_relaxed": "近隣エリアで条件を緩めた候補探索",
             "source_diversify": "異なる検索表現で情報源の多様性を増やす探索",
             "detail_first": "詳細ページ取得率を優先する探索",
             "schema_first": "家賃・徒歩・間取りの取得率を優先する探索",
             "exploit_best": "有望な条件組み合わせを深掘りする探索",
-            "explore_adjacent": "周辺条件に寄せて近傍探索する探索",
         }
         return descriptions.get(operator, "探索ノード")
 
     # JP: operator intentを処理する。
     # EN: Process operator intent.
     def _operator_intent(self, operator: str) -> ResearchIntent:
-        if operator in {"relax_for_coverage", "source_diversify", "explore_adjacent"}:
+        if operator in {"strict_relaxed", "nearby_primary", "nearby_relaxed", "source_diversify"}:
             return "pivot"
-        if operator in {"tighten_match", "detail_first", "schema_first", "exploit_best"}:
+        if operator in {
+            "strict_primary",
+            "detail_first",
+            "schema_first",
+            "exploit_best",
+        }:
             return "refine"
         return "refine"
 
@@ -378,15 +373,7 @@ class AgentManagerTreeMixin:
     # JP: available tree operatorsを処理する。
     # EN: Process available tree operators.
     def _available_tree_operators(self) -> list[str]:
-        return [
-            "tighten_match",
-            "relax_for_coverage",
-            "source_diversify",
-            "detail_first",
-            "schema_first",
-            "explore_adjacent",
-            "exploit_best",
-        ]
+        return ["source_diversify", "detail_first", "schema_first", "exploit_best"]
 
     # JP: operators for issue hintsを処理する。
     # EN: Process operators for issue hints.
@@ -394,77 +381,94 @@ class AgentManagerTreeMixin:
         joined = " / ".join(str(item).strip() for item in issues if str(item).strip())
         operators: list[str] = []
         if "検索結果" in joined:
-            operators.extend(["source_diversify", "relax_for_coverage", "explore_adjacent"])
+            operators.extend(["source_diversify", "detail_first"])
         if "詳細ページ補完率" in joined:
             operators.extend(["detail_first", "schema_first"])
         if "欠損" in joined:
-            operators.extend(["schema_first", "tighten_match"])
+            operators.extend(["schema_first", "detail_first"])
         if "条件一致度" in joined:
-            operators.extend(["tighten_match", "relax_for_coverage"])
+            operators.extend(["exploit_best", "source_diversify"])
         if "情報源" in joined:
-            operators.extend(["source_diversify", "relax_for_coverage"])
+            operators.extend(["source_diversify", "detail_first"])
         deduped: list[str] = []
         for operator in operators:
             if operator not in deduped:
                 deduped.append(operator)
         return deduped
 
-    # JP: initial operatorsを処理する。
-    # EN: Process initial operators.
-    def _initial_operators(self) -> list[str]:
-        catalog = self._available_tree_operators()
-        catalog_set = set(catalog)
-        strategy_memory = self._strategy_memory()
-        preferred = [
-            str(tag).strip()
-            for tag in strategy_memory.get("preferred_strategy_tags", []) or []
-            if str(tag).strip() in catalog_set
-        ]
-        avoided = {
-            str(tag).strip()
-            for tag in strategy_memory.get("avoided_strategy_tags", []) or []
-            if str(tag).strip() in catalog_set
+    # JP: nearby hintsをクエリから抽出する。
+    # EN: Extract nearby hints from family queries.
+    def _nearby_hints_from_queries(
+        self,
+        queries: list[str],
+        *,
+        user_memory: dict[str, Any],
+    ) -> list[str]:
+        target_area = str(user_memory.get("target_area") or "").strip()
+        blocked = {
+            target_area,
+            str(user_memory.get("listing_type") or "").strip(),
+            str(user_memory.get("layout_preference") or "").strip(),
+            "賃貸",
+            "売買",
+            "住みやすい",
+            "物件情報",
+            "情報",
+            "募集",
+            "不動産",
+            "設備",
+            "詳細",
+            "初期費用",
+            "間取り",
+            "徒歩",
+            "駅近",
+            "候補",
         }
-        last_successful_path = [
-            str(tag).strip()
-            for tag in strategy_memory.get("last_successful_path", []) or []
-            if str(tag).strip() in catalog_set and str(tag).strip() not in avoided
-        ]
-        retry_driven = [
-            operator
-            for operator in self._operators_for_issue_hints(
-                list(self._retry_context().get("top_issues", []) or [])
-            )
-            if operator in catalog_set and operator not in avoided
-        ]
-        ordered: list[str] = []
-        if last_successful_path:
-            ordered.append(last_successful_path[0])
-        ordered.extend(tag for tag in preferred if tag not in avoided)
-        ordered.extend(retry_driven)
-        ordered.extend(last_successful_path[1:])
-        ordered.extend(operator for operator in catalog if operator not in avoided)
+        hints: list[str] = []
+        for query in queries:
+            for token in [str(item).strip() for item in str(query or "").split() if str(item).strip()]:
+                if token in blocked:
+                    continue
+                if "万円" in token or "徒歩" in token or any(char.isdigit() for char in token):
+                    continue
+                if token not in hints:
+                    hints.append(token)
+        return hints[:3]
 
-        deduped: list[str] = []
-        for operator in ordered:
-            if operator and operator not in deduped:
-                deduped.append(operator)
-        count = self._initial_operator_count()
-        if deduped:
-            return deduped[:count]
-        return catalog[:count]
+    # JP: initial branch familiesを処理する。
+    # EN: Process initial branch families.
+    def _initial_branch_families(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "operator": "strict_primary",
+                "branch_family": "strict_primary",
+                "area_scope": "strict",
+                "constraint_mode": "primary",
+            },
+            {
+                "operator": "strict_relaxed",
+                "branch_family": "strict_relaxed",
+                "area_scope": "strict",
+                "constraint_mode": "relaxed",
+            },
+            {
+                "operator": "nearby_primary",
+                "branch_family": "nearby_primary",
+                "area_scope": "nearby",
+                "constraint_mode": "primary",
+            },
+            {
+                "operator": "nearby_relaxed",
+                "branch_family": "nearby_relaxed",
+                "area_scope": "nearby",
+                "constraint_mode": "relaxed",
+            },
+        ]
 
-    # JP: initial operator countを処理する。
-    # EN: Process initial operator count.
-    def _initial_operator_count(self) -> int:
-        user_memory = self._active_user_memory()
-        retry = self._retry_context()
-        score = 0
-        score += min(3, len(user_memory.get("must_conditions", []) or []))
-        score += min(2, len(user_memory.get("nice_to_have", []) or []))
-        score += 2 if retry.get("top_issues") else 0
-        score += 1 if not user_memory.get("budget_max") else 0
-        return max(2, min(5, 2 + score // 2))
+    # JP: family labelを処理する。
+    # EN: Process family label.
+    def _family_label(self, branch_family: str) -> str:
+        return self._operator_label(branch_family)
 
     # JP: candidate node input payloadを処理する。
     # EN: Process candidate node input payload.
@@ -475,6 +479,9 @@ class AgentManagerTreeMixin:
             "description": plan.description,
             "queries": plan.queries,
             "strategy_tags": plan.strategy_tags,
+            "branch_family": plan.branch_family,
+            "area_scope": plan.area_scope,
+            "constraint_mode": plan.constraint_mode,
             "depth": plan.depth,
             "intent": plan.intent,
             "debug_depth": plan.debug_depth,
@@ -486,6 +493,7 @@ class AgentManagerTreeMixin:
         self,
         *,
         operator: str,
+        branch_family: str,
         depth: int,
         parent_summary: dict[str, Any] | None,
     ) -> float:
@@ -498,15 +506,13 @@ class AgentManagerTreeMixin:
         retry_issues = set(self._retry_context().get("top_issues", []) or [])
 
         tag_bonus = {
-            "tighten_match": 4.0,
-            "relax_for_coverage": 3.0,
             "source_diversify": 3.0,
             "detail_first": 4.0,
             "schema_first": 4.0,
             "exploit_best": 5.0,
-            "explore_adjacent": 3.0,
         }.get(operator, 0.0)
-        score = base + tag_bonus
+        family_bonus = BRANCH_FAMILY_PRIORITY.get(branch_family, 0) * 2.5
+        score = base + tag_bonus + family_bonus
         if operator in preferred:
             score += 4.0
         if operator in avoided:
@@ -526,6 +532,9 @@ class AgentManagerTreeMixin:
         state: ResearchExecutionState,
         *,
         operator: str,
+        branch_family: str,
+        area_scope: str,
+        constraint_mode: str,
         base_queries: list[str],
         base_profile: dict[str, Any],
         parent_key: str | None,
@@ -534,24 +543,44 @@ class AgentManagerTreeMixin:
         extra_tags: list[str] | None = None,
         parent_summary: dict[str, Any] | None = None,
     ) -> SearchNodePlan:
-        strategy_tags = [operator] + [
+        strategy_tags = [branch_family, operator] + [
             str(tag).strip()
             for tag in extra_tags or []
-            if str(tag).strip() and str(tag).strip() != operator
+            if str(tag).strip()
+            and str(tag).strip() not in {operator, branch_family}
         ]
+        queries = self._queries_for_operator(
+            base_queries=base_queries,
+            operator=operator,
+            user_memory=self._active_user_memory(),
+            area_scope=area_scope,
+            constraint_mode=constraint_mode,
+        )
+        nearby_hints = (
+            self._nearby_hints_from_queries(queries, user_memory=self._active_user_memory())
+            if area_scope == "nearby"
+            else []
+        )
+        if operator == branch_family:
+            label = self._family_label(branch_family)
+            description = self._operator_description(branch_family)
+        else:
+            label = f"{self._family_label(branch_family)} / {self._operator_label(operator)}"
+            description = (
+                f"{self._operator_description(branch_family)} / "
+                f"{self._operator_description(operator)}"
+            )
         intent = self._intent_for_child_plan(operator=operator, parent_summary=parent_summary)
         return SearchNodePlan(
             node_key=self._next_node_key(state, operator, depth),
-            label=self._operator_label(operator),
-            description=self._operator_description(operator),
-            queries=self._queries_for_operator(
-                base_queries=base_queries,
-                operator=operator,
-                user_memory=self._active_user_memory(),
-            ),
+            label=label,
+            description=description,
+            queries=queries,
             ranking_profile=self._profile_for_operator(
                 base_profile=base_profile,
                 operator=operator,
+                area_scope=area_scope,
+                constraint_mode=constraint_mode,
             ),
             strategy_tags=self._dedupe_queries(strategy_tags, limit=6),
             depth=depth,
@@ -559,32 +588,30 @@ class AgentManagerTreeMixin:
             parent_node_id=parent_node_id,
             intent=intent,
             debug_depth=self._debug_depth_for_child_plan(parent_summary),
+            branch_family=branch_family,
+            area_scope=area_scope,
+            constraint_mode=constraint_mode,
+            nearby_hints=nearby_hints,
         )
 
     # JP: initial node plansを処理する。
     # EN: Process initial node plans.
     def _initial_node_plans(self, state: ResearchExecutionState) -> list[SearchNodePlan]:
-        user_memory = self._active_user_memory()
         seed_queries = self.seed_queries_for_search(state)
-        base_queries = self.build_research_queries(user_memory, seed_queries)
-        strategy_memory = self._strategy_memory()
-        extra_tags = [
-            str(tag).strip()
-            for tag in strategy_memory.get("last_successful_path", []) or []
-            if str(tag).strip()
-        ]
         return [
             self._make_node_plan(
                 state,
-                operator=operator,
-                base_queries=base_queries,
+                operator=family["operator"],
+                branch_family=family["branch_family"],
+                area_scope=family["area_scope"],
+                constraint_mode=family["constraint_mode"],
+                base_queries=seed_queries,
                 base_profile={},
                 parent_key=None,
                 parent_node_id=state.root_node.id if state.root_node else None,
                 depth=1,
-                extra_tags=extra_tags,
             )
-            for operator in self._initial_operators()
+            for family in self._initial_branch_families()
         ]
 
     # JP: seed queries for searchを処理する。
@@ -623,6 +650,9 @@ class AgentManagerTreeMixin:
         payload = {
             "node_key": plan.node_key,
             "label": plan.label,
+            "branch_family": plan.branch_family,
+            "area_scope": plan.area_scope,
+            "constraint_mode": plan.constraint_mode,
             "depth": plan.depth,
             "strategy_tags": plan.strategy_tags,
             "intent": plan.intent,
@@ -692,7 +722,8 @@ class AgentManagerTreeMixin:
             return
 
         frontier_score = self._estimate_frontier_score(
-            operator=plan.strategy_tags[0] if plan.strategy_tags else plan.label,
+            operator=plan.strategy_tags[1] if len(plan.strategy_tags) > 1 else plan.branch_family,
+            branch_family=plan.branch_family,
             depth=plan.depth,
             parent_summary=parent_summary,
         )
@@ -726,6 +757,9 @@ class AgentManagerTreeMixin:
                 "is_failed": False,
                 "debug_depth": plan.debug_depth,
                 "strategy_tags": plan.strategy_tags,
+                "branch_family": plan.branch_family,
+                "area_scope": plan.area_scope,
+                "constraint_mode": plan.constraint_mode,
                 "query_count": len(plan.queries),
                 "queries": plan.queries,
                 "frontier_score": frontier_score,
@@ -930,6 +964,9 @@ class AgentManagerTreeMixin:
             intent=plan.intent,
             is_failed=True,
             debug_depth=plan.debug_depth,
+            branch_family=plan.branch_family,
+            area_scope=plan.area_scope,
+            constraint_mode=plan.constraint_mode,
         )
         summary["status"] = "failed"
         summary["frontier_score"] = 0.0
@@ -995,6 +1032,9 @@ class AgentManagerTreeMixin:
                 "is_failed": False,
                 "debug_depth": plan.debug_depth,
                 "strategy_tags": plan.strategy_tags,
+                "branch_family": plan.branch_family,
+                "area_scope": plan.area_scope,
+                "constraint_mode": plan.constraint_mode,
                 "query_count": len(plan.queries),
                 "queries": plan.queries,
                 "frontier_score": artifacts.frontier_score,
@@ -1054,6 +1094,7 @@ class AgentManagerTreeMixin:
             integrity_result = self.toolbox.run(
                 "integrity_review",
                 self.context,
+                branch=plan,
                 normalized_properties=normalize_result.get("normalized_properties", []),
                 raw_results=retrieve_result.get("raw_results", []),
                 detail_html_map=enrich_result.get("detail_html_map", {}),
@@ -1072,6 +1113,7 @@ class AgentManagerTreeMixin:
             ranking_result = self.toolbox.run(
                 "rank",
                 self.context,
+                branch=plan,
                 normalized_properties=integrity_result.get("normalized_properties", []),
                 ranking_profile=plan.ranking_profile,
             )
@@ -1098,6 +1140,9 @@ class AgentManagerTreeMixin:
                 intent=plan.intent,
                 is_failed=False,
                 debug_depth=plan.debug_depth,
+                branch_family=plan.branch_family,
+                area_scope=plan.area_scope,
+                constraint_mode=plan.constraint_mode,
             )
             summary["parent_key"] = plan.parent_key or ""
             summary["description"] = plan.description
@@ -1307,6 +1352,9 @@ class AgentManagerTreeMixin:
                 self._make_node_plan(
                     state,
                     operator=operator,
+                    branch_family=plan.branch_family,
+                    area_scope=plan.area_scope,
+                    constraint_mode=plan.constraint_mode,
                     base_queries=base_queries,
                     base_profile=base_profile,
                     parent_key=plan.node_key,
@@ -1353,21 +1401,21 @@ class AgentManagerTreeMixin:
 
         if summary.get("status") == "failed":
             if failure_stage == "retrieve" or "検索結果が取得できていない" in joined_issues:
-                operators.extend(["source_diversify", "relax_for_coverage"])
+                operators.extend(["source_diversify", "detail_first"])
             if (
                 failure_stage in {"enrich", "normalize_dedupe", "integrity_review"}
                 or "詳細ページ補完率が低い" in joined_issues
             ):
                 operators.extend(["detail_first", "schema_first"])
             if failure_stage == "rank" or "上位候補の条件一致度が低い" in joined_issues:
-                operators.extend(["tighten_match", "explore_adjacent"])
+                operators.extend(["exploit_best", "source_diversify"])
 
         if "low_detail_coverage" in prune_reasons or "詳細ページ補完率が低い" in joined_issues:
             operators.extend(["detail_first", "schema_first"])
         if "low_branch_score" in prune_reasons or "上位候補の条件一致度が低い" in joined_issues:
-            operators.extend(["tighten_match", "explore_adjacent"])
+            operators.extend(["exploit_best", "source_diversify"])
         if "情報源の多様性が低い" in joined_issues:
-            operators.extend(["source_diversify", "relax_for_coverage"])
+            operators.extend(["source_diversify", "detail_first"])
         if not operators:
             operators.extend(
                 [
@@ -1377,7 +1425,7 @@ class AgentManagerTreeMixin:
                 ]
             )
         if not operators and summary.get("status") == "failed":
-            operators.extend(["source_diversify", "explore_adjacent"])
+            operators.extend(["source_diversify", "detail_first"])
 
         deduped: list[str] = []
         preferred = [
@@ -1420,6 +1468,9 @@ class AgentManagerTreeMixin:
             "branch_id": "none",
             "node_key": "none",
             "label": "none",
+            "branch_family": "strict_primary",
+            "area_scope": "strict",
+            "constraint_mode": "primary",
             "status": "failed",
             "intent": "draft",
             "is_failed": True,
@@ -1466,6 +1517,9 @@ class AgentManagerTreeMixin:
                 {
                     "branch_id": current_key,
                     "label": artifacts.plan.label,
+                    "branch_family": artifacts.plan.branch_family,
+                    "area_scope": artifacts.plan.area_scope,
+                    "constraint_mode": artifacts.plan.constraint_mode,
                     "depth": artifacts.plan.depth,
                     "intent": str(summary.get("intent") or artifacts.plan.intent),
                     "is_failed": bool(summary.get("is_failed")),
@@ -1535,6 +1589,9 @@ class AgentManagerTreeMixin:
                     "branch_id": artifacts.plan.node_key,
                     "node_key": artifacts.plan.node_key,
                     "label": artifacts.plan.label,
+                    "branch_family": artifacts.plan.branch_family,
+                    "area_scope": artifacts.plan.area_scope,
+                    "constraint_mode": artifacts.plan.constraint_mode,
                     "depth": artifacts.plan.depth,
                     "queries": artifacts.plan.queries,
                     "strategy_tags": artifacts.plan.strategy_tags,
@@ -1607,6 +1664,7 @@ class AgentManagerTreeMixin:
             "termination_reason": state.termination_reason or "frontier_exhausted",
             "max_depth_reached": max_depth,
             "selected_branch_id": str(state.selected_branch_summary.get("branch_id") or ""),
+            "alternative_branch_ids": list(state.alternative_branch_ids),
             "selected_path_tags": selected_path_tags,
             "retry_context_used": bool(state.retry_context),
             "issue_distribution": dict(issue_counter.most_common(5)),
@@ -1660,19 +1718,57 @@ class AgentManagerTreeMixin:
         ]
         return eligible or completed
 
+    # JP: familyごとのbest summaryを処理する。
+    # EN: Process best summary per family.
+    def _best_summaries_by_family(self, state: ResearchExecutionState) -> dict[str, dict[str, Any]]:
+        completed = [
+            dict(item)
+            for item in state.branch_summaries
+            if str(item.get("status") or "").strip() == "completed"
+        ]
+        best_by_family: dict[str, dict[str, Any]] = {}
+        for family in BRANCH_FAMILY_PRIORITY:
+            family_summaries = [
+                item for item in completed if str(item.get("branch_family") or "").strip() == family
+            ]
+            if not family_summaries:
+                continue
+            selected = select_best_branch(family_summaries)
+            if selected is not None:
+                best_by_family[family] = selected
+        return best_by_family
+
     # JP: best score gapを処理する。
     # EN: Process best score gap.
     def _best_score_gap(self, state: ResearchExecutionState) -> float:
-        candidates = self._eligible_completed_artifacts(state)
+        candidates = [
+            dict(item)
+            for item in state.branch_summaries
+            if str(item.get("status") or "").strip() == "completed"
+        ]
         if len(candidates) < 2:
             return 0.0
-        sorted_candidates = sorted(
-            candidates,
-            key=lambda artifact: branch_selection_sort_key(artifact.summary),
-            reverse=True,
-        )
-        best_score = float(sorted_candidates[0].summary.get("branch_score") or 0.0)
-        second_score = float(sorted_candidates[1].summary.get("branch_score") or 0.0)
+        selected = select_best_branch(candidates)
+        if selected is None:
+            return 0.0
+        family = str(selected.get("branch_family") or "").strip()
+        second_candidates = [
+            item
+            for item in candidates
+            if str(item.get("branch_id") or "") != str(selected.get("branch_id") or "")
+            and str(item.get("branch_family") or "").strip() == family
+        ]
+        if not second_candidates:
+            second_candidates = [
+                item
+                for item in candidates
+                if str(item.get("branch_id") or "") != str(selected.get("branch_id") or "")
+            ]
+        if not second_candidates:
+            return 0.0
+        second = max(second_candidates, key=branch_selection_sort_key)
+        best_score = float(selected.get("branch_score") or 0.0)
+        second_score = float(second.get("branch_score") or 0.0)
         return round(best_score - second_score, 2)
 
     # JP: stop for stable bestかどうかを判定する。
@@ -1690,42 +1786,35 @@ class AgentManagerTreeMixin:
     # EN: Process refresh best node.
     def _refresh_best_node(self, state: ResearchExecutionState, *, candidate_key: str) -> None:
         previous_best_key = state.best_node_key
-        best_artifacts = state.node_artifacts.get(previous_best_key) if previous_best_key else None
-        if best_artifacts is not None and best_artifacts.summary.get("status") != "completed":
-            best_artifacts = None
-
-        candidate_artifacts = state.node_artifacts.get(candidate_key)
-        candidate_summary = candidate_artifacts.summary if candidate_artifacts else {}
-        if candidate_artifacts is not None and candidate_summary.get("status") == "completed":
-            parent_key = str(candidate_summary.get("parent_key") or "").strip()
-            parent_artifacts = state.node_artifacts.get(parent_key) if parent_key else None
-            parent_summary = (
-                parent_artifacts.summary
-                if parent_artifacts is not None
-                and parent_artifacts.summary.get("status") == "completed"
-                else None
-            )
-            if (
-                best_artifacts is None
-                or is_branch_selection_eligible(candidate_summary, parent_summary=parent_summary)
-                and (
-                    branch_selection_sort_key(candidate_summary)
-                    > branch_selection_sort_key(best_artifacts.summary)
-                )
-            ):
-                best_artifacts = candidate_artifacts
-
-        if best_artifacts is None:
+        completed_summaries = [
+            dict(item)
+            for item in state.branch_summaries
+            if str(item.get("status") or "").strip() == "completed"
+        ]
+        selected_summary = select_best_branch(completed_summaries)
+        if selected_summary is None:
             state.selected_branch_summary = {}
+            state.alternative_branch_ids = []
             state.best_node_key = ""
             state.best_node_stability = 0
             state.best_node_readiness = "low"
             state.best_score_gap = 0.0
             return
 
-        best_key = best_artifacts.plan.node_key
-        state.selected_branch_summary = best_artifacts.summary
-        state.best_node_readiness = best_artifacts.readiness
+        best_key = str(selected_summary.get("branch_id") or "")
+        best_artifacts = state.node_artifacts.get(best_key)
+        state.selected_branch_summary = selected_summary
+        state.best_node_readiness = best_artifacts.readiness if best_artifacts is not None else "low"
+        best_by_family = self._best_summaries_by_family(state)
+        state.alternative_branch_ids = [
+            str(item.get("branch_id") or "")
+            for family, item in sorted(
+                best_by_family.items(),
+                key=lambda pair: BRANCH_FAMILY_PRIORITY.get(pair[0], 0),
+                reverse=True,
+            )
+            if str(item.get("branch_id") or "") and str(item.get("branch_id") or "") != best_key
+        ]
         if best_key == previous_best_key:
             state.best_node_stability += 1
         else:
@@ -1876,6 +1965,18 @@ class AgentManagerTreeMixin:
                 or select_best_branch(state.branch_summaries)
                 or self._default_selected_branch_summary()
             )
+            best_by_family = self._best_summaries_by_family(state)
+            state.alternative_branch_ids = [
+                str(item.get("branch_id") or "")
+                for family, item in sorted(
+                    best_by_family.items(),
+                    key=lambda pair: BRANCH_FAMILY_PRIORITY.get(pair[0], 0),
+                    reverse=True,
+                )
+                if str(item.get("branch_id") or "")
+                and str(item.get("branch_id") or "")
+                != str(state.selected_branch_summary.get("branch_id") or "")
+            ]
             state.selected_path = self._build_selected_path(state)
             self._update_live_progress(
                 stage_name="tree_search",
@@ -1894,6 +1995,7 @@ class AgentManagerTreeMixin:
                 output_payload={
                     "selected_branch": state.selected_branch_summary,
                     "selected_path": state.selected_path,
+                    "alternative_branch_ids": state.alternative_branch_ids,
                 },
                 reasoning="tree search の評価結果から最良ノードとその経路を採用する。",
                 parent_node_id=(

@@ -72,6 +72,111 @@ def _compose_query(*parts: str) -> str:
 
 
 class OrchestratorResearchMixin:
+    # JP: branch family queriesを構築する。
+    # EN: Build family-scoped research queries.
+    def _build_branch_family_queries(
+        self,
+        user_memory: dict[str, Any],
+        seed_queries: list[str],
+        *,
+        area_scope: str,
+        constraint_mode: str,
+    ) -> list[str]:
+        area = _normalize_query_text(user_memory.get("target_area"))
+        layout = str(user_memory.get("layout_preference") or "").strip()
+        budget = int(user_memory.get("budget_max") or 0)
+        walk = int(user_memory.get("station_walk_max") or 0)
+        listing_type_keyword = str(user_memory.get("listing_type") or "").strip()
+        must_conditions = [
+            _normalize_query_text(item)
+            for item in user_memory.get("must_conditions", []) or []
+            if _normalize_query_text(item)
+        ]
+        nice_to_have = [
+            _normalize_query_text(item)
+            for item in user_memory.get("nice_to_have", []) or []
+            if _normalize_query_text(item)
+        ]
+        budget_token = _format_budget_query(budget)
+        relaxed_budget_token = _relaxed_budget_query(budget)
+        walk_token = f"徒歩{walk}分" if walk else ""
+        must_fragment = " ".join(must_conditions[:2]).strip() if constraint_mode == "primary" else ""
+        nice_fragment = " ".join(nice_to_have[:2]).strip()
+        nearby_areas = _lookup_area_hints(area, AREA_NEARBY_HINTS)
+        line_hints = _lookup_area_hints(area, AREA_LINE_HINTS)
+
+        normalized_seed_queries = [
+            _normalize_query_text(item) for item in seed_queries if _normalize_query_text(item)
+        ]
+        budget_fragment = budget_token if constraint_mode == "primary" else relaxed_budget_token
+        queries: list[str] = []
+
+        if area_scope == "strict":
+            queries.extend(
+                [
+                    _compose_query(
+                        area,
+                        listing_type_keyword,
+                        budget_fragment,
+                        layout,
+                        walk_token,
+                        must_fragment,
+                        nice_fragment if not must_fragment else "",
+                    ),
+                    _compose_query(
+                        area,
+                        layout,
+                        must_fragment or nice_fragment,
+                        listing_type_keyword,
+                        budget_fragment,
+                    ),
+                    _compose_query(area, listing_type_keyword, budget_fragment, walk_token, layout),
+                ]
+            )
+        else:
+            nearby_tokens = nearby_areas[:2] if nearby_areas else [f"{area}周辺"]
+            for nearby in nearby_tokens:
+                queries.append(
+                    _compose_query(
+                        nearby,
+                        listing_type_keyword,
+                        budget_fragment,
+                        layout,
+                        walk_token,
+                        must_fragment or nice_fragment,
+                    )
+                )
+            if line_hints:
+                queries.append(
+                    _compose_query(
+                        line_hints[0],
+                        area,
+                        listing_type_keyword,
+                        budget_fragment,
+                        layout,
+                        must_fragment,
+                    )
+                )
+            else:
+                queries.append(
+                    _compose_query(
+                        f"{area}沿線",
+                        listing_type_keyword,
+                        budget_fragment,
+                        layout,
+                        must_fragment,
+                    )
+                )
+
+        if normalized_seed_queries:
+            queries = normalized_seed_queries[:1] + queries
+        deduped: list[str] = []
+        for item in queries:
+            text = _normalize_query_text(item)
+            if text and text not in deduped:
+                deduped.append(text)
+        return deduped[:5]
+
     # JP: research queriesを構築する。
     # EN: Build research queries.
     def _build_research_queries(
@@ -340,6 +445,7 @@ class OrchestratorResearchMixin:
             execution_result.display_normalized_properties
         )
         task_memory["last_display_ranked_properties"] = execution_result.display_ranked_properties
+        task_memory["alternative_display_groups"] = execution_result.alternative_display_groups
         task_memory["last_duplicate_groups"] = execution_result.duplicate_groups
         task_memory["last_integrity_reviews"] = execution_result.integrity_reviews
         task_memory["last_dropped_property_ids"] = execution_result.dropped_property_ids
@@ -358,9 +464,11 @@ class OrchestratorResearchMixin:
         task_memory["last_research_job_id"] = job_id
         task_memory["last_llm_config"] = job_llm_config
         task_memory["selected_branch_id"] = execution_result.selected_branch_id
+        task_memory["alternative_branch_ids"] = execution_result.alternative_branch_ids
         task_memory["branch_summaries"] = execution_result.branch_summaries
         task_memory["offline_evaluation"] = execution_result.offline_evaluation
         task_memory["failure_summary"] = execution_result.failure_summary
+        task_memory["family_failure_summary"] = execution_result.family_failure_summary
         task_memory["selected_path"] = execution_result.selected_path
         task_memory["search_tree_summary"] = execution_result.search_tree_summary
         task_memory["pruned_nodes"] = execution_result.pruned_nodes
@@ -611,6 +719,7 @@ class OrchestratorResearchMixin:
             provider=research_provider,
             research_adapter=research_adapter,
             build_research_queries=self._build_research_queries,
+            build_branch_family_queries=self._build_branch_family_queries,
             collect_search_results=self._collect_search_results,
             fetch_detail_html=self.catalog.fetch_detail_html,
             collect_source_items=self._collect_research_source_items,

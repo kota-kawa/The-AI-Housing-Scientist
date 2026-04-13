@@ -1,386 +1,318 @@
-# Part 5 提出ドラフト
+# Part 5: The AI Housing Scientist
 
-## タイトル
-The AI Housing Scientist
-AI Scientist 型の Tree Search と自動評価を、日本の賃貸物件調査エージェントへ拡張した実装
+AI Scientist の探索・評価構造を、日本の賃貸物件調査エージェントへ移植した概念実証
+
+---
 
 ## 1. 概要
-Part 5 では、Sakana AI の The AI Scientist にある中核的な発想を、機械学習論文生成ではない実務的ドメインへ移植することを目標にして、**The AI Housing Scientist** という PoC を構築した。
 
-このシステムは、日本の賃貸物件探しを対象に、以下の流れを end-to-end で支援する。
+本パートでは、Sakana AI の The AI Scientist が持つ中核的な構造――**計画立案・分岐探索・自動評価・統合**――を、機械学習論文の生成ではなく、日本の賃貸物件探索という実務的なドメインへ移植した概念実証（PoC）システム **The AI Housing Scientist** を構築した。
 
-1. ユーザーの希望条件を自然文から整理する
-2. 不足条件を追加で質問する
-3. 調査計画を提示し、ユーザー承認を得る
-4. 複数の探索方針を持つ分岐型リサーチを実行する
-5. 検索結果を正規化・重複排除・整合性審査する
-6. 候補物件をランキング・比較する
-7. 問い合わせ文面を下書きする
-8. 契約条項テキストからリスクを抽出する
+日本の賃貸物件探索を題材に選んだ理由は、この領域が AI Scientist 型のエージェント設計と相性が良いためである。具体的には、情報源が複数のウェブサイトに分散していること、掲載データに欠損や矛盾が含まれやすいこと、家賃・駅距離・間取りなどのトレードオフが複雑であること、そして最終的に問い合わせや契約判断という行動が求められることが挙げられる。これらの性質は、一回の検索で完結させる方式よりも、複数の探索方針を並行して試し、結果を評価して意思決定につなげる方式と適合する。
 
-重要なのは、このプロジェクトが AI Scientist の既存コードをそのまま動かしたものではない点である。論文生成エージェントをそのまま使うのではなく、**planning, branching, evaluation, synthesis** という構造を、住宅探索という別ドメイン向けに作り直した。
+なお本実装は、AI Scientist の既存コードをそのまま動かしたものではない。論文生成という表面的な用途ではなく、「探索を計画し、分岐を評価し、根拠をまとめて意思決定につなげる」という根本構造を、住宅探索向けに設計し直したものである。
 
-## 2. Part 5 の趣旨との対応
-私は Part 5 を、「Sakana AI の agentic research の考え方を理解したうえで、それを別の問題設定に意味のある形で拡張する課題」だと解釈した。その観点で、この実装は次の 3 点で課題趣旨に沿っている。
+---
 
-第一に、対象ドメインを明確に変えている。ここで扱っているのは ML 論文生成ではなく、日本の賃貸物件探索という、情報が不完全で、条件交渉が多く、実務的な意思決定が必要な領域である。
+## 2. AI Scientist v2 の理解と本実装への応用
 
-第二に、AI Scientist v2 の tree search 的な考え方を実装レベルで取り入れている。単発の検索や単発の回答ではなく、複数の探索分岐を走らせ、その分岐ごとに結果を評価し、弱い枝を刈り込み、最終的に最良の経路を採用する構造になっている。
+AI Scientist v2 では、研究のアイデア生成から実験実行・論文執筆までを自動化するにあたり、木探索（tree search）の仕組みが導入されている。具体的には、複数の研究方針を分岐として生成し、各分岐で実験を実行した後、Automated Reviewer と呼ばれる自動評価器でその成果を採点する。評価の低い分岐は枝刈り（除外）され、有望な分岐がさらに展開される。これにより、「最初に思いついたアイデア」ではなく、「試行の中で最も評価が高かった方向」が最終成果として選ばれる。
 
-第三に、出力が単なる「候補一覧」では終わらない。候補比較、推薦理由、問い合わせ文、契約リスク確認までつなげることで、探索から実行までを一つの agent loop としてまとめている。
+この設計の本質は、**生成と評価を分離し、評価が最終的な制御権を持つ**という点にある。本実装ではこの考え方を以下のように賃貸物件探索に応用した。
 
-つまりこのプロジェクトは、AI Scientist の「論文を書く」という表面的な用途ではなく、**探索を計画し、分岐を評価し、根拠をまとめて意思決定につなげる**という根本構造を、別領域で再実装したものだと位置づけている。
+| AI Scientist v2 の要素 | 本実装での対応 |
+|---|---|
+| 研究アイデアの分岐生成 | 「条件を厳しくして絞る」「候補数を確保するために緩める」など、異なる探索方針の分岐を生成 |
+| 実験の実行 | 各分岐で Web 検索・詳細ページ取得・データ正規化を実行 |
+| Automated Reviewer による評価 | 分岐ごとに候補数・詳細取得率・条件一致度などの指標でスコアリングし、品質の低い分岐を除外 |
+| 最良分岐の選択と論文生成 | 最も評価の高い分岐の結果をもとに、比較レポート・問い合わせ文・契約リスク確認を生成 |
 
-## 3. なぜ賃貸探索を題材にしたか
-日本の賃貸物件探索は、agentic system の題材として相性が良い。理由は次の通りである。
+---
 
-- 情報源が検索結果、物件詳細、契約文面などに分散している
-- データが古い、欠損している、矛盾していることが多い
-- 厳しめの条件で深掘りする枝と、候補数を確保するために緩める枝の両方が必要になる
-- 正解が一意ではなく、家賃、駅距離、間取り、安心感などのトレードオフになる
-- 最終的には問い合わせや契約判断など、行動につながる出力が必要になる
+## 3. システムの全体像と動作例
 
-この性質は、単発の LLM 応答よりも、複数の探索方針を試して評価する tree search 型の設計と相性が良い。したがって、AI Scientist 系の発想を「論文執筆」以外へ広げる題材として適していると考えた。
+### 3.1 処理の流れ
 
-## 4. 実装したシステムの概要
-本リポジトリは、フロントエンドとバックエンドを含むフルスタック構成の PoC である。
+システムは以下の流れを一気通貫で処理する。
 
-- Frontend: React 19, TypeScript, Vite
-- Backend: FastAPI, Python 3.11
-- State / Audit: SQLite
-- Search: Brave Search API + mock property catalog
-- LLM routing: planner, research, communication, risk_check の用途別ルーティング
+1. ユーザーが自然文で希望条件を入力する
+2. 計画立案モジュールが条件を構造化し、不足があれば追加質問を返す
+3. 調査計画を提示し、ユーザーの承認を待つ
+4. 承認後、複数の探索方針で分岐型リサーチを実行する
+5. 各分岐の候補物件を正規化・重複排除・整合性審査する
+6. 分岐を評価・選抜し、最良の結果をランキング・比較レポートにまとめる
+7. 選択した候補に対して問い合わせ文の下書きを生成する
+8. 契約条項テキストを貼り付けると、リスク（更新料・違約金・解約予告など）を抽出する
 
-ユーザー体験としては、以下の流れで動作する。
+### 3.2 具体的な動作例
 
-1. ユーザーが自然文で条件を入力する
-2. planner が希望条件を構造化する
-3. 足りない条件があれば structured question として聞き返す
-4. 調査計画を提示し、ユーザー承認を待つ
-5. 承認後、バックグラウンドで research job を開始する
-6. 分岐探索により複数の検索戦略を試す
-7. 候補を正規化・評価して、最終レポートと比較 UI を返す
-8. 選択した候補に対して問い合わせ文を生成する
-9. 契約条項を貼り付けると、更新料・短期解約違約金・解約予告・保証会社などのリスクを抽出する
+以下は、実際の利用の流れを示した例である。
 
-## 5. 技術的な中核貢献
-このプロジェクトの主な技術的貢献は、**AI Scientist 型の branching + evaluator loop を、住宅探索ドメインに移植したこと**である。
+**ユーザー入力:**
+「新宿駅の近くで、家賃10万円以下の1LDKを探してほしい。ペット可だと嬉しい。」
 
-### 5.1 Planning を Research の前段に置いたこと
-AI Scientist 的な探索を成立させるには、最初の問題定義が雑だと全体が崩れる。そのため、このシステムではまず planner が自然文を structured slots に落とし込む。
+**Step 1 — 条件の構造化と追加質問:**
+システムは入力から「エリア: 新宿駅周辺」「予算: 10万円以下」「間取り: 1LDK」「あると良い条件: ペット可」を抽出し、不足している「入居時期」「駅徒歩の許容範囲」を追加質問として返す。
 
-扱う主な slot は以下である。
+**Step 2 — 調査計画の提示:**
+条件が揃うと、「条件を厳密に絞った検索」「候補数を確保するために条件を少し緩めた検索」「異なる検索表現で情報源を広げた検索」など、複数の探索方針を含む調査計画を提示する。ユーザーが承認すると探索が開始される。
 
-- 物件種別
-- 希望エリア
-- 予算上限
-- 間取り
-- 駅徒歩
-- 入居時期
-- 必須条件
-- あると良い条件
+**Step 3 — 分岐探索と評価:**
+各探索方針が並行して実行され、それぞれの結果が評価される。たとえば「条件厳密化」の分岐は候補2件・条件一致度が高い、「候補数確保」の分岐は候補5件だが条件一致度はやや低い、といった結果が得られる。評価モジュールがこれらをスコアリングし、最も品質の高い分岐を採用する。
 
-不足情報がある場合は follow-up question を返し、ある程度条件が固まると research plan を生成する。さらに、その plan は即実行せず、ユーザー承認を待つ設計にしている。
+**Step 4 — 最終出力:**
+採用された分岐の候補物件が比較表として表示され、各物件の推薦理由が添えられる。ユーザーが候補を選ぶと問い合わせ文の下書きが生成され、契約条項を貼り付ければリスク項目が抽出される。
 
-これは単なる UX 上の都合ではなく、探索の root を人間と agent が共同で確定するという意味で、後段の tree search の質を左右する重要な設計である。
+---
 
-### 5.2 Single-pass ではなく Branching Search にしたこと
-このシステムの research は、単純な「検索してランキング」ではない。`HousingResearchAgentManager` が中心となり、複数の探索分岐を管理する。
+## 4. 技術的な核心貢献
 
-state machine 上のトップレベル stage は以下の 3 つである。
+### 4.1 分岐型の探索設計
 
-- `plan_finalize`
-- `tree_search`
-- `synthesize`
+最も重要な設計上の選択は、物件探索を一回の検索で完結させず、**分岐型の調査問題**として扱った点である。
 
-その内部で、探索分岐ごとに異なる operator を適用する。実装されている代表的な operator は以下である。
+分岐探索を管理するリサーチコンポーネントが複数の探索分岐を並行管理し、各分岐に異なる探索方針を適用する。
 
-- `tighten_match`: 条件一致度を優先して絞る
-- `relax_for_coverage`: 候補数確保のために探索を広げる
-- `source_diversify`: 情報源の偏りを下げる
-- `detail_first`: 詳細ページの取得を優先する
-- `schema_first`: 比較に必要な項目の充足を優先する
-- `exploit_best`: 有望な枝をさらに深掘りする
-- `explore_adjacent`: 近接条件・周辺条件へ広げる
+| 探索方針 | 役割 |
+|---|---|
+| 条件厳格化 | must 条件と予算一致度を強めて絞り込む |
+| 候補拡張 | 候補数と詳細取得率を回復するために条件を緩める |
+| 情報源分散 | 異なる検索表現を使い、情報源の偏りを減らす |
+| 詳細優先 | 設備・初期費用などの詳細ページの取得を優先する |
+| 有望条件の深掘り | スコアの高い分岐の条件組み合わせをさらに深掘りする |
+| 近傍条件の探索 | 周辺エリアや「あると良い条件」方面に広げる |
 
-この構造により、「条件一致は強いが候補数が少ない枝」「候補数は多いが詳細情報が薄い枝」などを別々に評価できる。これは AI Scientist v2 の tree search の発想を、住宅探索用に具体化したものだと考えている。
+処理の流れは「計画確定 → 分岐探索 → 統合」の 3 段階で構成されている。
 
-### 5.3 分岐実行を Tool 化したこと
-各 branch は、内部で複数の tool を順番に実行する。`agent_manager_tooling_mixin.py` では、少なくとも次の処理が tool として切り出されている。
+### 4.2 分岐の評価と選抜
 
-- `retrieve`
-- `enrich`
-- `normalize_dedupe`
-- `integrity_review`
-- `rank`
+最も AI Scientist らしい部分は、分岐をただ生成するだけでなく、**分岐を評価して選ぶ仕組み**を入れた点である。各分岐の評価モジュールでは以下の指標を組み合わせて分岐スコア（各分岐の品質を 0〜100 で数値化した指標）を算出し、品質の低い分岐を除外する。
 
-各 tool は schema validation を持ち、入力と出力の形が固定されている。この構造には 2 つの利点がある。
+| 評価指標 | 配点 | 内容 |
+|---|---|---|
+| 候補数 | 20 点 | 正規化後に残った候補の件数 |
+| 詳細取得率 | 25 点 | 詳細ページから情報を補完できた候補の割合 |
+| 構造化率 | 20 点 | 家賃・駅徒歩・間取りが揃っている候補の割合 |
+| 上位候補の条件一致度 | 25 点 | 上位 3 件の条件一致スコアの平均 |
+| 情報源の多様性 | 10 点 | 異なる情報源から候補が得られているか |
+| 減点: 重複率 | -5 点 | 重複候補が多い場合の減点 |
+| 減点: 整合性審査での除外率 | -10 点 | 整合性審査で除外された候補が多い場合の減点 |
 
-1. 分岐単位で何を実行したかを追跡しやすい
-2. 一つの巨大プロンプトに依存せず、agent loop を保守しやすい
+最終的に「最後に生成された分岐」ではなく、「評価が最も高い分岐」が採用される。この **生成よりも評価が制御権を持つ** 構造が、AI Scientist の Automated Reviewer の考え方と直接対応している。
 
-これは、AI Scientist 的な「モデルがすべてを一度に解く」のではなく、複数の処理を orchestrate するという発想に近い。
+### 4.3 整合性審査によるドメイン特化の品質管理
 
-### 5.4 Reviewer 的な Branch Evaluation を入れたこと
-このプロジェクトで最も AI Scientist らしい部分は、分岐をただ生成するだけでなく、**分岐を評価して選ぶ仕組み**を入れた点である。
+賃貸領域では、古い掲載・価格矛盾・希望エリア外の物件などが検索結果に混入しやすい。そのため整合性審査のステージをランキングの前に独立して設け、以下の観点で候補を検証している。
 
-`offline_eval.py` では、分岐ごとに以下のような指標を計算している。
+- **掲載鮮度:** 「募集終了」「成約済」などの表記を検出し、古い物件を除外
+- **価格整合性:** タイトルと詳細ページで家賃が矛盾していないかを確認
+- **物件種別:** 売買物件が賃貸検索に混入していないかを判定
+- **エリア一致:** 希望エリアと実際の所在地が一致しているかを確認
 
-- 正規化後の候補数
-- ランキング可能候補数
-- 詳細ページ補完率
-- 構造化率
-- 上位候補スコア
-- source diversity
-- duplicate ratio
-- integrity drop ratio
+この審査はルールベースの判定と LLM による補助判定を組み合わせて行い、各候補に信頼度スコア（0〜100）を付与する。これは「論文の Reviewer を作った」のではなく、「別ドメインに Reviewer の役割を持つ品質管理の層を作った」と位置づけるのが正確である。
 
-これらを branch score にまとめ、弱い枝は prune し、改善幅のない枝も落とす。最終的に best branch を選ぶときも、「最後に生成された枝」ではなく、「評価が最も高い枝」を採用する。
+### 4.4 出力を行動につなげる設計
 
-つまりこのシステムでは、生成よりも**評価が制御権を持つ**。この点が、AI Scientist の reviewer / evaluator 的な考え方と強く対応している。
+最終出力は候補のランキングだけでなく、調査要約・候補比較表・推薦理由に加え、問い合わせ文の下書きと契約リスクの確認まで含む。「探す」で終わらず、「比較する」「問い合わせる」「契約前にリスクを確認する」まで一つの処理の流れにしている。実務的なドメインに AI Scientist の考え方を移植するうえで、出力が行動に直結することは重要だと考える。
 
-### 5.5 Evidence Reliability を重視したこと
-賃貸領域では、検索ヒットがそのまま推薦候補になるとは限らない。古い掲載、価格矛盾、賃貸と売買の混在、希望エリア外の物件などが普通に混ざる。そのため、`integrity_review` を独立 stage として入れた。
+---
 
-この stage では主に以下を確認している。
+## 5. 使用したモデルと技術構成
 
-- 募集終了・掲載終了などの stale signal
-- 家賃などの数値矛盾
-- 売買物件と賃貸物件の取り違え
-- 希望エリアとの不一致
-- 証拠不足による比較不能候補
-- 間取りや駅徒歩の不整合
+### 5.1 対応モデル
 
-これは科学論文の reviewer をそのまま再現したものではないが、**ドメイン特化の reviewer layer** と言える。信頼できない候補を ranking 前に落とすことで、最終出力の品質を上げている。
+本システムは複数の LLM プロバイダに対応しており、用途別にモデルを切り替えるルーティング機構を持つ（計画立案・リサーチ・コミュニケーション・リスク確認の 4 系統）。対応するプロバイダとデフォルトモデルは以下の通りである。
 
-### 5.6 最終出力を Actionable にしたこと
-このシステムの出力は単なるランキングではない。最終的に以下までつなげている。
+| プロバイダ | デフォルトモデル |
+|---|---|
+| OpenAI | gpt-5.4-mini |
+| Google Gemini | gemini-2.5-flash |
+| Groq | openai/gpt-oss-120b（主）、qwen/qwen3-32b（副） |
+| Anthropic Claude | claude-sonnet-4-6 |
 
-- research summary
-- 候補比較表
-- 最終 markdown report
-- source list
-- 物件カード UI
-- 問い合わせ文ドラフト
-- 契約リスク確認
+### 5.2 技術構成
 
-つまり「探す」で終わらず、「比較する」「問い合わせる」「契約前にリスクを見る」までを一続きの loop にしている。これは practical domain に AI Scientist の考え方を移植するうえで重要な点だと考える。
+| 要素 | 内容 |
+|---|---|
+| フロントエンド | React 19 + TypeScript + Vite（計画・比較表・物件カードなどを構造化表示） |
+| バックエンド | FastAPI + Python 3.11 |
+| データ保存・監査 | SQLite（セッション・調査履歴・監査ログ・LLM 呼び出しログを記録） |
+| Web 検索 | Brave Search API |
+| 物件カタログ | テスト・開発用の疑似物件データベース（本番環境では実データ API への差し替えを想定） |
+| テスト | 92 関数の自動テスト（計画立案・調査管理・リスク確認・LLM 監視などの主要機能をカバー） |
 
-## 6. AI Scientist / ShinkaEvolve との関係
-### AI Scientist v1 との関係
-v1 から強く影響を受けたのは、agent が end-to-end に仕事を進めるという考え方である。本プロジェクトでも、条件整理から最終レポートまでを一つの流れとして実装した。
+LLM 呼び出しの監視レイヤーにより、モデル名・トークン数・推定コスト・処理時間が DB に自動記録され、どの処理でコストがかかっているかを定量的に把握できる。
 
-### AI Scientist v2 との関係
-v2 からは、tree search によって複数の方向性を探索し、その中から評価に基づいて最善経路を選ぶ発想を取り入れた。今回の branch expansion, pruning, selection は、この影響が最も大きい部分である。
+---
 
-### Automated Reviewer との関係
-Nature 論文で述べられている reviewer を、そのまま論文評価器として再現したわけではない。ただし、以下の形で reviewer 的な発想を移植している。
+## 6. 先行事例との差別化
 
-- integrity review による候補信頼性の判定
-- offline evaluator による branch quality の採点
-- readiness が低い場合に再探索を促す設計
+既存の不動産 AI サービス（例: 物件提案チャットボットや条件検索の自然言語インターフェース）は、基本的に一回の検索結果を整形して返す構造であり、複数の探索方針を並行して評価する仕組みは持っていない。また、AI Scientist のコードをそのまま不動産に適用した事例は確認できなかった。
 
-したがって、「論文 reviewer を作った」のではなく、「別ドメインに reviewer の役割を持つ layer を作った」と位置づけるのが正確である。
+本実装の差別化は、「賃貸 AI チャットボット」を作ったことではなく、AI Scientist の**分岐探索・自動評価・枝刈りという構造**を不動産という別ドメインに移植し、さらに整合性審査や問い合わせ文生成・契約リスク確認までを一つの処理ループに組み込んだ点にある。
 
-### ShinkaEvolve との関係
-今回の repo では ShinkaEvolve 自体は実装していない。ただし、今は hand-crafted になっている branch operator や ranking profile を、今後進化的に改善する余地がある。ここは将来的に ShinkaEvolve 的な方向へ拡張可能だと考えている。
+---
 
-## 7. システム設計の詳細
-### 7.1 Orchestrator の分割
-バックエンドは `HousingOrchestrator` を中心に動くが、中身は mixin に分割されている。
+## 7. 限界と今後の展望
 
-- core
-- planning
-- research
-- presentation
-- actions
-- llm config manager
+**現状の限界:**
 
-この分割により、agent loop の責務が比較的明確になっている。単一クラスにすべて詰め込むよりも、Part 5 のような複雑な agent 実装には適した構造だと思う。
+- 実データ統合はまだ限定的で、Web 検索と疑似物件データベースに依存している
+- 分岐の評価は経験則ベースの指標であり、大規模なラベル付きデータで校正された評価器ではない
+- 契約リスク確認は一次的な確認として有用だが、法的助言の代替ではない
+- 各探索方針は手動で定義されており、自動的に改善される仕組みはまだない
 
-### 7.2 Research Journal と Auditability
-SQLite には以下の情報が保存される。
+**最も重要な次ステップ:**
 
-- session
-- message
-- memory
-- research job
-- research journal node
-- audit event
-- llm call event
-- property catalog
+① 探索方針の自動改善: 検索クエリの拡張戦略やランキングの重み付けを、ShinkaEvolve の発想で進化的に最適化する。ShinkaEvolve は LLM を用いてプログラムを進化的に改善するフレームワークであり、現在手動で定義している探索方針の改善に適用できると考えている。
 
-特に `research_journal_nodes` と `audit_events` が重要で、どの branch がどう実行され、なぜ選ばれ、何が落とされたかを後から追える。これは「agent が本当に reasoning しているか」を検証しやすくするために重要だった。
+② ドメイン特化の評価器の構築: 物件掲載の鮮度・事実整合性・問い合わせ有用性などに対してラベル付きデータを作成し、より精度の高い品質評価器を構築する。これにより、AI Scientist の Automated Reviewer の発想をより強く反映できる。
 
-### 7.3 LLM Routing
-用途ごとに route を分けている。
+---
 
-- `planner`
-- `research_default`
-- `communication`
-- `risk_check`
+## 8. まとめ
 
-また research job 実行中は route 設定を lock している。これにより、途中で model が変わって branch 比較が壊れることを避けている。
+本実装は「住宅検索アプリ」として提出するのではなく、AI Scientist 型のエージェント設計――曖昧な要求の構造化・分岐探索・自動評価による選抜・行動につながる出力の接続――を、情報が不完全で意思決定が必要な現実のドメインへ移植した実験として位置づけている。
 
-### 7.4 LLM Observability
-`ObservedLLMAdapter` により、以下が DB に記録される。
+このプロジェクトが示したいのは、AI Scientist の発想が ML 論文生成に限定されず、探索と評価が必要な他のドメインにも再利用可能なパターンである、という点である。
 
-- provider
-- model
-- operation
-- prompt / response chars
-- token 数
-- 推定コスト
-- duration
-- success / failure
-
-この仕組みを入れた理由は、agent 開発を「勘で prompt をいじる作業」にしないためである。どの route が重いか、どこで失敗しているかを見える化することで、改善可能なシステムにしたかった。
-
-### 7.5 Search 周りの工夫
-Brave Search 側には、rate limit 制御と、必要に応じた query rewrite / snippet summarization が入っている。さらに property catalog service 側には mock catalog と semantic scoring があり、完全な open world ではないが、ある程度 controllable な研究環境を用意している。
-
-### 7.6 Frontend の役割
-フロントエンドはただの chat 表示ではなく、structured block を描画する。
-
-- plan
-- question
-- table
-- cards
-- warning
-- timeline
-- tree
-- sources
-
-branching search の内容をユーザーに説明可能にするため、tree や progress を UI 上で見せる設計にした。これは trust と debugging の両方に効く。
-
-## 8. このプロジェクトの新規性
-私はこの実装の新規性を、次の 4 点に整理している。
-
-第一に、AI Scientist の発想を論文生成ではなく、実務的な住宅意思決定ドメインへ移した点。
-
-第二に、物件探索を single-pass retrieval にせず、**branching research problem** として扱った点。
-
-第三に、ranking の前に integrity review を入れ、さらに branch 自体も offline evaluator で選抜することで、二段階の reviewer 的評価を持たせた点。
-
-第四に、探索の結果を、そのまま問い合わせ文や契約リスク確認へ接続し、実行可能な workflow にした点。
-
-## 9. コードベース確認と検証結果
-今回、提出ドラフトを書くにあたって、README だけでなく、主要コードとテストを一通り確認した。
-
-確認した主な範囲は以下である。
-
-- `backend/app/main.py`
-- `backend/app/orchestrator.py`
-- `backend/app/orchestrator_modules/*`
-- `backend/app/research/*`
-- `backend/app/stages/*`
-- `backend/app/services/*`
-- `frontend/src/App.tsx`
-- `frontend/src/components/StructuredBlock.tsx`
-- `backend/tests/*`
-
-### 実装の厚み
-`backend/tests` には **92 個の test 関数** があり、planner, orchestrator, research manager, final report, risk check, llm observability など、主要な責務に対してテストが用意されている。PoC ではあるが、かなり意識的に品質管理されている構成だと判断した。
-
-### 実行した検証
-この環境で実際に確認できたものは以下である。
-
-- `frontend` での `npm run build`: 成功
-- `backend` での `pytest -q`: 収集段階で停止
-
-backend の停止理由は、現在のシェル環境が Python 3.10 である一方、プロジェクト側が Python 3.11 前提で書かれているためである。これは以下の 2 点と一致している。
-
-- `backend/pyproject.toml`: `requires-python = ">=3.11"`
-- `backend/Dockerfile`: `FROM python:3.11-slim`
-
-実際のエラーは `from datetime import UTC` で、これは Python 3.11 前提の記法である。したがって、backend テストが壊れていると断定するのではなく、**この端末の実行環境が target runtime と一致していないため、正しい条件での pytest 完走確認は今回のターンではできなかった**と記述するのが正確である。
-
-## 10. 限界
-このプロジェクトは PoC であり、明確な限界もある。
-
-- 実データ統合はまだ限定的で、Brave Search と mock catalog に依存している
-- branch evaluator は heuristic であり、大規模な人手ラベルで校正された reviewer ではない
-- 契約リスク確認は triage として有用だが、法的助言の代替ではない
-- 学習や自己改善はまだ限定的で、どの operator が長期的に有効かを自動最適化していない
-- 問い合わせ後の返信や成約結果までを loop に取り込めていない
-
-## 11. 今後の発展
-今後の発展として、特に重要だと考えるのは以下の 4 点である。
-
-### 11.1 Operator の自動改善
-今の branch operator は hand-crafted である。ここを ShinkaEvolve 的な発想で改善し、
-
-- query expansion 戦略
-- ranking weight
-- branch expansion policy
-- prune threshold
-
-を自動的に改善できるようにすると、Part 5 の延長としてかなり面白い研究対象になる。
-
-### 11.2 Housing Reviewer の校正
-listing freshness, factual consistency, inquiry usefulness, lease risk severity などに対してラベル付きデータを作り、より校正された reviewer を構築したい。これができると、AI Scientist の reviewer 的発想をさらに強く移植できる。
-
-### 11.3 ドメイン拡張
-この設計は賃貸だけでなく、以下にも広げられる。
-
-- 売買物件探索
-- 引っ越し比較支援
-- 住宅ローン前提の候補比較
-- 商業不動産調査
-- 日本語文書ベースの他の意思決定支援タスク
-
-### 11.4 Outcome まで含む評価
-本当に重要なのは、選ばれた branch が実際に良い結果につながるかである。将来的には、
-
-- stale listing の減少
-- shortlist 品質の改善
-- 問い合わせ返信率
-- 契約リスク回避率
-
-のような outcome 指標まで追い、探索方針を改善できるようにしたい。
-
-## 12. まとめ
-Part 5 では、The AI Scientist のアイデアをそのままなぞるのではなく、**計画立案、分岐探索、評価、統合**というコア構造を、日本の賃貸物件調査という別ドメインに移植した。
-
-このシステムが示したいのは、「LLM が部屋探しを会話できる」ということではない。そうではなく、
-
-- 曖昧な要求を research-ready な条件へ変換し
-- 複数の探索戦略を並行評価し
-- 信頼性の低い候補を reviewer 的に落とし
-- 根拠つきで最終推薦をまとめ
-- そのまま問い合わせや契約確認へ接続する
-
-という、AI Scientist 型エージェントの再利用可能なパターンである。
-
-その意味で、このプロジェクトは「住宅検索アプリ」ではなく、**AI Scientist 的 agent design を、高摩擦な現実ドメインへ移した実験**として提出したい。
+---
 
 ## References
-Nature paper:
-https://www.nature.com/articles/s41586-026-10265-5
 
-Nature blog:
-https://sakana.ai/ai-scientist-nature/
+- Sakana AI, "Towards Fully Automated AI Research," Nature (2026). https://www.nature.com/articles/s41586-026-10265-5
+- Sakana AI, Nature publication blog post. https://sakana.ai/ai-scientist-nature/
+- Lu, C. et al., "The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery," arXiv:2408.06292 (2024). https://github.com/SakanaAI/AI-Scientist
+- Yamada, Y. et al., "The AI Scientist-v2," arXiv:2504.08066 (2025). https://github.com/SakanaAI/AI-Scientist-v2
+- Sakana AI, "ShinkaEvolve," arXiv:2509.19349 (2025). https://github.com/SakanaAI/ShinkaEvolve
 
-AI Scientist v1 paper:
-https://arxiv.org/abs/2408.06292
+---
 
-AI Scientist v1 blog:
-https://sakana.ai/ai-scientist/
+## Appendix: 主要コード抜粋
 
-AI Scientist v1 code:
-https://github.com/SakanaAI/AI-Scientist
+以下に、本システムの核心部分を示す代表的なコードを抜粋する。
 
-AI Scientist v2 paper:
-https://arxiv.org/abs/2504.08066
+### A-1. 分岐の評価スコアリング
 
-AI Scientist v2 blog:
-https://sakana.ai/ai-scientist-first-publication/
+各探索分岐の品質を数値化する関数の中核部分である。候補数・詳細取得率・構造化率・上位候補の条件一致度・情報源の多様性の 5 指標を加点し、重複率と整合性審査での除外率を減点する。
 
-AI Scientist v2 code:
-https://github.com/SakanaAI/AI-Scientist-v2
+```python
+def evaluate_branch(
+    *,
+    branch_id: str,
+    label: str,
+    raw_results: list[dict[str, Any]],
+    normalized_properties: list[dict[str, Any]],
+    ranked_properties: list[dict[str, Any]],
+    duplicate_groups: list[dict[str, Any]],
+    search_summary: dict[str, Any],
+    parent_summary: dict[str, Any] | None = None,
+    # ... 他の引数は省略
+) -> dict[str, Any]:
+    normalized_count = len(normalized_properties)
+    detail_coverage = round(detail_hit_count / detail_denominator, 3)
+    structured_ratio = _structured_property_ratio(normalized_properties)
 
-ShinkaEvolve paper:
-https://arxiv.org/abs/2509.19349
+    # 上位3件の条件一致スコアの平均を算出
+    if ranked_properties:
+        top_scores = [float(item.get("score") or 0.0) for item in ranked_properties[:3]]
+        avg_top3_score = round(sum(top_scores) / len(top_scores), 3)
 
-ShinkaEvolve code:
-https://github.com/SakanaAI/ShinkaEvolve
+    # 情報源の多様性（異なる情報源の数）
+    source_diversity = len({
+        str(item.get("source_name") or "")
+        for item in raw_results
+        if str(item.get("source_name") or "").strip()
+    })
+
+    # 5指標の加点と2指標の減点でスコアを算出
+    score = 0.0
+    score += _score_from_range(normalized_count, 0, 6) * 20.0       # 候補数
+    score += detail_coverage * 25.0                                  # 詳細取得率
+    score += structured_ratio * 20.0                                 # 構造化率
+    score += _score_from_range(avg_top3_score, 35.0, 95.0) * 25.0   # 上位候補一致度
+    score += _score_from_range(source_diversity, 1, 3) * 10.0       # 情報源多様性
+    score -= duplicate_ratio * 5.0                                   # 重複率による減点
+    score -= integrity_drop_ratio * 10.0                             # 整合性除外による減点
+
+    # 評価結果に基づく課題と改善提案を生成
+    issues: list[str] = []
+    recommendations: list[str] = []
+    if detail_coverage < 0.4:
+        issues.append("詳細ページ補完率が低い")
+        recommendations.append("詳細ページ取得を優先する検索分岐を残す")
+    if source_diversity <= 1:
+        issues.append("情報源の多様性が低い")
+        recommendations.append("Brave と catalog の両系統で候補を確保する")
+    # ...
+```
+
+### A-2. 整合性審査（ランキング前の品質フィルター）
+
+各候補物件に対してルールベースの検証と LLM による補助検証を行い、信頼度の低い候補をランキング前に除外する関数である。
+
+```python
+def run_integrity_review(
+    *,
+    normalized_properties: list[dict[str, Any]],
+    adapter: LLMAdapter | None = None,
+    target_area: str = "",
+    listing_type: str = "",
+    # ... 他の引数は省略
+) -> dict[str, Any]:
+    # Step 1: 各候補にルールベースの検証を実施
+    for prop in normalized_properties:
+        rule_review = _rule_review_for_property(
+            prop=prop,
+            today=resolved_today,
+            target_area=target_area,
+            listing_type=listing_type,
+        )
+
+    # Step 2: LLM による補助的な検証（利用可能な場合）
+    if adapter is not None:
+        llm_reviews_by_id = _build_llm_integrity_reviews(
+            normalized_properties=normalized_properties,
+            adapter=adapter,
+        )
+
+    # Step 3: ルール判定とLLM判定を統合し、除外判定を行う
+    for prop in normalized_properties:
+        merged_review = _merge_reviews(
+            rule_reviews_by_id.get(property_id, {}),
+            llm_reviews_by_id.get(property_id),
+        )
+        # 信頼度スコア(0〜100)が低い候補、またはshould_drop=Trueの候補を除外
+        if merged_review["should_drop"]:
+            dropped_properties.append(prop)
+        else:
+            filtered_properties.append(prop)
+```
+
+### A-3. 探索方針ごとの検索クエリ生成
+
+各探索方針に応じて、ユーザーの希望条件から異なる切り口の検索クエリを生成するロジックである。
+
+```python
+# 条件厳格化: must条件・予算・駅徒歩を明示して絞り込む
+if operator == "tighten_match":
+    queries.extend([
+        self._compose_query(area, layout, " ".join(must_conditions[:2]), lt),
+        self._compose_query(area, layout, f"{int(budget / 10000)}万円", lt),
+        self._compose_query(area, layout, f"徒歩{walk}分", lt),
+    ])
+# 候補拡張: 条件を緩めて候補数を確保する
+elif operator == "relax_for_coverage":
+    queries.extend([
+        self._compose_query(area, lt),
+        self._compose_query(area, "住みやすい", lt),
+        self._compose_query(area, " ".join(nice_to_have[:2]), lt),
+    ])
+# 情報源分散: 検索表現を変えて異なる情報源を引き出す
+elif operator == "source_diversify":
+    queries.extend([
+        self._compose_query(area, layout, f"{lt}情報"),
+        self._compose_query(area, layout, "募集", lt),
+        self._compose_query(area, "不動産", lt),
+    ])
+```

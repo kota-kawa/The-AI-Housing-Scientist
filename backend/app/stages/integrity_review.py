@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import date
 import json
+from urllib.parse import urlparse
 import re
 from typing import Any
 
+from app.area_matching import classify_area_match, is_match_allowed_for_scope
 from app.llm.base import LLMAdapter
 
 INTEGRITY_DIMENSIONS = (
@@ -232,6 +234,9 @@ def _rule_review_for_property(
     listing_type: str = "",
     layout_preference: str = "",
     must_conditions: list[str] | None = None,
+    area_scope: str = "strict",
+    constraint_mode: str = "primary",
+    nearby_hints: list[str] | None = None,
 ) -> dict[str, Any]:
     source_text = " ".join(
         [
@@ -250,12 +255,22 @@ def _rule_review_for_property(
 
     # JP: 希望エリアと物件の所在地が一致しない場合は除外する。
     # EN: Drop properties that are clearly outside the target area.
+    area_match_level = "none"
+    area_match_evidence = ""
     if target_area:
-        area_name = str(prop.get("area_name") or "")
-        address = str(prop.get("address") or "")
-        area_haystack = f"{area_name} {address} {source_text}"
-        if target_area not in area_haystack:
-            inconsistencies.append(f"希望エリア「{target_area}」と物件の所在地が一致しないため除外")
+        area_match = classify_area_match(
+            target_area=target_area,
+            address=str(prop.get("address") or ""),
+            area_name=str(prop.get("area_name") or ""),
+            nearby_tokens=nearby_hints or [],
+        )
+        area_match_level = str(area_match.get("match_level") or "none").strip()
+        area_match_evidence = str(area_match.get("evidence") or "").strip()
+        if not is_match_allowed_for_scope(area_match_level, area_scope):
+            inconsistencies.append(
+                area_match_evidence
+                or f"希望エリア「{target_area}」と物件の所在地が一致しないため除外"
+            )
             hard_drop = True
 
     scores = {
@@ -299,20 +314,30 @@ def _rule_review_for_property(
             min_floor = int(floor_match.group(1))
             floor_level = int(prop.get("floor_level") or 0)
             if floor_level > 0 and floor_level < min_floor:
-                scores["listing_consistency"] = 1
-                inconsistencies.append(
-                    f"must条件「{text_condition}」に対して所在階が{floor_level}階のため除外"
-                )
-                hard_drop = True
+                if constraint_mode == "primary":
+                    scores["listing_consistency"] = 1
+                    inconsistencies.append(
+                        f"must条件「{text_condition}」に対して所在階が{floor_level}階のため除外"
+                    )
+                    hard_drop = True
+                else:
+                    scores["listing_consistency"] = min(scores["listing_consistency"], 2)
+                    inconsistencies.append(
+                        f"must条件「{text_condition}」に対して所在階が{floor_level}階で条件緩和候補"
+                    )
             elif floor_level <= 0:
                 scores["evidence_completeness"] = min(scores["evidence_completeness"], 2)
                 inconsistencies.append(f"must条件「{text_condition}」の所在階が未確認")
         if "オートロック" in text_condition:
             has_autolock = prop.get("has_autolock")
             if has_autolock is False:
-                scores["listing_consistency"] = 1
-                inconsistencies.append("must条件「オートロック」に対して無しのため除外")
-                hard_drop = True
+                if constraint_mode == "primary":
+                    scores["listing_consistency"] = 1
+                    inconsistencies.append("must条件「オートロック」に対して無しのため除外")
+                    hard_drop = True
+                else:
+                    scores["listing_consistency"] = min(scores["listing_consistency"], 2)
+                    inconsistencies.append("must条件「オートロック」に対して無しのため条件緩和候補")
             elif has_autolock is None:
                 scores["evidence_completeness"] = min(scores["evidence_completeness"], 2)
                 inconsistencies.append("must条件「オートロック」の有無が未確認")
@@ -425,6 +450,8 @@ def _rule_review_for_property(
         "should_drop": hard_drop or trust_score < 55,
         "review_status": review_status,
         "drop_reason_class": drop_reason_class,
+        "area_match_level": area_match_level,
+        "area_match_evidence": area_match_evidence,
     }
 
 
@@ -646,6 +673,73 @@ def _merge_reviews(
         "should_drop": should_drop,
         "review_status": review_status,
         "drop_reason_class": drop_reason_class,
+        "area_match_level": str(rule_review.get("area_match_level") or "none"),
+        "area_match_evidence": str(rule_review.get("area_match_evidence") or ""),
+    }
+
+
+def _source_key(raw_result: dict[str, Any], detail_url: str) -> str:
+    source_name = str(raw_result.get("source_name") or "unknown").strip() or "unknown"
+    parsed = urlparse(str(raw_result.get("url") or detail_url or ""))
+    host = str(parsed.netloc or "").strip()
+    return f"{source_name}:{host}" if host else source_name
+
+
+def _summarize_source_risk(
+    *,
+    normalized_properties: list[dict[str, Any]],
+    raw_by_url: dict[str, dict[str, Any]],
+    reviews_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    by_source: dict[str, dict[str, Any]] = {}
+    for prop in normalized_properties:
+        detail_url = str(prop.get("detail_url") or "")
+        raw_result = raw_by_url.get(detail_url, {})
+        review = reviews_by_id.get(str(prop.get("property_id_norm") or ""), {})
+        key = _source_key(raw_result, detail_url)
+        bucket = by_source.setdefault(
+            key,
+            {
+                "source_key": key,
+                "source_name": str(raw_result.get("source_name") or "unknown"),
+                "domain": urlparse(str(raw_result.get("url") or detail_url or "")).netloc,
+                "listing_count": 0,
+                "unavailable_count": 0,
+                "pricing_conflict_count": 0,
+                "area_mismatch_count": 0,
+            },
+        )
+        bucket["listing_count"] += 1
+        inconsistencies = " / ".join(str(item) for item in review.get("inconsistencies", []) or [])
+        if review.get("drop_reason_class") == "unavailable":
+            bucket["unavailable_count"] += 1
+        if "家賃" in inconsistencies or "管理費" in inconsistencies:
+            bucket["pricing_conflict_count"] += 1
+        if review.get("drop_reason_class") == "area_mismatch":
+            bucket["area_mismatch_count"] += 1
+
+    source_items = sorted(
+        by_source.values(),
+        key=lambda item: (
+            item["unavailable_count"] * 3
+            + item["pricing_conflict_count"] * 2
+            + item["area_mismatch_count"],
+            item["listing_count"],
+            item["source_key"],
+        ),
+        reverse=True,
+    )
+    for item in source_items:
+        item["risk_score"] = (
+            item["unavailable_count"] * 3
+            + item["pricing_conflict_count"] * 2
+            + item["area_mismatch_count"]
+        )
+    return {
+        "by_source": source_items[:6],
+        "unavailable_count": sum(item["unavailable_count"] for item in source_items),
+        "pricing_conflict_count": sum(item["pricing_conflict_count"] for item in source_items),
+        "area_mismatch_count": sum(item["area_mismatch_count"] for item in source_items),
     }
 
 
@@ -662,6 +756,9 @@ def run_integrity_review(
     listing_type: str = "",
     layout_preference: str = "",
     must_conditions: list[str] | None = None,
+    area_scope: str = "strict",
+    constraint_mode: str = "primary",
+    nearby_hints: list[str] | None = None,
 ) -> dict[str, Any]:
     resolved_today = today or date.today()
     raw_by_url = {
@@ -684,6 +781,9 @@ def run_integrity_review(
             listing_type=listing_type,
             layout_preference=layout_preference,
             must_conditions=must_conditions or [],
+            area_scope=area_scope,
+            constraint_mode=constraint_mode,
+            nearby_hints=nearby_hints,
         )
         rule_reviews_by_id[rule_review["property_id_norm"]] = rule_review
 
@@ -720,6 +820,15 @@ def run_integrity_review(
 
     trust_scores = [int(item.get("trust_score") or 0) for item in merged_reviews]
     avg_trust_score = round(sum(trust_scores) / len(trust_scores), 1) if trust_scores else 0.0
+    source_risk_summary = _summarize_source_risk(
+        normalized_properties=normalized_properties,
+        raw_by_url=raw_by_url,
+        reviews_by_id={
+            str(item.get("property_id_norm") or ""): item
+            for item in merged_reviews
+            if str(item.get("property_id_norm") or "").strip()
+        },
+    )
     dropped_area_mismatch_count = sum(
         1 for item in merged_reviews if item.get("drop_reason_class") == "area_mismatch"
     )
@@ -755,6 +864,7 @@ def run_integrity_review(
                 if normalized_properties
                 else 0.0
             ),
+            "source_risk_summary": source_risk_summary,
             "dropped_area_mismatch_count": dropped_area_mismatch_count,
             "dropped_layout_mismatch_count": dropped_layout_mismatch_count,
             "dropped_must_mismatch_count": dropped_must_mismatch_count,

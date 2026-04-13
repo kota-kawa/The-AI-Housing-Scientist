@@ -208,7 +208,7 @@ def test_final_report_fallback_says_no_recommendation_without_candidates():
                         "branch_id": "node-1",
                         "label": "strict",
                         "depth": 1,
-                        "strategy_tags": ["tighten_match"],
+                        "strategy_tags": ["strict_primary"],
                         "branch_score": 8.0,
                     }
                 ],

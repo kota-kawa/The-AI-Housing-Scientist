@@ -6,7 +6,7 @@ from app.db import Database
 from app.llm.base import LLMAdapter
 from app.orchestrator import HousingOrchestrator
 from app.research.agent_manager import (
-    HousingResearchAgentManager,
+    HousingResearchAgentManager as _HousingResearchAgentManager,
     ResearchExecutionState,
     SearchNodeArtifacts,
     SearchNodePlan,
@@ -92,6 +92,21 @@ class FakePlannerRouteAdapter(LLMAdapter):
 
     def list_models(self) -> list[str]:
         return ["fake-planner-model"]
+
+
+def passthrough_branch_family_queries(
+    user_memory: dict[str, object],
+    seed_queries: list[str],
+    **_: object,
+) -> list[str]:
+    return list(seed_queries)
+
+
+def make_manager(**kwargs):
+    return _HousingResearchAgentManager(
+        build_branch_family_queries=passthrough_branch_family_queries,
+        **kwargs,
+    )
 
 
 def test_research_job_records_branch_tree_and_evaluations(tmp_path: Path):
@@ -219,7 +234,7 @@ def test_register_frontier_node_uses_executed_count_for_tree_budget(tmp_path: Pa
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -298,7 +313,7 @@ def test_branch_result_nodes_keep_empty_integrity_result_instead_of_normalize_fa
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -319,7 +334,7 @@ def test_branch_result_nodes_keep_empty_integrity_result_instead_of_normalize_fa
         description="strict plan",
         queries=["町田 賃貸 ワンルーム"],
         ranking_profile={},
-        strategy_tags=["tighten_match"],
+        strategy_tags=["strict_primary"],
         depth=1,
     )
     artifact = SearchNodeArtifacts(
@@ -362,7 +377,7 @@ def test_display_candidate_pool_prefers_selected_path_aggregate_and_merges_snaps
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -508,7 +523,8 @@ def test_display_candidate_pool_prefers_selected_path_aggregate_and_merges_snaps
 
     display_ranked, display_normalized = manager._build_display_candidate_pool(
         state=state,
-        selected_branch_result_summary={
+        branch_id="child",
+        branch_result_summary={
             PROPERTY_CANDIDATES_KEY: [
                 {
                     "property_id_norm": "p-root",
@@ -549,7 +565,105 @@ def test_display_candidate_pool_prefers_selected_path_aggregate_and_merges_snaps
     assert display_ranked[1]["why_not_selected"] == "管理費は要確認"
 
 
-def test_initial_node_plans_prioritize_success_path_and_exclude_avoided_strategies(tmp_path: Path):
+def test_ensure_minimum_display_candidates_backfills_from_raw_results(tmp_path: Path):
+    database_path = str(tmp_path / "housing.db")
+    db = Database(database_path)
+    db.init()
+
+    session_id, _ = db.create_session()
+    approved_plan = {"user_memory_snapshot": {"learned_preferences": {}}}
+    job_id, _ = db.create_research_job(
+        session_id=session_id,
+        provider="openai",
+        llm_config={},
+        approved_plan=approved_plan,
+    )
+    manager = make_manager(
+        db=db,
+        session_id=session_id,
+        job_id=job_id,
+        approved_plan=approved_plan,
+        user_memory=approved_plan["user_memory_snapshot"],
+        task_memory={},
+        provider="openai",
+        research_adapter=None,
+        build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        collect_search_results=lambda **kwargs: ([], {}),
+        fetch_detail_html=lambda url: None,
+        collect_source_items=lambda **kwargs: [],
+    )
+    state = ResearchExecutionState()
+    plan = SearchNodePlan(
+        node_key="strict-primary",
+        label="strict",
+        description="strict plan",
+        queries=["江東区 賃貸 1LDK"],
+        ranking_profile={},
+        strategy_tags=["strict_primary"],
+        depth=1,
+        branch_family="strict_primary",
+        area_scope="strict",
+        constraint_mode="primary",
+    )
+    artifact = SearchNodeArtifacts(
+        plan=plan,
+        query_hash=manager._hash_queries(plan.queries, plan.ranking_profile),
+        frontier_score=22.0,
+        status="completed",
+    )
+    artifact.retrieve = {
+        "raw_results": [
+            {
+                "title": "東雲ベイテラス",
+                "url": "https://example.com/p1",
+                "description": "家賃は要確認。東雲エリアの参考候補。",
+                "source_name": "catalog",
+            },
+            {
+                "title": "豊洲リバーサイド",
+                "url": "https://example.com/p2",
+                "description": "豊洲駅周辺の参考候補。",
+                "source_name": "catalog",
+            },
+            {
+                "title": "有明フロント",
+                "url": "https://example.com/p3",
+                "description": "条件を緩めた再探索で見つかった候補。",
+                "source_name": "catalog",
+            },
+        ]
+    }
+    artifact.summary = {
+        "branch_id": plan.node_key,
+        "status": "completed",
+        "label": plan.label,
+        "branch_family": plan.branch_family,
+        "branch_score": 22.0,
+        "depth": 1,
+    }
+    state.node_artifacts[plan.node_key] = artifact
+    state.branch_summaries = [artifact.summary]
+
+    ranked, normalized, source = manager._ensure_minimum_display_candidates(
+        state,
+        display_ranked_properties=[],
+        display_normalized_properties=[],
+        alternative_display_groups=[],
+    )
+
+    assert source == "raw_result_fill"
+    assert len(ranked) == 3
+    assert len(normalized) == 3
+    assert [item["building_name"] for item in ranked] == [
+        "東雲ベイテラス",
+        "豊洲リバーサイド",
+        "有明フロント",
+    ]
+    assert all("参考候補" in item["why_selected"] for item in ranked)
+    assert all(item["property_id_norm"] for item in normalized)
+
+
+def test_initial_node_plans_create_fixed_branch_families(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
     db.init()
@@ -566,7 +680,7 @@ def test_initial_node_plans_prioritize_success_path_and_exclude_avoided_strategi
             "learned_preferences": {
                 "strategy_memory": {
                     "preferred_strategy_tags": ["detail_first", "schema_first"],
-                    "avoided_strategy_tags": ["relax_for_coverage"],
+                    "avoided_strategy_tags": ["detail_first"],
                     "last_successful_path": ["source_diversify", "detail_first"],
                 }
             },
@@ -578,7 +692,7 @@ def test_initial_node_plans_prioritize_success_path_and_exclude_avoided_strategi
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -595,14 +709,24 @@ def test_initial_node_plans_prioritize_success_path_and_exclude_avoided_strategi
     state = ResearchExecutionState(query="江東区 賃貸 1LDK", seed_queries=["江東区 賃貸 1LDK"])
 
     plans = manager._initial_node_plans(state)
-    operators = [plan.strategy_tags[0] for plan in plans]
+    assert [
+        (plan.branch_family, plan.area_scope, plan.constraint_mode)
+        for plan in plans
+    ] == [
+        ("strict_primary", "strict", "primary"),
+        ("strict_relaxed", "strict", "relaxed"),
+        ("nearby_primary", "nearby", "primary"),
+        ("nearby_relaxed", "nearby", "relaxed"),
+    ]
+    assert [plan.strategy_tags for plan in plans] == [
+        ["strict_primary"],
+        ["strict_relaxed"],
+        ["nearby_primary"],
+        ["nearby_relaxed"],
+    ]
 
-    assert operators[0] == "source_diversify"
-    assert "relax_for_coverage" not in operators
-    assert "detail_first" in operators
 
-
-def test_initial_node_plans_use_retry_issues_to_change_seed_strategies(tmp_path: Path):
+def test_initial_node_plans_use_family_query_builder_and_nearby_hints(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
     db.init()
@@ -626,7 +750,7 @@ def test_initial_node_plans_use_retry_issues_to_change_seed_strategies(tmp_path:
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = _HousingResearchAgentManager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -636,6 +760,12 @@ def test_initial_node_plans_use_retry_issues_to_change_seed_strategies(tmp_path:
         provider="openai",
         research_adapter=None,
         build_research_queries=lambda user_memory, seed_queries: seed_queries,
+        build_branch_family_queries=lambda user_memory, seed_queries, **kwargs: {
+            ("strict", "primary"): ["江東区 賃貸 1LDK strict"],
+            ("strict", "relaxed"): ["江東区 賃貸 1LDK relaxed"],
+            ("nearby", "primary"): ["豊洲 賃貸 1LDK", "東雲 賃貸 1LDK"],
+            ("nearby", "relaxed"): ["有明 賃貸 1LDK 緩和"],
+        }[(kwargs["area_scope"], kwargs["constraint_mode"])],
         collect_search_results=lambda **kwargs: ([], {}),
         fetch_detail_html=lambda url: None,
         collect_source_items=lambda **kwargs: [],
@@ -643,9 +773,15 @@ def test_initial_node_plans_use_retry_issues_to_change_seed_strategies(tmp_path:
     state = ResearchExecutionState(query="江東区 賃貸 1LDK", seed_queries=["江東区 賃貸 1LDK"])
 
     plans = manager._initial_node_plans(state)
-    operators = [plan.strategy_tags[0] for plan in plans]
-
-    assert operators[:2] == ["detail_first", "schema_first"]
+    plans_by_family = {plan.branch_family: plan for plan in plans}
+    assert plans_by_family["strict_primary"].queries == ["江東区 賃貸 1LDK strict"]
+    assert plans_by_family["strict_relaxed"].queries == ["江東区 賃貸 1LDK relaxed"]
+    assert plans_by_family["nearby_primary"].queries == [
+        "豊洲 賃貸 1LDK",
+        "東雲 賃貸 1LDK",
+    ]
+    assert plans_by_family["nearby_primary"].nearby_hints == ["豊洲", "東雲"]
+    assert plans_by_family["nearby_relaxed"].constraint_mode == "relaxed"
 
 
 def test_research_tools_reuse_query_and_detail_caches(tmp_path: Path):
@@ -680,7 +816,7 @@ def test_research_tools_reuse_query_and_detail_caches(tmp_path: Path):
         detail_calls.append(url)
         return f"<html>{url}</html>"
 
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -745,7 +881,7 @@ def test_expand_branch_batch_runs_candidates_in_parallel(tmp_path: Path, monkeyp
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -867,7 +1003,7 @@ def test_parallel_research_tools_share_singleflight_cache(tmp_path: Path):
         assert release_detail.wait(timeout=1.0)
         return f"<html>{url}</html>"
 
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -967,7 +1103,7 @@ def test_live_progress_summary_shows_current_action_and_recent_history(tmp_path:
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1017,7 +1153,7 @@ def test_tool_enrich_updates_job_with_live_detail_url(tmp_path: Path):
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1069,7 +1205,7 @@ def test_select_frontier_nodes_balances_best_branch_and_alternative(tmp_path: Pa
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1152,7 +1288,7 @@ def test_best_node_readiness_uses_cached_artifact_value(tmp_path: Path, monkeypa
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1209,7 +1345,7 @@ def test_tree_search_waits_for_min_nodes_before_stable_stop(tmp_path: Path, monk
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1276,7 +1412,7 @@ def test_tree_search_waits_for_min_nodes_before_stable_stop(tmp_path: Path, monk
     assert state.termination_reason == "stable_high_readiness"
 
 
-def test_initial_operator_count_scales_with_task_complexity(tmp_path: Path):
+def test_initial_node_plans_always_start_with_four_families(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
     db.init()
@@ -1299,7 +1435,7 @@ def test_initial_operator_count_scales_with_task_complexity(tmp_path: Path):
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1314,11 +1450,16 @@ def test_initial_operator_count_scales_with_task_complexity(tmp_path: Path):
         collect_source_items=lambda **kwargs: [],
     )
 
-    assert manager._initial_operator_count() == 5
-    assert len(manager._initial_operators()) == 5
+    plans = manager._initial_node_plans(ResearchExecutionState(query="q", seed_queries=["q"]))
+    assert [plan.branch_family for plan in plans] == [
+        "strict_primary",
+        "strict_relaxed",
+        "nearby_primary",
+        "nearby_relaxed",
+    ]
 
 
-def test_initial_operator_count_stays_small_for_simple_tasks(tmp_path: Path):
+def test_initial_node_plans_keep_fixed_family_count_for_simple_tasks(tmp_path: Path):
     database_path = str(tmp_path / "housing.db")
     db = Database(database_path)
     db.init()
@@ -1338,7 +1479,7 @@ def test_initial_operator_count_stays_small_for_simple_tasks(tmp_path: Path):
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1353,8 +1494,8 @@ def test_initial_operator_count_stays_small_for_simple_tasks(tmp_path: Path):
         collect_source_items=lambda **kwargs: [],
     )
 
-    assert manager._initial_operator_count() == 2
-    assert len(manager._initial_operators()) == 2
+    plans = manager._initial_node_plans(ResearchExecutionState(query="q", seed_queries=["q"]))
+    assert len(plans) == 4
 
 
 def test_children_budget_for_summary_adapts_to_quality(tmp_path: Path):
@@ -1370,7 +1511,7 @@ def test_children_budget_for_summary_adapts_to_quality(tmp_path: Path):
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1404,7 +1545,7 @@ def test_recovery_operators_respect_adaptive_children_budget(tmp_path: Path):
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1444,7 +1585,7 @@ def test_recovery_operators_respect_adaptive_children_budget(tmp_path: Path):
         },
     )
 
-    assert operators == ["source_diversify", "relax_for_coverage", "tighten_match"]
+    assert operators == ["source_diversify", "detail_first", "exploit_best"]
 
 
 def test_tree_search_expands_recovery_nodes_after_initial_failures(tmp_path: Path):
@@ -1474,7 +1615,7 @@ def test_tree_search_expands_recovery_nodes_after_initial_failures(tmp_path: Pat
     def fail_collect_search_results(**kwargs):
         raise RuntimeError("search backend unavailable")
 
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,
@@ -1519,7 +1660,7 @@ def test_tree_search_attaches_branch_result_summary_before_final_selection(
         llm_config={},
         approved_plan=approved_plan,
     )
-    manager = HousingResearchAgentManager(
+    manager = make_manager(
         db=db,
         session_id=session_id,
         job_id=job_id,

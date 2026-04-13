@@ -14,6 +14,12 @@ REPEATED_ISSUE_HARD_BRANCH_SCORE_IMPROVEMENT = 12.0
 REPEATED_ISSUE_MIN_DETAIL_COVERAGE_IMPROVEMENT = 0.12
 REPEATED_ISSUE_MIN_AVG_TOP3_IMPROVEMENT = 6.0
 REPEATED_ISSUE_MIN_NORMALIZED_COUNT_IMPROVEMENT = 2
+BRANCH_FAMILY_PRIORITY = {
+    "nearby_relaxed": 1,
+    "nearby_primary": 2,
+    "strict_relaxed": 3,
+    "strict_primary": 4,
+}
 
 
 # JP: metric valueを処理する。
@@ -111,17 +117,17 @@ def _expand_recommendations_from_issues(issues: list[str], top_score: float) -> 
     recommendations: list[str] = []
     joined = " / ".join(issues)
     if "詳細ページ補完率" in joined:
-        recommendations.extend(["detail_first", "source_diversify"])
+        recommendations.extend(["detail_first", "schema_first"])
     if "欠損" in joined:
-        recommendations.extend(["schema_first", "tighten_match"])
+        recommendations.extend(["schema_first", "detail_first"])
     if "条件一致度" in joined:
-        recommendations.extend(["tighten_match", "relax_for_coverage"])
+        recommendations.extend(["exploit_best", "source_diversify"])
     if "情報源" in joined:
-        recommendations.extend(["source_diversify", "relax_for_coverage"])
+        recommendations.extend(["source_diversify", "detail_first"])
     if not recommendations and top_score >= 60:
-        recommendations.extend(["exploit_best", "explore_adjacent"])
+        recommendations.extend(["exploit_best", "source_diversify"])
     elif not recommendations:
-        recommendations.extend(["relax_for_coverage", "source_diversify"])
+        recommendations.extend(["detail_first", "source_diversify"])
     deduped: list[str] = []
     for item in recommendations:
         if item not in deduped:
@@ -148,17 +154,23 @@ def evaluate_branch(
     intent: ResearchIntent = "draft",
     is_failed: bool = False,
     debug_depth: int = 0,
+    branch_family: str = "strict_primary",
+    area_scope: str = "strict",
+    constraint_mode: str = "primary",
 ) -> dict[str, Any]:
     normalized_count = len(normalized_properties)
     rankable_candidate_count = len(ranked_properties)
-    strict_match_count = sum(
-        1 for item in ranked_properties if float(item.get("score") or 0.0) >= 60.0
+    strict_match_count = (
+        sum(1 for item in ranked_properties if float(item.get("score") or 0.0) >= 60.0)
+        if branch_family == "strict_primary"
+        else 0
     )
     detail_hit_count = int(search_summary.get("detail_hit_count", 0) or 0)
     integrity_input_count = int(search_summary.get("integrity_input_count", normalized_count) or 0)
     integrity_dropped_count = int(search_summary.get("integrity_dropped_count", 0) or 0)
     integrity_drop_ratio = float(search_summary.get("integrity_drop_ratio", 0.0) or 0.0)
     dropped_area_mismatch_count = int(search_summary.get("dropped_area_mismatch_count", 0) or 0)
+    source_risk_summary = dict(search_summary.get("source_risk_summary", {}) or {})
     detail_denominator = integrity_input_count or normalized_count
     detail_coverage = round(detail_hit_count / detail_denominator, 3) if detail_denominator else 0.0
     detail_coverage = min(detail_coverage, 1.0)
@@ -189,6 +201,13 @@ def evaluate_branch(
     score += _score_from_range(source_diversity, min_value=1, max_value=3) * 10.0
     score -= duplicate_ratio * 5.0
     score -= integrity_drop_ratio * 10.0
+    source_risk_penalty = min(
+        12.0,
+        float(source_risk_summary.get("unavailable_count", 0) or 0) * 1.5
+        + float(source_risk_summary.get("pricing_conflict_count", 0) or 0) * 2.0
+        + float(source_risk_summary.get("area_mismatch_count", 0) or 0) * 1.0,
+    )
+    score -= source_risk_penalty
 
     if normalized_count == 0:
         score = min(score, 8.0 if raw_results else 0.0)
@@ -224,6 +243,9 @@ def evaluate_branch(
     if dropped_area_mismatch_count > 0:
         issues.append("エリア不一致で除外された候補が多い")
         recommendations.append("対象エリアを固定した strict 探索と近隣探索を分ける")
+    if source_risk_penalty >= 4.0:
+        issues.append("信頼性の低い情報源の比率が高い")
+        recommendations.append("募集終了表記や数値矛盾の多いソースは優先度を下げる")
 
     summary = (
         f"{label}: score={round(score, 2)}, "
@@ -251,6 +273,9 @@ def evaluate_branch(
         "queries": queries,
         "query_hash": query_hash,
         "strategy_tags": [str(tag).strip() for tag in strategy_tags or [] if str(tag).strip()],
+        "branch_family": branch_family,
+        "area_scope": area_scope,
+        "constraint_mode": constraint_mode,
         "raw_result_count": len(raw_results),
         "normalized_count": normalized_count,
         "viable_candidate_count": normalized_count,
@@ -269,6 +294,8 @@ def evaluate_branch(
         "top_score": top_score,
         "avg_top3_score": avg_top3_score,
         "source_diversity": source_diversity,
+        "source_risk_summary": source_risk_summary,
+        "source_risk_penalty": round(source_risk_penalty, 2),
         "branch_score": round(score, 2),
         "frontier_score": frontier_score,
         "delta_from_parent": delta_from_parent,
@@ -285,6 +312,8 @@ def evaluate_branch(
 # EN: Process branch selection sort key.
 def branch_selection_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     return (
+        BRANCH_FAMILY_PRIORITY.get(str(item.get("branch_family") or "").strip(), 0),
+        int(item.get("rankable_candidate_count") or 0) > 0,
         _summary_metric(item, "branch_score"),
         _summary_metric(item, "frontier_score"),
         _summary_metric(item, "debug_depth", maximize=False),
@@ -364,6 +393,23 @@ def select_best_branch(branch_summaries: list[dict[str, Any]]) -> dict[str, Any]
         )
     ]
     candidates = eligible or completed
+    preferred_family_priority = max(
+        (
+            BRANCH_FAMILY_PRIORITY.get(str(item.get("branch_family") or "").strip(), 0)
+            for item in candidates
+            if int(item.get("rankable_candidate_count") or 0) > 0
+        ),
+        default=0,
+    )
+    if preferred_family_priority > 0:
+        family_candidates = [
+            item
+            for item in candidates
+            if BRANCH_FAMILY_PRIORITY.get(str(item.get("branch_family") or "").strip(), 0)
+            == preferred_family_priority
+        ]
+        if family_candidates:
+            candidates = family_candidates
     return max(candidates, key=branch_selection_sort_key)
 
 

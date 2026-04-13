@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
-from app.research.offline_eval import evaluate_final_result, summarize_branch_failures
+from app.research.offline_eval import (
+    BRANCH_FAMILY_PRIORITY,
+    evaluate_final_result,
+    summarize_branch_failures,
+)
 from app.stages.result_summarizer import PROPERTY_CANDIDATES_KEY
 
 from .agent_manager_types import (
@@ -12,6 +17,7 @@ from .agent_manager_types import (
 )
 
 DISPLAY_CANDIDATE_LIMIT = 6
+MIN_DISPLAY_CANDIDATE_COUNT = 3
 
 
 class AgentManagerExecutionMixin:
@@ -106,13 +112,14 @@ class AgentManagerExecutionMixin:
                 filled[field] = value
         return filled
 
-    # JP: selected pathの完了artifactsを取得する。
-    # EN: Get completed artifacts on the selected path.
-    def _selected_path_completed_artifacts(
+    # JP: branch pathの完了artifactsを取得する。
+    # EN: Get completed artifacts on one branch path.
+    def _completed_artifacts_for_branch(
         self,
         state: ResearchExecutionState,
+        *,
+        branch_id: str,
     ) -> list[SearchNodeArtifacts]:
-        branch_id = str(state.selected_branch_summary.get("branch_id") or "")
         if not branch_id:
             return []
         return [
@@ -127,10 +134,11 @@ class AgentManagerExecutionMixin:
         self,
         *,
         state: ResearchExecutionState,
-        selected_branch_result_summary: dict[str, Any],
+        branch_id: str,
+        branch_result_summary: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         entries_by_key: dict[str, dict[str, Any]] = {}
-        for artifacts in self._selected_path_completed_artifacts(state):
+        for artifacts in self._completed_artifacts_for_branch(state, branch_id=branch_id):
             if "normalized_properties" in artifacts.integrity:
                 normalized_properties = list(artifacts.integrity.get("normalized_properties", []) or [])
             else:
@@ -189,9 +197,7 @@ class AgentManagerExecutionMixin:
                 if label and label not in existing["source_nodes"]:
                     existing["source_nodes"].append(label)
 
-        summary_candidates = list(
-            selected_branch_result_summary.get(PROPERTY_CANDIDATES_KEY, []) or []
-        )
+        summary_candidates = list(branch_result_summary.get(PROPERTY_CANDIDATES_KEY, []) or [])
         summary_by_key = {
             self._display_candidate_key(item): item
             for item in summary_candidates
@@ -262,6 +268,271 @@ class AgentManagerExecutionMixin:
 
         return display_ranked_properties, display_normalized_properties
 
+    # JP: branch summaryを取得する。
+    # EN: Get branch summary by id.
+    def _branch_summary_by_id(
+        self,
+        state: ResearchExecutionState,
+        *,
+        branch_id: str,
+    ) -> dict[str, Any]:
+        for item in state.branch_summaries:
+            if str(item.get("branch_id") or "") == branch_id:
+                return dict(item)
+        return {}
+
+    # JP: family failure summaryを構築する。
+    # EN: Build failure summary per family.
+    def _family_failure_summary(self, state: ResearchExecutionState) -> dict[str, Any]:
+        summaries: dict[str, Any] = {}
+        for family in [
+            "strict_primary",
+            "strict_relaxed",
+            "nearby_primary",
+            "nearby_relaxed",
+        ]:
+            family_summaries = [
+                item
+                for item in state.branch_summaries
+                if str(item.get("branch_family") or "") == family
+            ]
+            if not family_summaries:
+                continue
+            summary = summarize_branch_failures(family_summaries)
+            if summary.get("top_issues"):
+                summaries[family] = summary
+        return summaries
+
+    # JP: alternative display groupsを構築する。
+    # EN: Build display groups for alternative families.
+    def _build_alternative_display_groups(self, state: ResearchExecutionState) -> list[dict[str, Any]]:
+        groups: list[dict[str, Any]] = []
+        for branch_id in state.alternative_branch_ids[:3]:
+            artifacts = state.node_artifacts.get(branch_id)
+            if artifacts is None:
+                continue
+            branch_summary = self._branch_summary_by_id(state, branch_id=branch_id)
+            branch_result_summary = (
+                artifacts.integrity.get("branch_result_summary", {})
+                or artifacts.normalize.get("branch_result_summary", {})
+                or branch_summary.get("branch_result_summary", {})
+            )
+            ranked_properties, normalized_properties = self._build_display_candidate_pool(
+                state=state,
+                branch_id=branch_id,
+                branch_result_summary=branch_result_summary,
+            )
+            if not ranked_properties:
+                ranked_properties = list(artifacts.rank.get("ranked_properties", []))[:DISPLAY_CANDIDATE_LIMIT]
+                visible_ids = {
+                    str(item.get("property_id_norm") or "").strip()
+                    for item in ranked_properties
+                    if str(item.get("property_id_norm") or "").strip()
+                }
+                normalized_source = (
+                    artifacts.integrity.get("normalized_properties", [])
+                    if "normalized_properties" in artifacts.integrity
+                    else artifacts.normalize.get("normalized_properties", [])
+                )
+                normalized_properties = [
+                    item
+                    for item in normalized_source
+                    if str(item.get("property_id_norm") or "").strip() in visible_ids
+                ]
+            if not ranked_properties:
+                continue
+            groups.append(
+                {
+                    "branch_id": branch_id,
+                    "label": str(branch_summary.get("label") or artifacts.plan.label or "別枠候補"),
+                    "branch_family": str(
+                        branch_summary.get("branch_family") or artifacts.plan.branch_family or ""
+                    ),
+                    "ranked_properties": ranked_properties,
+                    "normalized_properties": normalized_properties,
+                    }
+                )
+        return groups
+
+    # JP: raw resultから表示用候補を構築する。
+    # EN: Build display candidates from raw results.
+    def _build_raw_result_display_candidates(
+        self,
+        state: ResearchExecutionState,
+        *,
+        excluded_property_ids: set[str],
+        excluded_urls: set[str],
+        limit: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        ranked_properties: list[dict[str, Any]] = []
+        normalized_properties: list[dict[str, Any]] = []
+        seen_urls = {str(url).strip() for url in excluded_urls if str(url).strip()}
+        seen_titles: set[str] = set()
+        completed_summaries = sorted(
+            [
+                item
+                for item in state.branch_summaries
+                if str(item.get("status") or "").strip() == "completed"
+            ],
+            key=lambda item: (
+                BRANCH_FAMILY_PRIORITY.get(str(item.get("branch_family") or "").strip(), 0),
+                float(item.get("branch_score") or 0.0),
+                -int(item.get("depth") or 0),
+            ),
+            reverse=True,
+        )
+        for summary in completed_summaries:
+            branch_id = str(summary.get("branch_id") or "").strip()
+            artifacts = state.node_artifacts.get(branch_id)
+            if artifacts is None:
+                continue
+            label = str(summary.get("label") or artifacts.plan.label or "検索候補")
+            raw_results = list(artifacts.retrieve.get("raw_results", []) or [])
+            for raw in raw_results:
+                url = str(raw.get("url") or "").strip()
+                title = str(raw.get("title") or "").strip()
+                if url and url in seen_urls:
+                    continue
+                if not url and title and title in seen_titles:
+                    continue
+                if not url and not title:
+                    continue
+                property_id = (
+                    str(raw.get("property_id_norm") or "").strip()
+                    or f"fallback-{hashlib.sha1((url or title).encode('utf-8')).hexdigest()[:12]}"
+                )
+                if property_id in excluded_property_ids:
+                    continue
+                description = str(raw.get("description") or "").strip()
+                extra_snippets = [
+                    str(item).strip()
+                    for item in raw.get("extra_snippets", []) or []
+                    if str(item).strip()
+                ]
+                notes_parts = [description] + extra_snippets[:2]
+                notes = " / ".join(part for part in notes_parts if part).strip()
+                source_name = str(raw.get("source_name") or "source").strip() or "source"
+                why_selected = (
+                    f"{label} で検索ヒットした参考候補です。"
+                    " 条件を柔軟に広げた再表示枠として残しています。"
+                )
+                why_not_selected = (
+                    "家賃・駅徒歩・間取りの一部が未取得のため、"
+                    "詳細ページで再確認が必要です。"
+                )
+                normalized_properties.append(
+                    {
+                        "property_id_norm": property_id,
+                        "building_name": title or "参考候補",
+                        "detail_url": url,
+                        "image_url": str(raw.get("image_url") or "").strip(),
+                        "address": str(raw.get("address") or "").strip(),
+                        "area_name": str(raw.get("area_name") or "").strip(),
+                        "rent": int(raw.get("rent") or 0),
+                        "layout": str(raw.get("layout") or "").strip(),
+                        "station_walk_min": int(raw.get("station_walk_min") or 0),
+                        "area_m2": float(raw.get("area_m2") or 0.0),
+                        "nearest_station": str(raw.get("nearest_station") or "").strip(),
+                        "features": [],
+                        "notes": notes or f"{source_name} の検索結果から取得した参考候補です。",
+                    }
+                )
+                ranked_properties.append(
+                    {
+                        "property_id_norm": property_id,
+                        "score": round(max(10.0, 38.0 - len(ranked_properties) * 2.5), 2),
+                        "why_selected": why_selected,
+                        "why_not_selected": why_not_selected,
+                        "reason": why_selected,
+                        "building_name": title or "参考候補",
+                        "detail_url": url,
+                        "source_nodes": [label],
+                        "reference_only": True,
+                    }
+                )
+                excluded_property_ids.add(property_id)
+                if url:
+                    seen_urls.add(url)
+                if title:
+                    seen_titles.add(title)
+                if len(ranked_properties) >= limit:
+                    return ranked_properties, normalized_properties
+        return ranked_properties, normalized_properties
+
+    # JP: 表示候補を minimum 件数まで補完する。
+    # EN: Ensure the display candidate list reaches the minimum count.
+    def _ensure_minimum_display_candidates(
+        self,
+        state: ResearchExecutionState,
+        *,
+        display_ranked_properties: list[dict[str, Any]],
+        display_normalized_properties: list[dict[str, Any]],
+        alternative_display_groups: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+        ranked = list(display_ranked_properties)
+        normalized_by_id = {
+            str(item.get("property_id_norm") or "").strip(): dict(item)
+            for item in display_normalized_properties
+            if str(item.get("property_id_norm") or "").strip()
+        }
+        normalized = list(normalized_by_id.values())
+        existing_property_ids = {
+            str(item.get("property_id_norm") or "").strip()
+            for item in ranked
+            if str(item.get("property_id_norm") or "").strip()
+        }
+        existing_urls = {
+            str(item.get("detail_url") or "").strip()
+            for item in normalized
+            if str(item.get("detail_url") or "").strip()
+        }
+        if len(ranked) >= MIN_DISPLAY_CANDIDATE_COUNT:
+            return ranked, normalized, ""
+
+        # JP: まず別 family のランク済み候補で補完する。
+        # EN: Fill from alternative family candidates first.
+        for group in alternative_display_groups:
+            group_by_id = {
+                str(item.get("property_id_norm") or "").strip(): dict(item)
+                for item in group.get("normalized_properties", []) or []
+                if str(item.get("property_id_norm") or "").strip()
+            }
+            for item in group.get("ranked_properties", []) or []:
+                property_id = str(item.get("property_id_norm") or "").strip()
+                if not property_id or property_id in existing_property_ids:
+                    continue
+                prop = group_by_id.get(property_id)
+                if prop is None:
+                    continue
+                ranked.append(dict(item))
+                normalized_by_id[property_id] = prop
+                normalized.append(prop)
+                existing_property_ids.add(property_id)
+                detail_url = str(prop.get("detail_url") or "").strip()
+                if detail_url:
+                    existing_urls.add(detail_url)
+                if len(ranked) >= MIN_DISPLAY_CANDIDATE_COUNT:
+                    return ranked, normalized, "alternative_branch_fill"
+
+        # JP: それでも不足する場合は raw result を参考候補として表示する。
+        # EN: Fall back to raw search results when ranked candidates are still insufficient.
+        missing_count = MIN_DISPLAY_CANDIDATE_COUNT - len(ranked)
+        raw_ranked, raw_normalized = self._build_raw_result_display_candidates(
+            state,
+            excluded_property_ids=existing_property_ids,
+            excluded_urls=existing_urls,
+            limit=missing_count,
+        )
+        for prop in raw_normalized:
+            property_id = str(prop.get("property_id_norm") or "").strip()
+            if property_id and property_id not in normalized_by_id:
+                normalized_by_id[property_id] = prop
+                normalized.append(prop)
+        ranked.extend(raw_ranked)
+        if raw_ranked:
+            return ranked, normalized, "raw_result_fill"
+        return ranked, normalized, ""
+
     # JP: synthesizeを処理する。
     # EN: Handle synthesize.
     def _handle_synthesize(self, state: ResearchExecutionState) -> str | None:
@@ -271,7 +542,7 @@ class AgentManagerExecutionMixin:
         selected_integrity = selected_artifacts.integrity if selected_artifacts else {}
         selected_retrieve = selected_artifacts.retrieve if selected_artifacts else {}
         selected_enrich = selected_artifacts.enrich if selected_artifacts else {}
-        selected_branch_result_summary = (
+        selected_result_summary = (
             selected_integrity.get("branch_result_summary", {})
             or selected_normalize.get("branch_result_summary", {})
             or state.selected_branch_summary.get("branch_result_summary", {})
@@ -283,7 +554,8 @@ class AgentManagerExecutionMixin:
         )
         display_ranked_properties, display_normalized_properties = self._build_display_candidate_pool(
             state=state,
-            selected_branch_result_summary=selected_branch_result_summary,
+            branch_id=str(state.selected_branch_summary.get("branch_id") or ""),
+            branch_result_summary=selected_result_summary,
         )
         display_candidate_source = "selected_path_aggregate"
         if not display_ranked_properties:
@@ -301,13 +573,45 @@ class AgentManagerExecutionMixin:
                 if str(item.get("property_id_norm") or "").strip() in visible_ids
             ]
             display_candidate_source = "selected_leaf_fallback"
+        state.alternative_display_groups = self._build_alternative_display_groups(state)
+        (
+            display_ranked_properties,
+            display_normalized_properties,
+            minimum_fill_source,
+        ) = self._ensure_minimum_display_candidates(
+            state,
+            display_ranked_properties=display_ranked_properties,
+            display_normalized_properties=display_normalized_properties,
+            alternative_display_groups=state.alternative_display_groups,
+        )
+        if minimum_fill_source:
+            display_candidate_source = (
+                f"{display_candidate_source}+{minimum_fill_source}"
+                if display_candidate_source
+                else minimum_fill_source
+            )
         state.display_ranked_properties = display_ranked_properties
         state.display_normalized_properties = display_normalized_properties
 
+        source_ranked_properties = (
+            list(selected_rank.get("ranked_properties", [])) or display_ranked_properties
+        )
+        source_normalized_properties = selected_properties or display_normalized_properties
+        source_raw_results = list(selected_retrieve.get("raw_results", []))
+        if not source_raw_results:
+            seen_urls: set[str] = set()
+            for artifacts in state.node_artifacts.values():
+                for item in artifacts.retrieve.get("raw_results", []) or []:
+                    url = str(item.get("url") or "").strip()
+                    if url and url in seen_urls:
+                        continue
+                    if url:
+                        seen_urls.add(url)
+                    source_raw_results.append(item)
         state.source_items = self.collect_source_items(
-            ranked_properties=selected_rank.get("ranked_properties", []),
-            normalized_properties=selected_properties,
-            raw_results=selected_retrieve.get("raw_results", []),
+            ranked_properties=source_ranked_properties,
+            normalized_properties=source_normalized_properties,
+            raw_results=source_raw_results,
         )
         state.search_summary = (
             selected_normalize.get("summary", {})
@@ -322,9 +626,14 @@ class AgentManagerExecutionMixin:
         )
         state.search_summary["display_candidate_count"] = len(display_ranked_properties)
         state.search_summary["display_candidate_source"] = display_candidate_source
-        if selected_branch_result_summary:
-            state.search_summary["branch_result_summary"] = selected_branch_result_summary
+        state.search_summary["selected_branch_family"] = str(
+            state.selected_branch_summary.get("branch_family") or ""
+        )
+        state.search_summary["alternative_branch_ids"] = list(state.alternative_branch_ids)
+        if selected_result_summary:
+            state.search_summary["branch_result_summary"] = selected_result_summary
         state.failure_summary = summarize_branch_failures(state.branch_summaries)
+        state.family_failure_summary = self._family_failure_summary(state)
         state.offline_evaluation = evaluate_final_result(
             selected_branch_summary=state.selected_branch_summary,
             visible_ranked_properties=display_ranked_properties,
@@ -332,6 +641,7 @@ class AgentManagerExecutionMixin:
         )
         state.offline_evaluation["selected_path"] = state.selected_path
         state.offline_evaluation["search_tree_summary"] = state.search_tree_summary
+        state.offline_evaluation["alternative_branch_ids"] = state.alternative_branch_ids
         self._update_live_progress(
             stage_name="synthesize",
             progress_percent=92,
@@ -347,7 +657,7 @@ class AgentManagerExecutionMixin:
             search_summary=state.search_summary,
             source_items=state.source_items,
             offline_evaluation=state.offline_evaluation,
-            branch_result_summary=selected_branch_result_summary,
+            branch_result_summary=selected_result_summary,
         )
         if self.research_adapter is not None:
             try:
@@ -363,7 +673,7 @@ class AgentManagerExecutionMixin:
                     search_summary=state.search_summary,
                     source_items=state.source_items,
                     offline_evaluation=state.offline_evaluation,
-                    branch_result_summary=selected_branch_result_summary,
+                    branch_result_summary=selected_result_summary,
                     selected_branch_summary=state.selected_branch_summary,
                     branch_summaries=state.branch_summaries,
                     failure_summary=state.failure_summary,
@@ -451,7 +761,7 @@ class AgentManagerExecutionMixin:
         selected_normalize = selected_artifacts.normalize if selected_artifacts else {}
         selected_integrity = selected_artifacts.integrity if selected_artifacts else {}
         selected_retrieve = selected_artifacts.retrieve if selected_artifacts else {}
-        selected_branch_result_summary = (
+        selected_result_summary = (
             selected_integrity.get("branch_result_summary", {})
             or selected_normalize.get("branch_result_summary", {})
             or state.selected_branch_summary.get("branch_result_summary", {})
@@ -477,17 +787,23 @@ class AgentManagerExecutionMixin:
                 for item in selected_properties
                 if str(item.get("property_id_norm") or "").strip() in display_ids
             ]
+        final_normalized_properties = selected_properties or display_normalized_properties
+        final_ranked_properties = (
+            list(selected_rank.get("ranked_properties", [])) or display_ranked_properties
+        )
 
         return ResearchExecutionResult(
             query=state.query,
             selected_branch_id=str(state.selected_branch_summary.get("branch_id") or "none"),
+            alternative_branch_ids=list(state.alternative_branch_ids),
             branch_summaries=state.branch_summaries,
-            branch_result_summary=selected_branch_result_summary,
+            branch_result_summary=selected_result_summary,
             final_report_markdown="",
-            normalized_properties=selected_properties,
-            ranked_properties=selected_rank.get("ranked_properties", []),
+            normalized_properties=final_normalized_properties,
+            ranked_properties=final_ranked_properties,
             display_normalized_properties=display_normalized_properties,
             display_ranked_properties=display_ranked_properties,
+            alternative_display_groups=state.alternative_display_groups,
             duplicate_groups=selected_normalize.get("duplicate_groups", []),
             integrity_reviews=selected_integrity.get("integrity_reviews", []),
             dropped_property_ids=selected_integrity.get("dropped_property_ids", []),
@@ -496,6 +812,7 @@ class AgentManagerExecutionMixin:
             search_summary=state.search_summary,
             offline_evaluation=state.offline_evaluation,
             failure_summary=state.failure_summary,
+            family_failure_summary=state.family_failure_summary,
             research_summary=state.research_summary,
             selected_path=state.selected_path,
             search_tree_summary=state.search_tree_summary,

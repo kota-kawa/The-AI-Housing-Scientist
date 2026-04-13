@@ -277,11 +277,16 @@ class AgentManagerToolingMixin:
                         input_schema={
                             "type": "object",
                             "properties": {
+                                "branch": node_schema,
                                 "normalized_properties": {"type": "array"},
                                 "raw_results": {"type": "array"},
                                 "detail_html_map": {"type": "object"},
                             },
-                            "required": ["normalized_properties", "raw_results", "detail_html_map"],
+                            "required": [
+                                "normalized_properties",
+                                "raw_results",
+                                "detail_html_map",
+                            ],
                             "additionalProperties": False,
                         },
                         output_schema={
@@ -313,6 +318,7 @@ class AgentManagerToolingMixin:
                         input_schema={
                             "type": "object",
                             "properties": {
+                                "branch": node_schema,
                                 "normalized_properties": {"type": "array"},
                                 "ranking_profile": {"type": "object"},
                             },
@@ -706,6 +712,7 @@ class AgentManagerToolingMixin:
         self,
         *,
         context: ToolContext,
+        branch: SearchNodePlan | None = None,
         normalized_properties: list[dict[str, Any]],
         ranking_profile: dict[str, Any],
     ) -> dict[str, Any]:
@@ -714,6 +721,8 @@ class AgentManagerToolingMixin:
             user_memory=self._active_user_memory(),
             ranking_profile=ranking_profile,
             adapter=self.research_adapter,
+            area_scope=branch.area_scope if branch is not None else "strict",
+            nearby_hints=branch.nearby_hints if branch is not None else None,
         )
 
     # JP: tool integrity reviewを処理する。
@@ -722,6 +731,7 @@ class AgentManagerToolingMixin:
         self,
         *,
         context: ToolContext,
+        branch: SearchNodePlan | None = None,
         normalized_properties: list[dict[str, Any]],
         raw_results: list[dict[str, Any]],
         detail_html_map: dict[str, str],
@@ -744,4 +754,7 @@ class AgentManagerToolingMixin:
             listing_type=listing_type,
             layout_preference=layout_preference,
             must_conditions=must_conditions,
+            area_scope=branch.area_scope if branch is not None else "strict",
+            constraint_mode=branch.constraint_mode if branch is not None else "primary",
+            nearby_hints=branch.nearby_hints if branch is not None else None,
         )

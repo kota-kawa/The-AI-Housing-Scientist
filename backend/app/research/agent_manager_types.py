@@ -19,6 +19,10 @@ class SearchNodePlan:
     parent_node_id: int | None = None
     intent: ResearchIntent = "draft"
     debug_depth: int = 0
+    branch_family: str = "strict_primary"
+    area_scope: str = "strict"
+    constraint_mode: str = "primary"
+    nearby_hints: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -55,6 +59,8 @@ class ResearchExecutionState:
     pruned_nodes: list[dict[str, Any]] = field(default_factory=list)
     selected_branch_summary: dict[str, Any] = field(default_factory=dict)
     selected_path: list[dict[str, Any]] = field(default_factory=list)
+    alternative_branch_ids: list[str] = field(default_factory=list)
+    family_failure_summary: dict[str, Any] = field(default_factory=dict)
     best_node_key: str = ""
     best_node_stability: int = 0
     best_node_readiness: str = "low"
@@ -64,6 +70,7 @@ class ResearchExecutionState:
     search_summary: dict[str, Any] = field(default_factory=dict)
     display_normalized_properties: list[dict[str, Any]] = field(default_factory=list)
     display_ranked_properties: list[dict[str, Any]] = field(default_factory=list)
+    alternative_display_groups: list[dict[str, Any]] = field(default_factory=list)
     offline_evaluation: dict[str, Any] = field(default_factory=dict)
     failure_summary: dict[str, Any] = field(default_factory=dict)
     research_summary: str = ""
@@ -74,6 +81,7 @@ class ResearchExecutionState:
 class ResearchExecutionResult:
     query: str
     selected_branch_id: str
+    alternative_branch_ids: list[str]
     branch_summaries: list[dict[str, Any]]
     branch_result_summary: dict[str, Any]
     final_report_markdown: str
@@ -81,6 +89,7 @@ class ResearchExecutionResult:
     ranked_properties: list[dict[str, Any]]
     display_normalized_properties: list[dict[str, Any]]
     display_ranked_properties: list[dict[str, Any]]
+    alternative_display_groups: list[dict[str, Any]]
     duplicate_groups: list[dict[str, Any]]
     integrity_reviews: list[dict[str, Any]]
     dropped_property_ids: list[str]
@@ -89,6 +98,7 @@ class ResearchExecutionResult:
     search_summary: dict[str, Any]
     offline_evaluation: dict[str, Any]
     failure_summary: dict[str, Any]
+    family_failure_summary: dict[str, Any]
     research_summary: str
     selected_path: list[dict[str, Any]]
     search_tree_summary: dict[str, Any]

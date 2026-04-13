@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.area_matching import classify_area_match
 from app.llm.base import LLMAdapter
 from app.models import RankedProperty
 from app.stages.prompt_examples import PromptExamplesError, sample_prompt_examples
@@ -10,6 +11,8 @@ from app.stages.prompt_examples import PromptExamplesError, sample_prompt_exampl
 DEFAULT_RANKING_PROFILE = {
     "base_score": 50.0,
     "area_match_bonus": 20.0,
+    "area_municipality_bonus": 14.0,
+    "area_nearby_bonus": 10.0,
     "area_partial_bonus": 8.0,
     "area_miss_penalty": 25.0,
     "budget_match_bonus": 25.0,
@@ -84,6 +87,9 @@ def _score_property_rules(
     prop: dict[str, Any],
     user_memory: dict[str, Any],
     profile: dict[str, float],
+    *,
+    area_scope: str,
+    nearby_hints: list[str] | None,
 ) -> tuple[float, list[str], list[str]]:
     score = profile["base_score"]
     positives: list[str] = []
@@ -93,15 +99,31 @@ def _score_property_rules(
     # EN: Evaluate area match against target area.
     target_area = str(user_memory.get("target_area") or "").strip()
     if target_area:
-        area_name = str(prop.get("area_name") or "")
-        address = str(prop.get("address") or "")
-        area_haystack = f"{area_name} {address}"
-        if target_area in area_haystack:
+        area_match = classify_area_match(
+            target_area=target_area,
+            address=str(prop.get("address") or ""),
+            area_name=str(prop.get("area_name") or ""),
+            nearby_tokens=nearby_hints or [],
+        )
+        area_match_level = str(area_match.get("match_level") or "none").strip()
+        area_evidence = str(area_match.get("evidence") or "").strip()
+        if area_match_level == "exact":
             score += profile["area_match_bonus"]
-            positives.append(f"希望エリア {target_area} と一致")
+            positives.append(area_evidence or f"希望エリア {target_area} と一致")
+        elif area_match_level == "municipality":
+            score += profile["area_municipality_bonus"]
+            positives.append(area_evidence or f"希望エリア {target_area} と同一市区町村")
+        elif area_match_level == "nearby" and area_scope == "nearby":
+            score += profile["area_nearby_bonus"]
+            positives.append(area_evidence or f"希望エリア {target_area} の近隣候補")
+        elif area_match_level == "partial" and area_scope == "nearby":
+            score += profile["area_partial_bonus"]
+            positives.append(area_evidence or f"希望エリア {target_area} に部分一致")
         else:
             score -= profile["area_miss_penalty"]
-            negatives.append(f"希望エリア {target_area} と不一致")
+            negatives.append(
+                area_evidence or f"希望エリア {target_area} と一致しないため優先度が下がる"
+            )
 
     budget_max = int(user_memory.get("budget_max") or 0)
     rent = int(prop.get("rent") or 0)
@@ -407,13 +429,21 @@ def run_ranking(
     user_memory: dict[str, Any],
     ranking_profile: dict[str, Any] | None = None,
     adapter: LLMAdapter | None = None,
+    area_scope: str = "strict",
+    nearby_hints: list[str] | None = None,
 ) -> dict[str, Any]:
     profile = _resolve_profile(ranking_profile)
     rule_results_by_id: dict[str, dict[str, Any]] = {}
     llm_enhancements: dict[str, dict[str, Any]] = {}
 
     for prop in normalized_properties:
-        score, positives, negatives = _score_property_rules(prop, user_memory, profile)
+        score, positives, negatives = _score_property_rules(
+            prop,
+            user_memory,
+            profile,
+            area_scope=area_scope,
+            nearby_hints=nearby_hints,
+        )
         rule_results_by_id[prop["property_id_norm"]] = {
             "score": score,
             "positives": positives,

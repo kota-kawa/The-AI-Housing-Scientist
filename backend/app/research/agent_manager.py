@@ -47,6 +47,7 @@ class HousingResearchAgentManager(
         provider: str,
         research_adapter: LLMAdapter | None,
         build_research_queries: Callable[[dict[str, Any], list[str]], list[str]],
+        build_branch_family_queries: Callable[..., list[str]],
         collect_search_results: Callable[..., tuple[list[dict[str, Any]], dict[str, Any]]],
         fetch_detail_html: Callable[[str], str | None],
         collect_source_items: Callable[..., list[dict[str, Any]]],
@@ -69,6 +70,7 @@ class HousingResearchAgentManager(
         self.provider = provider
         self.research_adapter = research_adapter
         self.build_research_queries = build_research_queries
+        self.build_branch_family_queries = build_branch_family_queries
         self.collect_search_results = collect_search_results
         self.fetch_detail_html = fetch_detail_html
         self.collect_source_items = collect_source_items

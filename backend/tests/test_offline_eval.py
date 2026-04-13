@@ -289,3 +289,41 @@ def test_zero_candidate_branch_stays_low_quality_even_with_detail_hits():
     )
     assert final_result["readiness"] == "low"
     assert "除外済み候補を推薦に戻さず、strict条件で再探索する" in final_result["recommendations"]
+
+
+def test_select_best_branch_prefers_strict_family_when_rankable_candidates_exist():
+    strict_branch = {
+        "branch_id": "strict-primary",
+        "node_key": "strict-primary",
+        "label": "strict条件",
+        "status": "completed",
+        "branch_family": "strict_primary",
+        "branch_score": 78.0,
+        "frontier_score": 78.0,
+        "detail_coverage": 0.62,
+        "avg_top3_score": 76.0,
+        "normalized_count": 2,
+        "rankable_candidate_count": 2,
+        "top_issue_class": "healthy",
+        "parent_key": "",
+    }
+    nearby_branch = {
+        "branch_id": "nearby-primary",
+        "node_key": "nearby-primary",
+        "label": "近隣候補",
+        "status": "completed",
+        "branch_family": "nearby_primary",
+        "branch_score": 91.0,
+        "frontier_score": 91.0,
+        "detail_coverage": 0.84,
+        "avg_top3_score": 89.0,
+        "normalized_count": 3,
+        "rankable_candidate_count": 3,
+        "top_issue_class": "healthy",
+        "parent_key": "",
+    }
+
+    selected = select_best_branch([nearby_branch, strict_branch])
+
+    assert selected is not None
+    assert selected["branch_id"] == "strict-primary"

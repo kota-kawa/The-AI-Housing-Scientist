@@ -1,3 +1,43 @@
+Sakana Al Technical Problem Set - Version 0.6.4
+
+Instructions
+Prospective technical candidates (such as yourself) who we believe have potential, are asked to
+work through this problem set. While you are not strictly required to complete every problem, we
+strongly encourage you to attempt all parts to have a realistic chance of moving forward. We
+also expect different quality and different types of answers from candidates with different
+backgrounds and levels of experience, from internship applicants to highly experienced
+researchers from industry. The problems are constructed so that they can be approached with
+the help of a good consumer-level GPU workstation capable of running deep learning stacks.
+The problems are designed to also reflect the nature of Sakana Al, and we intend the exercise
+to be fun and challenging! We will ask you to play with nature-inspired algorithms like neural
+network morphology evolution. Then, we ask you to play with generative Al models such as
+Stable Diffusion, but add a Japan twist! We ask you to work with recent bio-inspired neural
+network architectures, and also attempt to work with agentic Al systems for LLM-guided
+research, experimentation and discovery. We ask you to build a character-leve/ LM. In
+attempting this problem set, most people should learn something new and interesting!
+We ask that candidates submit their solutions in a single, self-contained Google Doc report
+- you are free to include an Appendix Section (not on GitHub please) that includes code
+snippets if they feel it is necessary for understanding your solutions. We aim to judge the
+candidate's thought process, ability to interpret and follow instructions (and if our instructions are
+vague, ability to demonstrate best judgment in coming up with reasonable assumptions, design
+and engineering choices), skills outside of just ML development, and ability to communicate
+clearly and convincingly from reading their submitted Google Doc report. Important: Assume
+the reviewer will not read anything outside the contents of your Google Doc. Do not submit
+your solutions in other formats (e.g. Notion, MS Word, GitHub, Colab.)
+Note that it is fine, and even encouraged to use existing open-source code and incorporate it
+into your solution. We even included many references to open-source implementations in the
+Reference section of each part. We just ask that you do your best to reference work you used in
+your solution. Please present your code in a way that makes it clear what was written by you.
+We ask that you keep your coding standards at a high level (e.g. don't submit unreadable
+spaghetti code for your solutions). Please include code that you believe proudly reflects your
+accomplishments in an Appendix of the Google Doc. Make your code readable for mere
+mortals, add comments when it makes sense, use a linter or equivalent-just make sure your
+work is presentable, so we can also assess software engineering aspects of your skills.
+Lastly, there is no strict time limit. A good rule-of-thumb is to submit your responses within a
+month. From our own experience, it may take 1 or 2 weeks to complete all parts. Please email
+us by replying to our email correspondence to share your completed Google Doc submission.
+
+
 Part 5: LLM Agents
 The Al Scientist: Towards Fully Automated Al Research
 The Al Scientist's Tree Search Process for Producing a Research Paper

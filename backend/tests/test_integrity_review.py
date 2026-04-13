@@ -226,3 +226,88 @@ def test_integrity_review_drops_explicit_must_condition_mismatch():
     review = result["integrity_reviews_by_id"]["p1"]
     assert review["drop_reason_class"] == "must_mismatch"
     assert result["summary"]["dropped_must_mismatch_count"] == 1
+
+
+def test_integrity_review_keeps_must_mismatch_for_relaxed_family():
+    result = run_integrity_review(
+        normalized_properties=[
+            {
+                "property_id_norm": "p1",
+                "building_name": "町田リラックスレジデンス",
+                "detail_url": "https://example.com/p1",
+                "address": "東京都町田市原町田6-7-8",
+                "layout": "1R",
+                "rent": 98000,
+                "management_fee": 5000,
+                "station_walk_min": 8,
+                "floor_level": 1,
+                "has_autolock": False,
+                "available_date": "2026-05-01",
+                "notes": "1階、オートロックなし",
+                "features": [],
+            }
+        ],
+        raw_results=[
+            {
+                "url": "https://example.com/p1",
+                "source_name": "brave",
+                "title": "町田リラックスレジデンス 1R",
+                "description": "1階 オートロックなし 賃料98,000円",
+                "extra_snippets": [],
+            }
+        ],
+        detail_html_map={
+            "https://example.com/p1": "<html><body>1階 オートロックなし</body></html>"
+        },
+        must_conditions=["2階以上", "オートロック"],
+        constraint_mode="relaxed",
+        today=date(2026, 4, 9),
+    )
+
+    assert [item["property_id_norm"] for item in result["normalized_properties"]] == ["p1"]
+    review = result["integrity_reviews_by_id"]["p1"]
+    assert review["should_drop"] is False
+    assert review["drop_reason_class"] == ""
+    assert any("条件緩和候補" in item for item in review["inconsistencies"])
+
+
+def test_integrity_review_allows_nearby_area_for_nearby_scope():
+    result = run_integrity_review(
+        normalized_properties=[
+            {
+                "property_id_norm": "p1",
+                "building_name": "高円寺ネイバーズ",
+                "detail_url": "https://example.com/p1",
+                "address": "東京都杉並区高円寺北1-2-3",
+                "area_name": "高円寺",
+                "layout": "1LDK",
+                "rent": 118000,
+                "management_fee": 8000,
+                "station_walk_min": 6,
+                "available_date": "2026-05-01",
+                "notes": "高円寺駅徒歩6分",
+                "features": [],
+            }
+        ],
+        raw_results=[
+            {
+                "url": "https://example.com/p1",
+                "source_name": "brave",
+                "title": "高円寺ネイバーズ 1LDK",
+                "description": "高円寺駅徒歩6分 賃料118,000円",
+                "extra_snippets": [],
+            }
+        ],
+        detail_html_map={
+            "https://example.com/p1": "<html><body><p>高円寺駅徒歩6分</p></body></html>"
+        },
+        target_area="東京都中野区中野",
+        area_scope="nearby",
+        nearby_hints=["高円寺", "東中野"],
+        today=date(2026, 4, 9),
+    )
+
+    assert [item["property_id_norm"] for item in result["normalized_properties"]] == ["p1"]
+    review = result["integrity_reviews_by_id"]["p1"]
+    assert review["area_match_level"] == "nearby"
+    assert review["should_drop"] is False

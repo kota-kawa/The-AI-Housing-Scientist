@@ -193,3 +193,58 @@ def test_run_ranking_injects_two_prompt_examples_into_llm_payload():
     assert all("case_id" in item for item in payload["examples"])
     assert all("input" in item for item in payload["examples"])
     assert all("output" in item for item in payload["examples"])
+
+
+def test_run_ranking_nearby_scope_rewards_nearby_area():
+    strict_result = run_ranking(
+        normalized_properties=[
+            {
+                "property_id_norm": "p1",
+                "building_name": "高円寺ネイバーズ",
+                "address": "東京都杉並区高円寺北1-2-3",
+                "area_name": "高円寺",
+                "nearest_station": "高円寺駅",
+                "station_walk_min": 6,
+                "layout": "1LDK",
+                "area_m2": 32.0,
+                "rent": 118000,
+                "notes": "高円寺駅徒歩6分。",
+                "features": [],
+            }
+        ],
+        user_memory={
+            "target_area": "東京都中野区中野",
+            "budget_max": 120000,
+            "station_walk_max": 7,
+            "layout_preference": "1LDK",
+        },
+        adapter=None,
+    )
+    nearby_result = run_ranking(
+        normalized_properties=[
+            {
+                "property_id_norm": "p1",
+                "building_name": "高円寺ネイバーズ",
+                "address": "東京都杉並区高円寺北1-2-3",
+                "area_name": "高円寺",
+                "nearest_station": "高円寺駅",
+                "station_walk_min": 6,
+                "layout": "1LDK",
+                "area_m2": 32.0,
+                "rent": 118000,
+                "notes": "高円寺駅徒歩6分。",
+                "features": [],
+            }
+        ],
+        user_memory={
+            "target_area": "東京都中野区中野",
+            "budget_max": 120000,
+            "station_walk_max": 7,
+            "layout_preference": "1LDK",
+        },
+        area_scope="nearby",
+        nearby_hints=["高円寺", "東中野"],
+        adapter=None,
+    )
+
+    assert nearby_result["ranked_properties"][0]["score"] > strict_result["ranked_properties"][0]["score"]
