@@ -25,9 +25,9 @@ This project was built as an end-to-end product demo with a simple conversationa
 
 Click the image below to watch the demo on YouTube.
 
-<a href="https://youtu.be/1nitw6KUBF0?si=Z2c0vfOylqkSezgq">
-  <img src="assets/images/demo-thumbnail.png" alt="Demo Video" width="100%">
-</a>
+| Demo Video |
+| --- |
+| <a href="https://youtu.be/1nitw6KUBF0?si=Z2c0vfOylqkSezgq"><img src="https://img.youtube.com/vi/1nitw6KUBF0/hqdefault.jpg" alt="Demo Video" width="100%"></a> |
 
 ## ✨ What It Does
 
@@ -130,9 +130,9 @@ Apache License 2.0. See `LICENSE` for details.
 
 画像をクリックすると YouTube で動画を開きます。
 
-<a href="https://youtu.be/1nitw6KUBF0?si=Z2c0vfOylqkSezgq">
-  <img src="assets/images/demo-thumbnail.png" alt="デモ動画" width="100%">
-</a>
+| デモ動画 |
+| --- |
+| <a href="https://youtu.be/1nitw6KUBF0?si=Z2c0vfOylqkSezgq"><img src="https://img.youtube.com/vi/1nitw6KUBF0/hqdefault.jpg" alt="デモ動画" width="100%"></a> |
 
 ## ✨ できること
 
