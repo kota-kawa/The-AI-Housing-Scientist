@@ -577,10 +577,10 @@ def _looks_like_single_property_url(url: str) -> bool:
     if not segments:
         return False
 
-    segment_set = {segment for segment in segments}
+    segment_set = set(segments)
     has_positive_segment = bool(segment_set & DETAIL_URL_POSITIVE_SEGMENTS)
     has_negative_segment = bool(segment_set & DETAIL_URL_NEGATIVE_SEGMENTS)
-    query_keys = {key.lower() for key in parse_qs(parsed.query).keys()}
+    query_keys = {key.lower() for key in parse_qs(parsed.query)}
     has_negative_query = bool(query_keys & DETAIL_URL_NEGATIVE_QUERY_KEYS)
 
     if has_negative_segment and not has_positive_segment:
@@ -597,9 +597,7 @@ def _looks_like_single_property_url(url: str) -> bool:
         return False
     if len(last_segment) >= 12 and re.search(r"[a-z]", last_segment):
         return True
-    if len(segments) >= 2 and re.search(r"\d", last_segment):
-        return True
-    return False
+    return len(segments) >= 2 and re.search(r"\d", last_segment) is not None
 
 
 # JP: 検索結果本文から具体物件らしさのシグナル数を数える。
@@ -713,13 +711,11 @@ def is_single_property_search_result(
         collection_signal_count = _collection_signal_count(item, detail_html)
         if detail_signal_count >= 4 and collection_signal_count == 0:
             return True
-        if (
+        return (
             detail_signal_count >= 5
             and collection_signal_count <= 1
             and _search_result_fact_signal_count(item) >= 1
-        ):
-            return True
-        return False
+        )
 
     if not _looks_like_single_property_url(url):
         return False

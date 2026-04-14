@@ -26,7 +26,9 @@ final_report_system_msg = """あなたは日本の賃貸物件調査アナリス
 - 意思決定に直結する内容にし、社内メモや顧客向け説明として再利用しやすい形にしてください。
 """
 
-final_report_prompt = """以下が与えられます:
+final_report_prompt = """Write a final markdown report using the provided research journal facts.
+
+以下が与えられます:
 
 1) ステージレベルのジャーナル要約:
 {stage_nodes}

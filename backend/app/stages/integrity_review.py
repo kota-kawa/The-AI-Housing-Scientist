@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import date
 import json
-from urllib.parse import urlparse
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 from app.area_matching import classify_area_match, is_match_allowed_for_scope
 from app.llm.base import LLMAdapter

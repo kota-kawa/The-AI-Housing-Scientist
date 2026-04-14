@@ -708,7 +708,7 @@ def _llm_parse(
     profile_memory: dict[str, Any] | None,
     adapter: LLMAdapter,
 ) -> dict[str, Any]:
-    planner_examples = sample_prompt_examples("planner_examples.json", count=3)
+    planner_examples = sample_prompt_examples("planner_examples.json", count=2)
     prompt_payload = {
         "user_message": message,
         "current_user_memory": user_memory,

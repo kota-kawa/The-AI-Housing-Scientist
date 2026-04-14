@@ -8,8 +8,8 @@ from app.research.offline_eval import (
     evaluate_final_result,
     summarize_branch_failures,
 )
-from app.stages.search_normalize import is_single_property_search_result
 from app.stages.result_summarizer import PROPERTY_CANDIDATES_KEY
+from app.stages.search_normalize import is_single_property_search_result
 
 from .agent_manager_types import (
     ResearchExecutionResult,

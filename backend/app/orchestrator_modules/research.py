@@ -9,8 +9,8 @@ from app.models import ChatMessageResponse, ResearchStateResponse, UIBlock
 from app.research import HousingResearchAgentManager
 from app.services import BraveSearchClient
 from app.stages import run_final_report, run_risk_check
-from app.stages.search_normalize import is_single_property_search_result
 from app.stages.planner import _has_slot_value, run_planner
+from app.stages.search_normalize import is_single_property_search_result
 
 MAX_RESEARCH_QUERIES = 8
 AREA_NEARBY_HINTS: dict[str, tuple[str, ...]] = {

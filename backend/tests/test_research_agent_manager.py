@@ -7,6 +7,8 @@ from app.llm.base import LLMAdapter
 from app.orchestrator import HousingOrchestrator
 from app.research.agent_manager import (
     HousingResearchAgentManager as _HousingResearchAgentManager,
+)
+from app.research.agent_manager import (
     ResearchExecutionState,
     SearchNodeArtifacts,
     SearchNodePlan,
