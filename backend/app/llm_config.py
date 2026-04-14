@@ -29,6 +29,7 @@ LLM_ROUTE_DEFINITIONS: list[dict[str, str]] = [
     },
 ]
 
+
 # JP: LLM route keysを取得する。
 # EN: Get LLM route keys.
 def get_llm_route_keys() -> list[LLMRouteKey]:
