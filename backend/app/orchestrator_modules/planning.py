@@ -449,12 +449,17 @@ class OrchestratorPlanningMixin:
         questions: list[dict[str, Any]],
         optional: bool,
     ) -> UIBlock:
-        intro = (
-            "検索精度を上げるため、分かるものだけ追加入力してください。"
-            if optional
-            else "検索に必要な条件です。未定の項目は後で追加できます。"
-        )
-        title = "検索精度を上げる追加条件" if optional else "検索に必要な条件"
+        has_required = any(q.get("required") for q in questions)
+        has_optional = any(not q.get("required") for q in questions)
+        if has_required and has_optional:
+            intro = "検索を始めるにあたって、条件を入力してください。任意項目は分かる範囲でOKです。"
+            title = "検索条件の入力"
+        elif optional:
+            intro = "検索精度を上げるため、分かるものだけ追加入力してください。"
+            title = "検索精度を上げる追加条件"
+        else:
+            intro = "検索に必要な条件です。未定の項目は後で追加できます。"
+            title = "検索に必要な条件"
         return UIBlock(
             type="question",
             title=title,

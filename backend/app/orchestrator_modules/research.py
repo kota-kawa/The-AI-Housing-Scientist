@@ -19,6 +19,21 @@ AREA_NEARBY_HINTS: dict[str, tuple[str, ...]] = {
     "江東区": ("門前仲町", "木場", "豊洲"),
     "渋谷": ("恵比寿", "代官山", "表参道"),
     "吉祥寺": ("三鷹", "西荻窪", "武蔵境"),
+    "新宿": ("中野", "代々木", "高田馬場"),
+    "池袋": ("目白", "大塚", "要町"),
+    "品川": ("大井町", "五反田", "天王洲アイル"),
+    "横浜": ("みなとみらい", "東神奈川", "桜木町"),
+    "川崎": ("武蔵小杉", "溝の口", "鶴見"),
+    "大宮": ("浦和", "さいたま新都心", "北与野"),
+    "船橋": ("津田沼", "西船橋", "習志野"),
+    "立川": ("国立", "日野", "昭島"),
+    "三軒茶屋": ("下北沢", "駒沢大学", "池尻大橋"),
+    "武蔵小杉": ("日吉", "元住吉", "新丸子"),
+    "北千住": ("南千住", "綾瀬", "西新井"),
+    "赤羽": ("十条", "王子", "東十条"),
+    "荻窪": ("阿佐ヶ谷", "西荻窪", "南阿佐ヶ谷"),
+    "目黒": ("白金台", "不動前", "武蔵小山"),
+    "世田谷": ("三軒茶屋", "駒沢", "用賀"),
 }
 AREA_LINE_HINTS: dict[str, tuple[str, ...]] = {
     "町田": ("小田急線", "横浜線"),
@@ -26,6 +41,21 @@ AREA_LINE_HINTS: dict[str, tuple[str, ...]] = {
     "江東区": ("東西線", "有楽町線"),
     "渋谷": ("山手線", "半蔵門線"),
     "吉祥寺": ("中央線", "井の頭線"),
+    "新宿": ("山手線", "中央線", "丸ノ内線"),
+    "池袋": ("山手線", "丸ノ内線", "有楽町線"),
+    "品川": ("山手線", "京急線"),
+    "横浜": ("東海道線", "京急線", "横浜市営地下鉄"),
+    "川崎": ("東海道線", "京急線", "南武線"),
+    "大宮": ("京浜東北線", "宇都宮線", "高崎線"),
+    "船橋": ("総武線", "京成線", "東武野田線"),
+    "立川": ("中央線", "南武線", "多摩モノレール"),
+    "三軒茶屋": ("東急田園都市線", "東急世田谷線"),
+    "武蔵小杉": ("東急東横線", "南武線"),
+    "北千住": ("千代田線", "日比谷線", "東武スカイツリーライン"),
+    "赤羽": ("京浜東北線", "埼京線"),
+    "荻窪": ("中央線", "丸ノ内線"),
+    "目黒": ("山手線", "東急目黒線", "南北線"),
+    "世田谷": ("東急田園都市線", "小田急線"),
 }
 
 
@@ -56,14 +86,46 @@ def _relaxed_budget_query(budget: int) -> str:
 
 # JP: lookup area hintsを処理する。
 # EN: Process lookup area hints.
-def _lookup_area_hints(area: str, hint_map: dict[str, tuple[str, ...]]) -> list[str]:
+def _lookup_area_hints(
+    area: str,
+    hint_map: dict[str, tuple[str, ...]],
+    *,
+    adapter: LLMAdapter | None = None,
+    hint_type: str = "nearby",
+) -> list[str]:
     normalized = _normalize_query_text(area)
     if not normalized:
         return []
     for key, values in hint_map.items():
         if normalized == key or key in normalized or normalized in key:
             return list(values)
-    return []
+    if adapter is None:
+        return []
+    return _llm_area_hints(normalized, hint_type=hint_type, adapter=adapter)
+
+
+def _llm_area_hints(area: str, *, hint_type: str, adapter: LLMAdapter) -> list[str]:
+    """ハードコードマップにないエリアの近隣駅・沿線をLLMで補完する。"""
+    if hint_type == "line":
+        question = f"「{area}」を通る主要鉄道路線を2〜3個挙げてください。"
+    else:
+        question = f"「{area}」の近隣で賃貸物件を探す際に候補になる駅やエリアを2〜3個挙げてください。"
+    schema = {
+        "type": "object",
+        "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+    try:
+        result = adapter.generate_structured(
+            system="あなたは日本の地理に詳しいアシスタントです。要求されたJSONのみを返してください。",
+            user=question,
+            schema=schema,
+            temperature=0.1,
+        )
+        return [str(item).strip() for item in result.get("items", []) if str(item).strip()][:3]
+    except Exception:
+        return []
 
 
 # JP: compose queryを処理する。
@@ -82,6 +144,7 @@ class OrchestratorResearchMixin:
         *,
         area_scope: str,
         constraint_mode: str,
+        adapter: LLMAdapter | None = None,
     ) -> list[str]:
         area = _normalize_query_text(user_memory.get("target_area"))
         layout = str(user_memory.get("layout_preference") or "").strip()
@@ -103,8 +166,8 @@ class OrchestratorResearchMixin:
         walk_token = f"徒歩{walk}分" if walk else ""
         must_fragment = " ".join(must_conditions[:2]).strip() if constraint_mode == "primary" else ""
         nice_fragment = " ".join(nice_to_have[:2]).strip()
-        nearby_areas = _lookup_area_hints(area, AREA_NEARBY_HINTS)
-        line_hints = _lookup_area_hints(area, AREA_LINE_HINTS)
+        nearby_areas = _lookup_area_hints(area, AREA_NEARBY_HINTS, adapter=adapter, hint_type="nearby")
+        line_hints = _lookup_area_hints(area, AREA_LINE_HINTS, adapter=adapter, hint_type="line")
 
         normalized_seed_queries = [
             _normalize_query_text(item) for item in seed_queries if _normalize_query_text(item)
@@ -193,7 +256,7 @@ class OrchestratorResearchMixin:
     # JP: research queriesを構築する。
     # EN: Build research queries.
     def _build_research_queries(
-        self, user_memory: dict[str, Any], seed_queries: list[str]
+        self, user_memory: dict[str, Any], seed_queries: list[str], *, adapter: LLMAdapter | None = None
     ) -> list[str]:
         area = _normalize_query_text(user_memory.get("target_area"))
         layout = str(user_memory.get("layout_preference") or "").strip()
@@ -215,8 +278,8 @@ class OrchestratorResearchMixin:
         walk_token = f"徒歩{walk}分" if walk else ""
         core_must = " ".join(must_conditions[:2]).strip()
         core_nice = " ".join(nice_to_have[:2]).strip()
-        nearby_areas = _lookup_area_hints(area, AREA_NEARBY_HINTS)
-        line_hints = _lookup_area_hints(area, AREA_LINE_HINTS)
+        nearby_areas = _lookup_area_hints(area, AREA_NEARBY_HINTS, adapter=adapter, hint_type="nearby")
+        line_hints = _lookup_area_hints(area, AREA_LINE_HINTS, adapter=adapter, hint_type="line")
 
         normalized_seed_queries = [
             _normalize_query_text(item) for item in seed_queries if _normalize_query_text(item)
@@ -611,9 +674,30 @@ class OrchestratorResearchMixin:
                 profile_memory=profile_memory,
                 follow_up_questions=planner_result.get("required_follow_up_questions", []),
             )
+            # 任意スロットも同じブロックにまとめて表示する（UX改善）
+            optional_slots = [
+                slot
+                for slot in [
+                    "layout_preference",
+                    "station_walk_max",
+                    "move_in_date",
+                    "must_conditions",
+                    "nice_to_have",
+                ]
+                if slot not in set(planner_result["missing_slots"])
+                and not _has_slot_value(slot, updated_user_memory)
+            ]
+            optional_questions = self._build_planning_questions(
+                user_memory=updated_user_memory,
+                slots=optional_slots,
+                required=False,
+                profile_memory=profile_memory,
+                follow_up_questions=follow_up_questions,
+            ) if optional_slots else []
+            combined_questions = required_questions + optional_questions
             blocks = [
                 self._build_question_block(
-                    questions=required_questions,
+                    questions=combined_questions,
                     optional=False,
                 )
             ]

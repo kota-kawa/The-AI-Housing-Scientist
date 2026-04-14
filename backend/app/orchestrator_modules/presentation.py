@@ -317,7 +317,20 @@ class OrchestratorPresentationMixin:
             )
 
         alternative_display_groups = task_memory.get("alternative_display_groups") or []
+        main_property_ids = {
+            str(item.get("property_id_norm") or item.get("id") or "").strip()
+            for item in ranked_properties
+            if str(item.get("property_id_norm") or item.get("id") or "").strip()
+        }
         for group in alternative_display_groups[:3]:
+            alt_ranked = [
+                item
+                for item in list(group.get("ranked_properties") or [])
+                if str(item.get("property_id_norm") or item.get("id") or "").strip()
+                not in main_property_ids
+            ]
+            if not alt_ranked:
+                continue
             blocks.append(
                 UIBlock(
                     type="cards",
@@ -325,7 +338,7 @@ class OrchestratorPresentationMixin:
                     content={
                         "compare_enabled": False,
                         "items": self._build_property_cards(
-                            ranked_properties=list(group.get("ranked_properties") or []),
+                            ranked_properties=alt_ranked,
                             normalized_properties=list(group.get("normalized_properties") or []),
                             selectable=True,
                             property_reactions=self._get_property_reactions(task_memory),

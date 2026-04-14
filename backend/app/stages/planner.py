@@ -161,7 +161,7 @@ def _normalize_listing_type(value: Any) -> str | None:
         return "賃貸"
     if any(token in text for token in ["売買", "購入", "買う", "分譲"]) or "buy" in lower:
         return "売買"
-    return text
+    return None
 
 
 # JP: budget valueを解析する。
@@ -175,13 +175,16 @@ def _parse_budget_value(value: Any) -> int | None:
         amount = int(compact)
         return amount if amount > 0 else None
 
-    match = None
-    if "万" in compact:
-        import re
-
-        match = re.search(r"(\d+(?:\.\d+)?)\s*万", compact)
-        if match:
-            return int(float(match.group(1)) * 10000)
+    # 億 unit (e.g. "1.5億", "2億5000万")
+    oku_match = re.search(r"(\d+(?:\.\d+)?)\s*億", compact)
+    man_match = re.search(r"(\d+(?:\.\d+)?)\s*万", compact)
+    if oku_match:
+        oku_amount = int(float(oku_match.group(1)) * 100_000_000)
+        man_amount = int(float(man_match.group(1)) * 10_000) if man_match else 0
+        total = oku_amount + man_amount
+        return total if total > 0 else None
+    if man_match:
+        return int(float(man_match.group(1)) * 10_000)
     return None
 
 
@@ -222,6 +225,9 @@ def _normalize_slot_value(slot: str, value: Any) -> Any:
 # JP: slot valueが設定済みか判定する。
 # EN: Check whether slot value is present.
 def _has_slot_value(slot: str, user_memory: dict[str, Any]) -> bool:
+    answered_slots = list(user_memory.get("answered_slots") or [])
+    if slot in answered_slots:
+        return True
     value = user_memory.get(slot)
     if slot in LIST_SLOT_KEYS:
         return bool(value)
@@ -243,7 +249,18 @@ def _merge_slot_memory(
             merged[key] = override.get(key)
     for key in LIST_SLOT_KEYS:
         if override.get(key):
-            merged[key] = list(override.get(key) or [])
+            existing = list(merged.get(key) or [])
+            for item in override.get(key) or []:
+                if item not in existing:
+                    existing.append(item)
+            merged[key] = existing
+    # answered_slots のマージ
+    base_answered = list(merged.get("answered_slots") or [])
+    override_answered = list(override.get("answered_slots") or [])
+    for slot in override_answered:
+        if slot not in base_answered:
+            base_answered.append(slot)
+    merged["answered_slots"] = base_answered
     return merged
 
 
@@ -254,6 +271,7 @@ def _apply_planner_answers(
     planner_answers: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     merged = _sanitize_slot_memory(user_memory)
+    answered_slots = list(merged.get("answered_slots") or [])
     for item in planner_answers or []:
         if not isinstance(item, dict):
             continue
@@ -267,6 +285,10 @@ def _apply_planner_answers(
             merged[slot] = normalized if isinstance(normalized, int) else None
         else:
             merged[slot] = normalized
+        # ユーザーが明示的に回答したスロットを記録（"こだわらない" 等で値が None になっても再質問しない）
+        if slot not in answered_slots:
+            answered_slots.append(slot)
+    merged["answered_slots"] = answered_slots
     return merged
 
 
@@ -306,9 +328,12 @@ def _infer_intent(
     if listing_type in {"賃貸", "売買"}:
         return "search"
     normalized_message = _normalize_text(message)
-    if any(
-        token in normalized_message
-        for token in ["探したい", "部屋", "物件", "賃貸", "売買", "購入", "住みたい"]
+    search_nouns = ["物件", "賃貸", "売買", "購入"]
+    search_verbs = ["探したい", "住みたい", "借りたい", "買いたい", "見つけたい", "検索"]
+    if any(token in normalized_message for token in search_nouns + search_verbs):
+        return "search"
+    if "部屋" in normalized_message and any(
+        verb in normalized_message for verb in search_verbs
     ):
         return "search"
     return "general_question"
@@ -346,8 +371,8 @@ def _build_base_seed_queries(user_memory: dict[str, Any]) -> list[str]:
     candidates = _dedupe_texts(
         [
             " ".join(part for part in [area, listing_type, budget, layout, must_condition] if part),
-            " ".join(part for part in [area, budget, layout, listing_type] if part),
-            " ".join(part for part in [area, layout, listing_type, nice_condition] if part),
+            " ".join(part for part in [area, listing_type, budget, layout] if part),
+            " ".join(part for part in [area, listing_type, layout, nice_condition] if part),
             " ".join(part for part in [area, listing_type, layout] if part),
             " ".join(part for part in [area, listing_type, budget] if part),
         ],
@@ -414,6 +439,7 @@ def _blank_slot_memory() -> dict[str, Any]:
         "listing_type": None,
         "must_conditions": [],
         "nice_to_have": [],
+        "answered_slots": [],
     }
 
 
@@ -448,6 +474,11 @@ def _sanitize_slot_memory(raw_memory: Any) -> dict[str, Any]:
         value = raw_memory.get(key)
         memory[key] = _dedupe_texts(list(value), limit=6) if isinstance(value, list) else []
 
+    answered_raw = raw_memory.get("answered_slots")
+    if isinstance(answered_raw, list):
+        memory["answered_slots"] = [
+            slot for slot in answered_raw if isinstance(slot, str) and slot in ALL_SLOT_KEYS
+        ]
     return memory
 
 
@@ -677,7 +708,7 @@ def _llm_parse(
     profile_memory: dict[str, Any] | None,
     adapter: LLMAdapter,
 ) -> dict[str, Any]:
-    planner_examples = sample_prompt_examples("planner_examples.json", count=2)
+    planner_examples = sample_prompt_examples("planner_examples.json", count=3)
     prompt_payload = {
         "user_message": message,
         "current_user_memory": user_memory,

@@ -176,6 +176,7 @@ class AgentManagerTreeMixin:
             base_queries,
             area_scope=area_scope,
             constraint_mode=constraint_mode,
+            adapter=self.research_adapter,
         )
         nearby_hints = [str(item).strip() for item in nearby_hints or [] if str(item).strip()]
         location_tokens = nearby_hints[:2] if area_scope == "nearby" and nearby_hints else [area]
