@@ -1,0 +1,42 @@
+flowchart LR
+    U["User Request
+    e.g. 'I want to find a one-person apartment in Kasukabe'"] --> P["Planner
+    Extract conditions and ask follow-up questions"]
+    P --> A{"Enough information?"}
+    A -- "No" --> Q["Ask follow-up questions
+    budget, layout, station walk, move-in date"]
+    Q --> P
+    A -- "Yes" --> RP["Approved research plan
+    search goal and initial query seeds"]
+    RP --> BM["HousingResearchAgentManager
+    manage branch search"]
+
+    BM --> B1["Strict search
+    keep original conditions"]
+    BM --> B2["Relaxed search
+    loosen constraints to avoid zero results"]
+    BM --> B3["Nearby-area search
+    extend to nearby stations or cities"]
+    BM --> B4["Source-diversified search
+    vary query wording and sources"]
+
+    B1 --> S["Web search and source collection"]
+    B2 --> S
+    B3 --> S
+    B4 --> S
+
+    S --> D["Choose promising property URLs with LLM
+    and fetch detail pages"]
+    D --> N["Normalize and deduplicate properties"]
+    N --> I["Integrity review
+    remove stale, inconsistent, wrong-area, or non-rental listings"]
+    I --> R["Rank candidates
+    condition match, detail coverage, source quality"]
+    R --> E["Evaluate each branch
+    candidate count, detail coverage, structured fields, top scores"]
+    E --> SB["Select best branch
+    not just the largest result set"]
+    SB --> RS["Summarize selected branch and alternatives"]
+    RS --> C["Generate inquiry draft"]
+    RS --> K["Extract contract risks
+    renewal fee, early termination, notice period, guarantor terms"]

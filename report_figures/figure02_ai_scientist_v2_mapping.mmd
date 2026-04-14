@@ -1,0 +1,35 @@
+flowchart TB
+    subgraph L["AI-Scientist-v2"]
+        L1["AgentManager
+        stage progression"]
+        L2["ParallelAgent
+        draft / debug / improve"]
+        L3["Execute generated code"]
+        L4["Parse metrics and execution results"]
+        L5["Generate plots and analyze them"]
+        L6["Select best node"]
+        L7["Journal and final report"]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
+    end
+
+    subgraph R["The AI Housing Scientist"]
+        R1["Planner and research manager
+        request clarification and manage search stages"]
+        R2["Branch search
+        strict / relaxed / nearby / diversified / detail-first"]
+        R3["Run web search and fetch property pages"]
+        R4["Evaluate branch outcomes
+        candidate count, detail coverage, condition match"]
+        R5["Integrity review and ranking"]
+        R6["Select best branch"]
+        R7["Summary, inquiry draft, risk check"]
+        R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7
+    end
+
+    L1 -. "adapted as stage management" .-> R1
+    L2 -. "adapted as multiple search branches" .-> R2
+    L3 -. "execution replaced by search actions" .-> R3
+    L4 -. "metrics replaced by branch-quality signals" .-> R4
+    L5 -. "scientific validation replaced by integrity filtering" .-> R5
+    L6 -. "same idea: choose the best path" .-> R6
+    L7 -. "same idea: summarize successes and failures" .-> R7

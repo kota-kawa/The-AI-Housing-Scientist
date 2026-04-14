@@ -1,0 +1,35 @@
+flowchart TB
+    Root["Approved plan
+    target area, budget, layout, must conditions"]
+
+    Root --> S1["Strict-primary branch
+    preserve core constraints"]
+    Root --> S2["Strict-relaxed branch
+    relax one or two must conditions"]
+    Root --> N1["Nearby-primary branch
+    keep constraints but widen area"]
+    Root --> D1["Detail-first branch
+    prioritize listings with richer detail pages"]
+
+    S1 --> S1R["Results:
+    fewer candidates
+    but rankable and on-target"]
+    S2 --> S2R["Results:
+    more candidates
+    but weaker condition match"]
+    N1 --> N1R["Results:
+    many candidates
+    but area drift risk"]
+    D1 --> D1R["Results:
+    good detail coverage
+    but source coverage may narrow"]
+
+    S1R --> Eval["Offline branch evaluation
+    count + detail coverage + structured fields + top candidate quality + integrity review"]
+    S2R --> Eval
+    N1R --> Eval
+    D1R --> Eval
+
+    Eval --> Pick["Selected branch
+    prefer a branch that still preserves the user's core conditions
+    and leaves rankable candidates after integrity review"]
