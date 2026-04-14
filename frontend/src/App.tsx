@@ -349,6 +349,8 @@ export default function App() {
   const previousMessageCountRef = useRef<number>(0);
   const userIsNearBottomRef = useRef<boolean>(true);
   const forceAutoScrollRef = useRef<boolean>(false);
+  const suppressAutoScrollRef = useRef<boolean>(true);
+  const hasStartedConversationRef = useRef<boolean>(false);
   const lastMessageRef = useRef<HTMLElement | null>(null);
   const [inputBarHeight, setInputBarHeight] = useState<number>(160);
 
@@ -444,6 +446,8 @@ export default function App() {
       } catch (e) {
         setError(e instanceof Error ? e.message : "初期化に失敗しました");
         setStatus("初期化失敗");
+      } finally {
+        suppressAutoScrollRef.current = false;
       }
     };
 
@@ -479,6 +483,11 @@ export default function App() {
   useEffect(() => {
     const hasNewMessage = messages.length > previousMessageCountRef.current;
     previousMessageCountRef.current = messages.length;
+
+    if (suppressAutoScrollRef.current) {
+      forceAutoScrollRef.current = false;
+      return;
+    }
 
     const shouldAutoScroll =
       forceAutoScrollRef.current || (userIsNearBottomRef.current && (hasNewMessage || loading));
@@ -633,9 +642,9 @@ export default function App() {
    * 日本語: アシスタント応答をメッセージ一覧へ追加し、必要なら調査追跡IDを更新します。
    * English: Appends assistant output and updates active research tracking when needed.
    */
-  const appendAssistantResponse = (payload: ChatMessageResponse) => {
+  const appendAssistantResponse = (payload: ChatMessageResponse, forceScroll: boolean = true) => {
     const assistantMessage = toAssistantMessage(payload);
-    forceAutoScrollRef.current = true;
+    forceAutoScrollRef.current = forceScroll;
     setMessages((prev) => [...prev, assistantMessage]);
     if (POLLED_RESEARCH_STATES.has(payload.status)) {
       setActiveResearchMessageId(assistantMessage.id);
@@ -659,6 +668,11 @@ export default function App() {
     }
 
     const userText = messageText.trim();
+    const isFirstConversationTurn = !hasStartedConversationRef.current;
+    if (isFirstConversationTurn) {
+      suppressAutoScrollRef.current = true;
+      hasStartedConversationRef.current = true;
+    }
     setInput("");
     setError("");
     setLoading(true);
@@ -675,18 +689,21 @@ export default function App() {
           .map((item) => `${PLANNER_SLOT_LABELS[item.slot] ?? item.slot}: ${item.value}`)
           .join(" / "),
     };
-    forceAutoScrollRef.current = true;
+    forceAutoScrollRef.current = !isFirstConversationTurn;
     setMessages((prev) => [...prev, userMessage]);
 
     try {
       const response = await sendMessage(sessionId, userText, undefined, plannerAnswers);
-      appendAssistantResponse(response);
+      appendAssistantResponse(response, !isFirstConversationTurn);
       setResponseState(response.status);
       setStatus(toStatusLabel(response));
     } catch (e) {
       setError(e instanceof Error ? e.message : "送信に失敗しました");
       setStatus("エラー");
     } finally {
+      if (isFirstConversationTurn) {
+        suppressAutoScrollRef.current = false;
+      }
       setLoading(false);
     }
   };
@@ -845,7 +862,9 @@ export default function App() {
     setStatus("新しいセッションを準備中...");
     setLlmEditorOpen(false);
     setActiveResearchMessageId("");
-    forceAutoScrollRef.current = true;
+    forceAutoScrollRef.current = false;
+    suppressAutoScrollRef.current = true;
+    hasStartedConversationRef.current = false;
 
     try {
       const session = await createSession(undefined, true);
@@ -868,6 +887,7 @@ export default function App() {
       setError(e instanceof Error ? e.message : "新しいセッションの作成に失敗しました");
       setStatus("エラー");
     } finally {
+      suppressAutoScrollRef.current = false;
       setLoading(false);
     }
   };
@@ -1349,8 +1369,8 @@ export default function App() {
 
             <div className="overflow-visible rounded-[26px] bg-sky-50 shadow-floating transition">
               {llmEditorOpen && llmDraft && llmCapabilities && (
-                <div className="border-b border-sky-100/90 px-4 pb-4 pt-4 sm:px-5">
-                  <div className="rounded-[24px] border border-sky-100 bg-white p-4 shadow-card">
+                <div className="border-b border-sky-100/90 px-3 pb-3 pt-3 sm:px-4">
+                  <div className="rounded-[22px] border border-sky-100 bg-white p-3 shadow-card sm:p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-inkSubtle">
@@ -1359,30 +1379,32 @@ export default function App() {
                         <p className="mt-1 text-sm font-semibold text-ink">
                           実行前に段階ごとのモデルを調整できます
                         </p>
-                        <p className="mt-1 text-xs leading-6 text-inkMuted">
+                        <p className="mt-1 hidden text-[11px] leading-5 text-inkMuted sm:block">
                           調査ジョブは開始時に設定を固定します。問い合わせ文と契約チェックは実行時の設定を使います。
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={() => setLlmEditorOpen(false)}
-                        className="rounded-full border border-sky-100 bg-white px-3 py-1.5 text-xs font-medium text-ink transition hover:border-sky-300 hover:bg-sky-50"
+                        className="rounded-full border border-sky-100 bg-white px-3 py-1.5 text-[11px] font-medium text-ink transition hover:border-sky-300 hover:bg-sky-50"
                       >
                         閉じる
                       </button>
                     </div>
 
-                    <div className="mt-4 space-y-3">
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
                       {llmCapabilities.route_definitions.map((route) => {
                         const routeConfig = llmDraft.routes[route.key];
                         return (
                           <div
                             key={route.key}
-                            className="grid gap-3 rounded-2xl border border-sky-100 bg-sky-50/45 p-3 sm:grid-cols-[160px_minmax(0,1fr)]"
+                            className="grid gap-2 rounded-2xl border border-sky-100 bg-sky-50/45 p-2.5 sm:grid-cols-[112px_minmax(0,1fr)]"
                           >
                             <div>
-                              <p className="text-sm font-semibold text-ink">{route.label}</p>
-                              <p className="mt-1 text-xs leading-5 text-inkMuted">
+                              <p className="text-sm font-semibold leading-5 text-ink">
+                                {route.label}
+                              </p>
+                              <p className="mt-0.5 text-[11px] leading-4 text-inkMuted">
                                 {route.description}
                               </p>
                             </div>
@@ -1401,7 +1423,7 @@ export default function App() {
                                       openModelDropdown === route.key ? null : route.key
                                     );
                                   }}
-                                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-sky-100 bg-white px-3 py-2 text-left text-sm text-ink shadow-sm transition hover:border-sky-300 hover:shadow focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-sky-100 bg-white px-3 py-1.5 text-left text-sm text-ink shadow-sm transition hover:border-sky-300 hover:shadow focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                                 >
                                   <span className="truncate">{routeConfig.model}</span>
                                   <svg
@@ -1460,7 +1482,7 @@ export default function App() {
                                   </div>
                                 )}
                               </div>
-                              <p className="text-xs text-inkMuted">
+                              <p className="text-[11px] leading-4 text-inkMuted">
                                 選択可能モデル {llmCapabilities.models.length} 件
                               </p>
                             </div>
@@ -1469,8 +1491,8 @@ export default function App() {
                       })}
                     </div>
 
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-xs text-inkMuted">
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] leading-5 text-inkMuted">
                         現在のプリセット: {formatPresetLabel(llmDraft.preset)}
                         {!llmEditable ? " / 調査中は編集できません" : ""}
                       </p>
@@ -1479,7 +1501,7 @@ export default function App() {
                           type="button"
                           onClick={handleResetLlmConfig}
                           disabled={!llmEditable || llmSaving}
-                          className="rounded-full border border-sky-100 bg-white px-4 py-2 text-sm font-medium text-ink transition hover:border-sky-300 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-full border border-sky-100 bg-white px-3 py-1.5 text-xs font-medium text-ink transition hover:border-sky-300 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           デフォルトに戻す
                         </button>
@@ -1487,7 +1509,7 @@ export default function App() {
                           type="button"
                           onClick={() => void handleSaveLlmConfig()}
                           disabled={!llmEditable || llmSaving}
-                          className="rounded-full border border-sky-500/20 bg-accent px-4 py-2 text-sm font-medium text-white shadow-card transition hover:bg-accentDeep hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-full border border-sky-500/20 bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-card transition hover:bg-accentDeep hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {llmSaving ? "保存中..." : "設定を保存"}
                         </button>

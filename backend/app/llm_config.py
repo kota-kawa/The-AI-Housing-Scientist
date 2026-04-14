@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from app.config import ProviderName, Settings, get_provider_api_key, get_provider_model
+from app.config import Settings, get_provider_model
 
 LLMRouteKey = Literal["planner", "research_default", "communication", "risk_check"]
 
@@ -29,14 +29,6 @@ LLM_ROUTE_DEFINITIONS: list[dict[str, str]] = [
     },
 ]
 
-_STAGE_PROVIDER_PREFERENCES: dict[LLMRouteKey, list[ProviderName]] = {
-    "planner": ["openai", "claude", "gemini", "groq"],
-    "research_default": ["openai", "gemini", "claude", "groq"],
-    "communication": ["claude", "openai", "gemini", "groq"],
-    "risk_check": ["gemini", "openai", "claude", "groq"],
-}
-
-
 # JP: LLM route keysを取得する。
 # EN: Get LLM route keys.
 def get_llm_route_keys() -> list[LLMRouteKey]:
@@ -49,23 +41,14 @@ def get_llm_route_definitions() -> list[dict[str, str]]:
     return [dict(item) for item in LLM_ROUTE_DEFINITIONS]
 
 
-# JP: pick default providerを処理する。
-# EN: Process pick default provider.
-def _pick_default_provider(settings: Settings, route_key: LLMRouteKey) -> ProviderName:
-    for provider in _STAGE_PROVIDER_PREFERENCES[route_key]:
-        if get_provider_api_key(settings, provider):
-            return provider
-    return settings.llm_default_provider
-
-
 # JP: default LLM configを構築する。
 # EN: Build default LLM config.
 def build_default_llm_config(settings: Settings) -> dict[str, Any]:
+    default_model = str(settings.groq_model_primary).strip() or get_provider_model(settings, "groq")
     routes: dict[str, dict[str, str]] = {}
     for route_key in get_llm_route_keys():
-        provider = _pick_default_provider(settings, route_key)
         routes[route_key] = {
-            "model": get_provider_model(settings, provider),
+            "model": default_model,
         }
     return {"preset": "default", "routes": routes}
 

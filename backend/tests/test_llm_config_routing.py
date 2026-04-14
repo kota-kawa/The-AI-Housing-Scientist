@@ -107,10 +107,10 @@ def test_session_llm_config_defaults_and_custom_update(tmp_path: Path, monkeypat
     )
 
     default_config = orchestrator.get_session_llm_config(session_id)
-    assert default_config["routes"]["planner"]["model"] == "gpt-5.4-mini"
-    assert default_config["routes"]["research_default"]["model"] == "gpt-5.4-mini"
-    assert default_config["routes"]["communication"]["model"] == "claude-sonnet-4-6"
-    assert default_config["routes"]["risk_check"]["model"] == "gemini-2.5-flash"
+    assert default_config["routes"]["planner"]["model"] == "openai/gpt-oss-120b"
+    assert default_config["routes"]["research_default"]["model"] == "openai/gpt-oss-120b"
+    assert default_config["routes"]["communication"]["model"] == "openai/gpt-oss-120b"
+    assert default_config["routes"]["risk_check"]["model"] == "openai/gpt-oss-120b"
     capabilities = orchestrator.get_llm_capabilities()
     assert [item["model"] for item in capabilities["models"]] == [
         "gpt-5.4-mini",

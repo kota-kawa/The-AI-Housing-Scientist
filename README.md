@@ -164,11 +164,11 @@ LLMは用途別のルートで使い分けます。
 | `MODEL_STRICT_MODE` | `true` | モデルやキーが無効な場合に厳格に失敗させる |
 | `RUN_PREFLIGHT_ON_STARTUP` | `true` | 起動時に事前チェックを実行する |
 | `PREFLIGHT_FAIL_FAST` | `false` | 事前チェック失敗時に起動を止める |
-| `OPENAI_MODEL` | `gpt-5.4-mini` | OpenAIの既定モデル |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Geminiの既定モデル |
-| `GROQ_MODEL_PRIMARY` | `openai/gpt-oss-120b` | Groqの主要モデル |
+| `OPENAI_MODEL` | `gpt-5.4-mini` | OpenAIの設定候補モデル |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Geminiの設定候補モデル |
+| `GROQ_MODEL_PRIMARY` | `openai/gpt-oss-120b` | 全ルートの既定値として使う主要モデル |
 | `GROQ_MODEL_SECONDARY` | `qwen/qwen3-32b` | Groqの予備モデル |
-| `CLAUDE_MODEL` | `claude-sonnet-4-6` | Claudeの既定モデル |
+| `CLAUDE_MODEL` | `claude-sonnet-4-6` | Claudeの設定候補モデル |
 | `DATABASE_PATH` | `data/housing_agent.db` | SQLite DBの保存先 |
 
 ## テストと品質チェック
