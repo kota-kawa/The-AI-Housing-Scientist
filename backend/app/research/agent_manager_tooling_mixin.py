@@ -236,7 +236,8 @@ class AgentManagerToolingMixin:
         payload = {
             "page": {
                 "url": parent_url,
-                "title": str(parent_item.get("title") or "") or self._extract_html_title(parent_html),
+                "title": str(parent_item.get("title") or "")
+                or self._extract_html_title(parent_html),
                 "description": str(parent_item.get("description") or ""),
             },
             "candidate_links": [
@@ -301,10 +302,7 @@ class AgentManagerToolingMixin:
         if anchor_text in {"見る", "詳細", "詳細を見る", "物件詳細"}:
             anchor_text = ""
         title = (
-            anchor_text
-            or child_title
-            or str(parent_item.get("title") or "").strip()
-            or "物件詳細"
+            anchor_text or child_title or str(parent_item.get("title") or "").strip() or "物件詳細"
         )
         return {
             "title": title,
@@ -989,18 +987,12 @@ class AgentManagerToolingMixin:
                     stage_name="tree_search",
                     progress_percent=50,
                     current_action="一覧ページから詳細リンクを探索中",
-                    detail=(
-                        f"{branch.label} / {len(selected_candidates)}件の詳細候補を追跡"
-                    ),
+                    detail=(f"{branch.label} / {len(selected_candidates)}件の詳細候補を追跡"),
                     url=url,
                 )
             for child_candidate in selected_candidates:
                 child_url = str(child_candidate.get("url") or "").strip()
-                if (
-                    not child_url
-                    or child_url in detail_html_map
-                    or child_url in expanded_by_url
-                ):
+                if not child_url or child_url in detail_html_map or child_url in expanded_by_url:
                     continue
                 child_fetch_attempt_count += 1
                 child_html, child_cache_hit = self._cached_singleflight_load(

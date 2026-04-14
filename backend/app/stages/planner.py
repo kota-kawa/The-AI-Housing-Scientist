@@ -332,9 +332,7 @@ def _infer_intent(
     search_verbs = ["探したい", "住みたい", "借りたい", "買いたい", "見つけたい", "検索"]
     if any(token in normalized_message for token in search_nouns + search_verbs):
         return "search"
-    if "部屋" in normalized_message and any(
-        verb in normalized_message for verb in search_verbs
-    ):
+    if "部屋" in normalized_message and any(verb in normalized_message for verb in search_verbs):
         return "search"
     return "general_question"
 
@@ -745,7 +743,7 @@ def _llm_parse(
             "next_action が search_and_compare のときは seed_queries を 3〜5 件返す",
             "seed_queries は current_user_memory と今回の user_message を根拠に生成する",
             "seed_queries に profile_history_summary のエリア・条件は含めない（user_message に同じエリアが明示されている場合を除く）",
-            "seed_queries はユーザー条件に基づく基本クエリを中心に、近隣エリア・沿線・予算緩和など少数の拡張クエリも含めてよい",
+            "seed_queries はユーザー条件に基づく基本クエリだけでもよく、必要な場合のみ近隣エリア・沿線・予算緩和など少数の拡張クエリを含めてよい",
             "next_action が missing_slots_question のときは seed_queries を空にしてよい",
             "research_plan はユーザー条件に即して summary / goal / strategy / rationale を返す",
             "condition_reasons は各条件が今回の検索で重要な理由を 1 文ずつ返し、該当しない key は空文字にする",

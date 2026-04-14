@@ -427,7 +427,9 @@ class AgentManagerTreeMixin:
         }
         hints: list[str] = []
         for query in queries:
-            for token in [str(item).strip() for item in str(query or "").split() if str(item).strip()]:
+            for token in [
+                str(item).strip() for item in str(query or "").split() if str(item).strip()
+            ]:
                 if token in blocked:
                     continue
                 if "万円" in token or "徒歩" in token or any(char.isdigit() for char in token):
@@ -547,8 +549,7 @@ class AgentManagerTreeMixin:
         strategy_tags = [branch_family, operator] + [
             str(tag).strip()
             for tag in extra_tags or []
-            if str(tag).strip()
-            and str(tag).strip() not in {operator, branch_family}
+            if str(tag).strip() and str(tag).strip() not in {operator, branch_family}
         ]
         queries = self._queries_for_operator(
             base_queries=base_queries,
@@ -1818,7 +1819,9 @@ class AgentManagerTreeMixin:
         best_key = str(selected_summary.get("branch_id") or "")
         best_artifacts = state.node_artifacts.get(best_key)
         state.selected_branch_summary = selected_summary
-        state.best_node_readiness = best_artifacts.readiness if best_artifacts is not None else "low"
+        state.best_node_readiness = (
+            best_artifacts.readiness if best_artifacts is not None else "low"
+        )
         best_by_family = self._best_summaries_by_family(state)
         state.alternative_branch_ids = [
             str(item.get("branch_id") or "")

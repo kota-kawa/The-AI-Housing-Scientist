@@ -141,9 +141,13 @@ class AgentManagerExecutionMixin:
         entries_by_key: dict[str, dict[str, Any]] = {}
         for artifacts in self._completed_artifacts_for_branch(state, branch_id=branch_id):
             if "normalized_properties" in artifacts.integrity:
-                normalized_properties = list(artifacts.integrity.get("normalized_properties", []) or [])
+                normalized_properties = list(
+                    artifacts.integrity.get("normalized_properties", []) or []
+                )
             else:
-                normalized_properties = list(artifacts.normalize.get("normalized_properties", []) or [])
+                normalized_properties = list(
+                    artifacts.normalize.get("normalized_properties", []) or []
+                )
             ranked_by_id = {
                 str(item.get("property_id_norm") or "").strip(): item
                 for item in artifacts.rank.get("ranked_properties", []) or []
@@ -214,12 +218,8 @@ class AgentManagerExecutionMixin:
             [key for key in entries_by_key if key not in ordered_keys],
             key=lambda key: (
                 float(entries_by_key[key].get("best_score") or 0.0),
-                self._display_candidate_completeness(
-                    entries_by_key[key].get("normalized") or {}
-                ),
-                str(
-                    (entries_by_key[key].get("normalized") or {}).get("building_name") or ""
-                ),
+                self._display_candidate_completeness(entries_by_key[key].get("normalized") or {}),
+                str((entries_by_key[key].get("normalized") or {}).get("building_name") or ""),
             ),
             reverse=True,
         )
@@ -306,7 +306,9 @@ class AgentManagerExecutionMixin:
 
     # JP: alternative display groupsを構築する。
     # EN: Build display groups for alternative families.
-    def _build_alternative_display_groups(self, state: ResearchExecutionState) -> list[dict[str, Any]]:
+    def _build_alternative_display_groups(
+        self, state: ResearchExecutionState
+    ) -> list[dict[str, Any]]:
         groups: list[dict[str, Any]] = []
         for branch_id in state.alternative_branch_ids[:3]:
             artifacts = state.node_artifacts.get(branch_id)
@@ -324,7 +326,9 @@ class AgentManagerExecutionMixin:
                 branch_result_summary=branch_result_summary,
             )
             if not ranked_properties:
-                ranked_properties = list(artifacts.rank.get("ranked_properties", []))[:DISPLAY_CANDIDATE_LIMIT]
+                ranked_properties = list(artifacts.rank.get("ranked_properties", []))[
+                    :DISPLAY_CANDIDATE_LIMIT
+                ]
                 visible_ids = {
                     str(item.get("property_id_norm") or "").strip()
                     for item in ranked_properties
@@ -351,8 +355,8 @@ class AgentManagerExecutionMixin:
                     ),
                     "ranked_properties": ranked_properties,
                     "normalized_properties": normalized_properties,
-                    }
-                )
+                }
+            )
         return groups
 
     # JP: raw resultから表示用候補を構築する。
@@ -442,8 +446,7 @@ class AgentManagerExecutionMixin:
                     " 条件を柔軟に広げた再表示枠として残しています。"
                 )
                 why_not_selected = (
-                    "家賃・駅徒歩・間取りの一部が未取得のため、"
-                    "詳細ページで再確認が必要です。"
+                    "家賃・駅徒歩・間取りの一部が未取得のため、詳細ページで再確認が必要です。"
                 )
                 normalized_properties.append(
                     {
@@ -590,10 +593,12 @@ class AgentManagerExecutionMixin:
             if "normalized_properties" in selected_integrity
             else selected_normalize.get("normalized_properties", [])
         )
-        display_ranked_properties, display_normalized_properties = self._build_display_candidate_pool(
-            state=state,
-            branch_id=str(state.selected_branch_summary.get("branch_id") or ""),
-            branch_result_summary=selected_result_summary,
+        display_ranked_properties, display_normalized_properties = (
+            self._build_display_candidate_pool(
+                state=state,
+                branch_id=str(state.selected_branch_summary.get("branch_id") or ""),
+                branch_result_summary=selected_result_summary,
+            )
         )
         display_candidate_source = "selected_path_aggregate"
         if not display_ranked_properties:

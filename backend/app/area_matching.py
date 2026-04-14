@@ -53,7 +53,11 @@ def classify_area_match(
     property_municipality = _normalize_text(property_levels.get("municipality", ""))
     property_locality = _normalize_text(property_levels.get("locality", ""))
 
-    if target_municipality and property_municipality and target_municipality == property_municipality:
+    if (
+        target_municipality
+        and property_municipality
+        and target_municipality == property_municipality
+    ):
         if target_locality:
             if property_locality and (
                 property_locality == target_locality or target_locality in property_locality

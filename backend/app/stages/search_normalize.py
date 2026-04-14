@@ -677,9 +677,7 @@ def _detail_page_signal_count(item: dict[str, Any], detail_html: str) -> int:
         > 0,
         bool(_extract_layout(_extract_html_field(detail_html, "layout") or text)),
         (_extract_area(_extract_html_field(detail_html, "area_m2") or text) > 0),
-        (
-            _extract_station_walk(_extract_html_field(detail_html, "station_walk_min") or text) > 0
-        ),
+        (_extract_station_walk(_extract_html_field(detail_html, "station_walk_min") or text) > 0),
     ]
     return sum(1 for passed in detail_signals if passed)
 

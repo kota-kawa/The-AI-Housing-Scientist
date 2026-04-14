@@ -247,4 +247,7 @@ def test_run_ranking_nearby_scope_rewards_nearby_area():
         adapter=None,
     )
 
-    assert nearby_result["ranked_properties"][0]["score"] > strict_result["ranked_properties"][0]["score"]
+    assert (
+        nearby_result["ranked_properties"][0]["score"]
+        > strict_result["ranked_properties"][0]["score"]
+    )

@@ -109,7 +109,9 @@ def _llm_area_hints(area: str, *, hint_type: str, adapter: LLMAdapter) -> list[s
     if hint_type == "line":
         question = f"「{area}」を通る主要鉄道路線を2〜3個挙げてください。"
     else:
-        question = f"「{area}」の近隣で賃貸物件を探す際に候補になる駅やエリアを2〜3個挙げてください。"
+        question = (
+            f"「{area}」の近隣で賃貸物件を探す際に候補になる駅やエリアを2〜3個挙げてください。"
+        )
     schema = {
         "type": "object",
         "properties": {"items": {"type": "array", "items": {"type": "string"}}},
@@ -164,9 +166,13 @@ class OrchestratorResearchMixin:
         budget_token = _format_budget_query(budget)
         relaxed_budget_token = _relaxed_budget_query(budget)
         walk_token = f"徒歩{walk}分" if walk else ""
-        must_fragment = " ".join(must_conditions[:2]).strip() if constraint_mode == "primary" else ""
+        must_fragment = (
+            " ".join(must_conditions[:2]).strip() if constraint_mode == "primary" else ""
+        )
         nice_fragment = " ".join(nice_to_have[:2]).strip()
-        nearby_areas = _lookup_area_hints(area, AREA_NEARBY_HINTS, adapter=adapter, hint_type="nearby")
+        nearby_areas = _lookup_area_hints(
+            area, AREA_NEARBY_HINTS, adapter=adapter, hint_type="nearby"
+        )
         line_hints = _lookup_area_hints(area, AREA_LINE_HINTS, adapter=adapter, hint_type="line")
 
         normalized_seed_queries = [
@@ -256,7 +262,11 @@ class OrchestratorResearchMixin:
     # JP: research queriesを構築する。
     # EN: Build research queries.
     def _build_research_queries(
-        self, user_memory: dict[str, Any], seed_queries: list[str], *, adapter: LLMAdapter | None = None
+        self,
+        user_memory: dict[str, Any],
+        seed_queries: list[str],
+        *,
+        adapter: LLMAdapter | None = None,
     ) -> list[str]:
         area = _normalize_query_text(user_memory.get("target_area"))
         layout = str(user_memory.get("layout_preference") or "").strip()
@@ -278,7 +288,9 @@ class OrchestratorResearchMixin:
         walk_token = f"徒歩{walk}分" if walk else ""
         core_must = " ".join(must_conditions[:2]).strip()
         core_nice = " ".join(nice_to_have[:2]).strip()
-        nearby_areas = _lookup_area_hints(area, AREA_NEARBY_HINTS, adapter=adapter, hint_type="nearby")
+        nearby_areas = _lookup_area_hints(
+            area, AREA_NEARBY_HINTS, adapter=adapter, hint_type="nearby"
+        )
         line_hints = _lookup_area_hints(area, AREA_LINE_HINTS, adapter=adapter, hint_type="line")
 
         normalized_seed_queries = [
@@ -687,13 +699,17 @@ class OrchestratorResearchMixin:
                 if slot not in set(planner_result["missing_slots"])
                 and not _has_slot_value(slot, updated_user_memory)
             ]
-            optional_questions = self._build_planning_questions(
-                user_memory=updated_user_memory,
-                slots=optional_slots,
-                required=False,
-                profile_memory=profile_memory,
-                follow_up_questions=follow_up_questions,
-            ) if optional_slots else []
+            optional_questions = (
+                self._build_planning_questions(
+                    user_memory=updated_user_memory,
+                    slots=optional_slots,
+                    required=False,
+                    profile_memory=profile_memory,
+                    follow_up_questions=follow_up_questions,
+                )
+                if optional_slots
+                else []
+            )
             combined_questions = required_questions + optional_questions
             blocks = [
                 self._build_question_block(

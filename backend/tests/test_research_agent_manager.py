@@ -820,10 +820,7 @@ def test_initial_node_plans_create_fixed_branch_families(tmp_path: Path):
     state = ResearchExecutionState(query="江東区 賃貸 1LDK", seed_queries=["江東区 賃貸 1LDK"])
 
     plans = manager._initial_node_plans(state)
-    assert [
-        (plan.branch_family, plan.area_scope, plan.constraint_mode)
-        for plan in plans
-    ] == [
+    assert [(plan.branch_family, plan.area_scope, plan.constraint_mode) for plan in plans] == [
         ("strict_primary", "strict", "primary"),
         ("strict_relaxed", "strict", "relaxed"),
         ("nearby_primary", "nearby", "primary"),
@@ -1457,14 +1454,16 @@ def test_tool_enrich_updates_job_with_live_detail_url(tmp_path: Path):
         research_adapter=None,
         build_research_queries=lambda user_memory, seed_queries: seed_queries,
         collect_search_results=lambda **kwargs: ([], {}),
-        fetch_detail_html=lambda url: """
+        fetch_detail_html=lambda url: (
+            """
         <article data-kind="property-detail">
           <h1 data-field="building_name">テスト物件</h1>
           <p data-field="address">東京都江東区豊洲1-2-3</p>
           <p data-field="layout">1LDK</p>
           <p data-field="rent">118000</p>
         </article>
-        """,
+        """
+        ),
         collect_source_items=lambda **kwargs: [],
     )
     plan = SearchNodePlan(
