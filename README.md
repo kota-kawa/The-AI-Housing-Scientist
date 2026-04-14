@@ -28,7 +28,7 @@ Click the image below to watch the demo on YouTube.
 
 | Demo Video |
 | --- |
-| <a href="https://youtu.be/1nitw6KUBF0?si=Z2c0vfOylqkSezgq"><img src="https://img.youtube.com/vi/1nitw6KUBF0/hqdefault.jpg" alt="Demo Video" width="100%"></a> |
+| <a href="https://youtu.be/1nitw6KUBF0?si=Z2c0vfOylqkSezgq"><img src="assets/images/demo-video-thumbnail.jpg" alt="Demo Video" width="100%"></a> |
 
 ## ✨ What It Does
 
@@ -166,7 +166,7 @@ Apache License 2.0. See `LICENSE` for details.
 
 | デモ動画 |
 | --- |
-| <a href="https://youtu.be/1nitw6KUBF0?si=Z2c0vfOylqkSezgq"><img src="https://img.youtube.com/vi/1nitw6KUBF0/hqdefault.jpg" alt="デモ動画" width="100%"></a> |
+| <a href="https://youtu.be/1nitw6KUBF0?si=Z2c0vfOylqkSezgq"><img src="assets/images/demo-video-thumbnail.jpg" alt="デモ動画" width="100%"></a> |
 
 ## ✨ できること
 
