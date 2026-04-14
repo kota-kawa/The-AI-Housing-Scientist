@@ -1006,12 +1006,11 @@ export default function App() {
     const items = Array.isArray(block.content.items)
       ? (block.content.items as QuestionEntry[])
       : [];
-    const isBlocking = block.content.mode === "blocking";
     const answeredCount = items.filter((item) => {
       const answer = getQuestionAnswerText(item);
       return Boolean(answer);
     }).length;
-    if (isBlocking && answeredCount < items.length) {
+    if (answeredCount === 0) {
       return;
     }
 

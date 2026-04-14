@@ -2591,17 +2591,14 @@ export default function StructuredBlock({
       const freeText = toDisplayText(item.free_text);
       return Boolean(selectedExamples.length || selectedExample || freeText.trim());
     }).length;
-    const remainingCount = Math.max(items.length - answeredCount, 0);
     const isBlocking = toDisplayText(block.content.mode) === "blocking";
-    const canSubmit = answeredCount > 0 && (!isBlocking || remainingCount === 0);
+    const canSubmit = answeredCount > 0;
     const progressText =
       answeredCount === 0
         ? isBlocking
-          ? "条件を入力すると、まとめて送信できます。"
+          ? "条件を1つ以上入力すると送信できます。未入力の項目は後で追加できます。"
           : "分かる条件だけ入力すると、ここから反映できます。"
-        : isBlocking && remainingCount > 0
-          ? `あと${remainingCount}項目入力すると、条件を送信できます。`
-          : `${answeredCount}/${items.length}項目入力済みです。内容を確認して送信してください。`;
+        : `${answeredCount}/${items.length}項目入力済みです。未入力の項目は後で追加できます。`;
     const tone = TONES.question;
     return (
       <section
